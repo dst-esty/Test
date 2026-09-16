@@ -30,6 +30,7 @@ export interface MiningOreDrop {
   type: 'gold_nugget' | 'quartz_gold' | 'silver_chunk' | 'dynamite';
   value: number; // gold ounces or dynamite count
   rotation: number;
+  autoRedeemed?: boolean;
 }
 
 export interface DesertAnimal {
@@ -144,6 +145,9 @@ export interface PlayerState {
   ammo: number;
   dynamite: number;
   goldFound: number; // ounces
+  cashDollars?: number; // 1880s Gold Standard cash ($20.67/oz)
+  autoRedeemGold?: boolean; // When true, auto-redeems dug gold into bank cash
+  woodPlanks?: number; // Timber planks for wooden shoring in sand & mine framing
   blocksDug: number;
   bullionBars?: number; // smelted bars
   builtStructures?: BuiltStructure[];
@@ -152,13 +156,48 @@ export interface PlayerState {
   discoveredLandmarks: string[];
   collectedClues: string[];
   // Subterranean Mine Layers
-  currentMineLevel?: number; // 0 for surface, 1 to 4 for underground layers
-  maxUnlockedMineLevel?: number; // 1 to 4
+  currentMineLevel?: number; // 0 for surface, 1+ for underground layers
+  maxUnlockedMineLevel?: number; // 1+
   activeShaftState?: ActiveMineShaftState | null;
+  // Underwater & Flooding Physics
+  oxygen?: number; // 0 to 100 (depletes when submerged)
+  isSwimming?: boolean;
+  cornishPumpActive?: boolean;
+  excavatedRoomsCount?: number;
+}
+
+export type RoomDirection = 'north' | 'south' | 'east' | 'west' | 'crosscut';
+
+export interface ExcavatedRoom {
+  id: string;
+  level: number;
+  direction: RoomDirection;
+  name: string;
+  depthMeters: number;
+  excavationProgress: number; // 0 to 100%
+  hitsNeeded: number;
+  currentHits: number;
+  isComplete: boolean;
+  isTimbered: boolean;
+  oreVeinType: string;
+  oreYieldOunces: number;
+  waterLevel: number; // meters above floor
+  createdAt: number;
+}
+
+export interface WaterTableState {
+  waterTableDepth: number; // meters (e.g. 88.0m)
+  waterLevelInLevel: Record<number, number>; // level -> water height in meters
+  isFlooding: boolean;
+  floodRate: number; // meters per second
+  pumpActive: boolean;
+  pumpRate: number; // meters per second reduction
+  aquiferBreached: boolean;
+  seepageWarning: boolean;
 }
 
 export interface MineLayerData {
-  level: number; // 1 to 4
+  level: number; // 1 to 7+
   id: string;
   name: string;
   depthMeters: number;
@@ -171,15 +210,23 @@ export interface MineLayerData {
   primaryMineral: string;
   secondaryMineral: string;
   accentColor: string;
+  // Watertable & Hydrological Simulation
+  isWaterBearing?: boolean;
+  waterLevel?: number; // meters of water on the floor (0 = dry, >0 = flooded)
+  isFlooding?: boolean;
+  maxFloodHeight?: number; // max water height before filling room
+  aquiferPressure?: number; // 0 - 100%
+  excavatedRooms?: ExcavatedRoom[];
 }
 
 export interface ActiveMineShaftState {
   id: string;
   surfacePos: Vector3D;
-  currentLevel: number; // 0 = surface, 1-4 = layers
+  currentLevel: number; // 0 = surface, 1+ = layers
   maxUnlockedLevel: number;
   layers: MineLayerData[];
   shaftExcavationHits: Record<number, number>; // hits toward next level per level
+  waterTable: WaterTableState;
 }
 
 export interface PortalExcavationState {
@@ -205,7 +252,7 @@ export interface GameSettings {
 }
 
 export interface GameOverDetails {
-  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite';
+  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning';
   title: string;
   subtitle: string;
   cause: string;
@@ -216,5 +263,54 @@ export interface GameOverDetails {
   landmarksDiscovered: number;
   timeSurvivedSeconds: number;
   coordinates: { x: number; y: number; z: number };
+}
+
+export interface MultiplayerPlayer {
+  id: string;
+  name: string;
+  outfitColor: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  action: string;
+  activeTool: string;
+  goldFound: number;
+  rocksGathered: number;
+  health: number;
+  ping: number;
+  lastUpdate: number;
+  distanceToLocal?: number;
+}
+
+export interface MultiplayerChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderColor: string;
+  text: string;
+  type: 'chat' | 'system' | 'shout' | 'discovery';
+  timestamp: number;
+}
+
+export interface MultiplayerColorPreset {
+  name: string;
+  hex: string;
+}
+
+export interface MultiplayerState {
+  connected: boolean;
+  selfId: string | null;
+  selfName: string;
+  selfColor: string;
+  ping: number;
+  players: Record<string, MultiplayerPlayer>;
+  chatMessages: MultiplayerChatMessage[];
+  recentEventBanner: {
+    id: string;
+    text: string;
+    type: 'joined' | 'discovery' | 'shored' | 'blasted';
+  } | null;
 }
 

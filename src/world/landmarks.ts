@@ -23,45 +23,234 @@ export function createLandmarkStructures(
   // ==========================================
   // 1. Weaver's Needle (Towering volcanic neck)
   // ==========================================
+  // Geologically authentic model of Arizona's iconic 1,000-ft volcanic plug.
+  // Features:
+  // - Monolithic dacite neck with steep, near-vertical columnar jointing facets
+  // - North-South elongated profile matching the real landmark
+  // - Iconic summit saddle notch (the "Needle's Eye") cleanly dividing the sharp North Fang from the South Shoulder
+  // - Sweeping volcanic talus apron with radiating jagged volcanic dikes & fallen talus boulders
   const needleGroup = new THREE.Group();
   const needleY = getTerrainHeight(80, 15);
   needleGroup.position.set(80, needleY, 15);
 
+  const spireHeight = 82;
+  const spireRadial = 44;
+  const spireHeightSegs = 56;
+  const spireGeo = new THREE.CylinderGeometry(3.6, 22.0, spireHeight, spireRadial, spireHeightSegs, false);
+  const sPos = spireGeo.attributes.position;
+  const sColors = new Float32Array(sPos.count * 3);
+
+  for (let i = 0; i < sPos.count; i++) {
+    let px = sPos.getX(i);
+    let py = sPos.getY(i);
+    let pz = sPos.getZ(i);
+
+    const t = (py + spireHeight / 2) / spireHeight; // 0.0 at base to 1.0 at summit
+    const angle = Math.atan2(pz, px);
+    const radius = Math.hypot(px, pz);
+
+    // 1. Talus apron flare at base (t < 0.28)
+    const talusFlaring = t < 0.28 ? 1.0 + Math.pow((0.28 - t) / 0.28, 2.2) * 1.35 : 1.0;
+
+    // 2. Sheer volcanic columnar fluting and horizontal strata shelves (middle shaft)
+    const fluting = Math.cos(angle * 8.0) * 0.16 + Math.sin(angle * 16.0) * 0.06;
+    const horizontalLedges = Math.sin(t * 26.0) * 0.05 * (1.0 - t * 0.35);
+    const sheerFacets = 1.0 - Math.pow(Math.sin(angle), 4.0) * 0.14;
+
+    // 3. Iconic Summit Saddle Notch ("The Needle's Eye", t >= 0.80)
+    // In real life, the summit splits along the North-South (Z) axis into:
+    // - Central V-notch saddle cleft (drops down significantly)
+    // - High, sharp North Fang (towers on Z > 0)
+    // - Weathered South Shoulder (broad crag on Z < 0)
+    if (t >= 0.80) {
+      const s = (t - 0.80) / 0.20; // 0.0 to 1.0 within the summit zone
+      const zn = Math.sin(angle); // -1.0 (South) to +1.0 (North)
+
+      if (Math.abs(zn) < 0.40) {
+        // Deep V-shaped saddle notch cleft
+        const notchDepth = (1.0 - Math.pow(Math.abs(zn) / 0.40, 2.0)) * 12.0 * s;
+        py -= notchDepth;
+      } else if (zn > 0.22) {
+        // North Fang (tall sharp eagle-beak needle point)
+        const fangRise = Math.pow((zn - 0.22) / 0.78, 1.4) * 8.2 * s;
+        py += fangRise;
+      } else if (zn < -0.22) {
+        // South Shoulder (weathered twin crown)
+        const shoulderRise = Math.pow((-zn - 0.22) / 0.78, 1.5) * 4.2 * s;
+        py += shoulderRise + Math.sin(angle * 4.0) * 0.8 * s;
+      }
+    }
+
+    // 4. North-South Elliptical Aspect Ratio (wider along Z, narrower across X)
+    const newRadius = radius * talusFlaring * (1.0 + fluting + horizontalLedges) * sheerFacets;
+    px = Math.cos(angle) * newRadius * 0.82;
+    pz = Math.sin(angle) * newRadius * 1.34;
+
+    // Micro-rock roughness displacement
+    px += Math.sin(py * 1.6 + angle * 3.0) * 0.25;
+    pz += Math.cos(py * 1.8 + angle * 4.0) * 0.25;
+
+    sPos.setX(i, px);
+    sPos.setY(i, py);
+    sPos.setZ(i, pz);
+
+    // 5. Authentic Arizona Volcanic Dacite & Desert Varnish Color Palette
+    const strataBand = Math.sin(py * 0.45) * 0.5 + 0.5;
+    const varnishStreaks = Math.cos(py * 2.2 + angle * 4.0) * 0.5 + 0.5;
+
+    let r = 0.65;
+    let g = 0.32;
+    let b = 0.18;
+
+    if (t > 0.82) {
+      // Weathered summit crests: deep manganese patina from atmospheric exposure
+      r = 0.32 + strataBand * 0.08;
+      g = 0.22 + strataBand * 0.06;
+      b = 0.17 + strataBand * 0.04;
+    } else if (fluting < -0.04 || varnishStreaks > 0.75) {
+      // Water-erosion runoff gullies with dark desert varnish
+      r = 0.26 + varnishStreaks * 0.06;
+      g = 0.18 + varnishStreaks * 0.04;
+      b = 0.14 + varnishStreaks * 0.03;
+    } else if (strataBand > 0.65) {
+      // Golden buff welded tuff ledges
+      r = 0.76 + varnishStreaks * 0.06;
+      g = 0.52 + varnishStreaks * 0.05;
+      b = 0.32 + varnishStreaks * 0.04;
+    } else if (t < 0.26) {
+      // Basal talus scree gravel
+      r = 0.72 + strataBand * 0.05;
+      g = 0.54 + strataBand * 0.04;
+      b = 0.38 + strataBand * 0.03;
+    } else {
+      // Terracotta volcanic dacite sheer cliff walls
+      r = 0.66 + varnishStreaks * 0.05;
+      g = 0.31 + varnishStreaks * 0.04;
+      b = 0.18 + varnishStreaks * 0.03;
+    }
+
+    sColors[i * 3] = r;
+    sColors[i * 3 + 1] = g;
+    sColors[i * 3 + 2] = b;
+  }
+
+  spireGeo.setAttribute('color', new THREE.BufferAttribute(sColors, 3));
+  spireGeo.computeVertexNormals();
+
   const needleRockMat = new THREE.MeshStandardMaterial({
-    color: 0x823c26,
-    roughness: 0.95,
-    metalness: 0.1,
-    flatShading: true,
+    vertexColors: true,
+    roughness: 0.90,
+    metalness: 0.06,
+    flatShading: false,
   });
 
-  // Main monolithic spire
-  const spireGeo = new THREE.CylinderGeometry(4.5, 14, 65, 9);
   const spire = new THREE.Mesh(spireGeo, needleRockMat);
-  spire.position.y = 32;
+  spire.position.y = spireHeight * 0.5 - 2.0;
   spire.castShadow = true;
   spire.receiveShadow = true;
   needleGroup.add(spire);
 
-  // Twin notch peak (the famous saddle notch of Weaver's Needle)
-  const summitNorth = new THREE.Mesh(new THREE.ConeGeometry(3.5, 14, 7), needleRockMat);
-  summitNorth.position.set(0, 68, 2);
-  summitNorth.castShadow = true;
-  needleGroup.add(summitNorth);
+  // Radiating Volcanic Dike Fins & Scree Buttresses:
+  // In real Superstition geology, intrusive volcanic dikes radiate from volcanic plugs.
+  // We model 3 natural jagged knife-edge rock fins branching down the slopes.
+  const dikeConfigs = [
+    { angle: -Math.PI * 0.65, length: 36, startH: 22, endH: 3, width: 4.8 }, // Toward Needle Canyon
+    { angle: 0.15, length: 32, startH: 18, endH: 2.5, width: 4.2 },           // Toward Bluff Spring
+    { angle: Math.PI * 0.55, length: 34, startH: 20, endH: 3.2, width: 4.5 }, // Toward Peralta Ridge
+  ];
 
-  const summitSouth = new THREE.Mesh(new THREE.ConeGeometry(3, 11, 6), needleRockMat);
-  summitSouth.position.set(0, 66, -2.5);
-  summitSouth.castShadow = true;
-  needleGroup.add(summitSouth);
+  dikeConfigs.forEach((dike) => {
+    const dikeGeo = new THREE.BoxGeometry(dike.width, dike.startH, dike.length, 4, 8, 8);
+    const dPos = dikeGeo.attributes.position;
+    const dCols = new Float32Array(dPos.count * 3);
 
-  // Scree buttresses at base
-  for (let i = 0; i < 6; i++) {
-    const angle = (i / 6) * Math.PI * 2;
-    const buttress = new THREE.Mesh(new THREE.ConeGeometry(7, 28, 5), needleRockMat);
-    buttress.position.set(Math.cos(angle) * 12, 12, Math.sin(angle) * 12);
-    buttress.rotation.z = Math.cos(angle) * 0.2;
-    buttress.castShadow = true;
-    needleGroup.add(buttress);
-  }
+    for (let j = 0; j < dPos.count; j++) {
+      let dx = dPos.getX(j);
+      let dy = dPos.getY(j);
+      let dz = dPos.getZ(j);
+
+      const zNorm = (dz + dike.length / 2) / dike.length; // 0 near needle to 1 at far tip
+      // Taper height as dike extends away from the central spire
+      dy *= (1.0 - zNorm * 0.75);
+
+      // Serrated knife-edge ridge crest on top
+      if (dy > 0) {
+        dy += Math.sin(zNorm * 18.0) * 1.4 + Math.cos(dx * 2.0) * 0.8;
+      }
+      // Stepped jointing on sides
+      dx *= (1.0 + Math.sin(dy * 1.2) * 0.2);
+
+      dPos.setX(j, dx);
+      dPos.setY(j, dy);
+      dPos.setZ(j, dz);
+
+      // Desert varnish and terracotta color
+      const isCrest = dy > dike.startH * 0.25;
+      dCols[j * 3] = isCrest ? 0.42 : 0.64;
+      dCols[j * 3 + 1] = isCrest ? 0.26 : 0.36;
+      dCols[j * 3 + 2] = isCrest ? 0.18 : 0.22;
+    }
+
+    dikeGeo.setAttribute('color', new THREE.BufferAttribute(dCols, 3));
+    dikeGeo.computeVertexNormals();
+
+    const dikeMesh = new THREE.Mesh(dikeGeo, needleRockMat);
+    const distFromCenter = 16 + dike.length * 0.42;
+    dikeMesh.position.set(
+      Math.cos(dike.angle) * distFromCenter,
+      dike.startH * 0.35,
+      Math.sin(dike.angle) * distFromCenter
+    );
+    dikeMesh.rotation.y = -dike.angle + Math.PI / 2;
+    dikeMesh.castShadow = true;
+    dikeMesh.receiveShadow = true;
+    needleGroup.add(dikeMesh);
+  });
+
+  // Giant Fallen Dacite Corestone Boulders on the talus apron
+  const talusBoulders = [
+    { x: -14, z: 12, size: 5.4, rot: 0.4 },
+    { x: 16, z: -10, size: 4.8, rot: 1.2 },
+    { x: -10, z: -18, size: 6.2, rot: 2.1 },
+    { x: 18, z: 15, size: 5.0, rot: 0.8 },
+    { x: 0, z: 22, size: 4.2, rot: 1.7 },
+  ];
+
+  talusBoulders.forEach((tb) => {
+    const bGeo = new THREE.DodecahedronGeometry(tb.size, 1);
+    const bPos = bGeo.attributes.position;
+    const bCols = new Float32Array(bPos.count * 3);
+
+    for (let k = 0; k < bPos.count; k++) {
+      let bx = bPos.getX(k);
+      let by = bPos.getY(k);
+      let bz = bPos.getZ(k);
+
+      // Chiseled angular talus fracture
+      bx *= 1.0 + Math.sin(by * 1.5) * 0.22;
+      by *= 0.78; // Slightly flattened tabular block
+      bz *= 1.0 + Math.cos(bx * 1.4) * 0.22;
+
+      bPos.setX(k, bx);
+      bPos.setY(k, by);
+      bPos.setZ(k, bz);
+
+      bCols[k * 3] = 0.58 + Math.sin(k) * 0.08;
+      bCols[k * 3 + 1] = 0.32 + Math.cos(k) * 0.05;
+      bCols[k * 3 + 2] = 0.20 + Math.sin(k * 2) * 0.04;
+    }
+
+    bGeo.setAttribute('color', new THREE.BufferAttribute(bCols, 3));
+    bGeo.computeVertexNormals();
+
+    const boulderMesh = new THREE.Mesh(bGeo, needleRockMat);
+    boulderMesh.position.set(tb.x, tb.size * 0.42, tb.z);
+    boulderMesh.rotation.set(0.2, tb.rot, -0.15);
+    boulderMesh.castShadow = true;
+    boulderMesh.receiveShadow = true;
+    needleGroup.add(boulderMesh);
+  });
+
   scene.add(needleGroup);
 
   // ==========================================

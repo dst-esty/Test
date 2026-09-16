@@ -15,9 +15,15 @@ import { MineBuilderModal } from './components/MineBuilderModal';
 import { ClaimDeedModal } from './components/ClaimDeedModal';
 import { RockDepotModal } from './components/RockDepotModal';
 import { MineShaftHUD } from './components/MineShaftHUD';
+import { GameOverModal } from './components/GameOverModal';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
 import { soundEngine } from './audio/soundEffects';
-import { ClaimInfo, ClueItem, Landmark, MineStructureType, PlayerState, Vector3D, WeatherType, MineLayerData } from './types';
+import { westernMusic } from './audio/westernMusic';
+import { ClaimInfo, ClueItem, Landmark, MineStructureType, PlayerState, Vector3D, WeatherType, MineLayerData, GameOverDetails, MultiplayerPlayer, MultiplayerChatMessage, RoomDirection, WaterTableState } from './types';
+import { MultiplayerHUD } from './components/MultiplayerHUD';
+import { ShaftSinkingGauge } from './components/ShaftSinkingGauge';
+import { ShaftSinkingStats } from './world/undergroundVoxels';
+import { multiplayer } from './multiplayer/multiplayerService';
 import { Compass, BookOpen, Map as MapIcon, Sparkles, AlertCircle } from 'lucide-react';
 
 export default function App() {
@@ -42,6 +48,35 @@ export default function App() {
     collectedClues: ['clue_trailhead'],
   });
 
+  // Multiplayer State
+  const [onlinePlayers, setOnlinePlayers] = useState<Record<string, MultiplayerPlayer>>({});
+  const [chatMessages, setChatMessages] = useState<MultiplayerChatMessage[]>([]);
+  const [multiplayerPing, setMultiplayerPing] = useState<number>(35);
+  const [selfId, setSelfId] = useState<string | null>(null);
+  const [selfName, setSelfName] = useState<string>(() => localStorage.getItem('prospector_name') || 'Canyon Jack');
+  const [selfColor, setSelfColor] = useState<string>(() => localStorage.getItem('prospector_color') || '#8c5932');
+  const [trackedPlayerPos, setTrackedPlayerPos] = useState<Vector3D | null>(null);
+
+  // Initialize and synchronize real-time multiplayer connection
+  useEffect(() => {
+    multiplayer.connect();
+    const handleUpdate = () => {
+      const state = multiplayer.getState();
+      setOnlinePlayers({ ...state.players });
+      setChatMessages([...state.chatMessages]);
+      setMultiplayerPing(state.ping);
+      setSelfId(multiplayer.getSelfId());
+      setSelfName(multiplayer.getSelfName());
+      setSelfColor(multiplayer.getSelfColor());
+    };
+
+    multiplayer.subscribe(handleUpdate);
+    return () => {
+      multiplayer.unsubscribe(handleUpdate);
+      multiplayer.disconnect();
+    };
+  }, []);
+
   // World Data
   const [landmarks, setLandmarks] = useState<Landmark[]>(INITIAL_LANDMARKS);
   const [clues, setClues] = useState<ClueItem[]>(INITIAL_CLUES);
@@ -54,6 +89,8 @@ export default function App() {
   const [isClaimDeedOpen, setIsClaimDeedOpen] = useState(false);
   const [isDepotOpen, setIsDepotOpen] = useState(false);
   const [activeBuildingType, setActiveBuildingType] = useState<MineStructureType>('timber_portal');
+  const [gameOverDetails, setGameOverDetails] = useState<GameOverDetails | null>(null);
+  const restartHandlerRef = useRef<(() => void) | null>(null);
 
   const [activeClueDialog, setActiveClueDialog] = useState<{
     clue?: ClueItem;
@@ -68,7 +105,8 @@ export default function App() {
     isBuilderOpen ||
     isClaimDeedOpen ||
     isDepotOpen ||
-    Boolean(activeClueDialog);
+    Boolean(activeClueDialog) ||
+    Boolean(gameOverDetails);
 
   // Visual Combat & Notification Feedback
   const [hitMarkerActive, setHitMarkerActive] = useState(false);
@@ -105,6 +143,27 @@ export default function App() {
   const shaftTraverseHandlerRef = useRef<((level: number) => void) | null>(null);
   const shaftExitHandlerRef = useRef<(() => void) | null>(null);
   const shaftDigHandlerRef = useRef<(() => void) | null>(null);
+  const excavateRoomHandlerRef = useRef<((dir: RoomDirection) => void) | null>(null);
+  const timberRoomHandlerRef = useRef<((dir: RoomDirection) => void) | null>(null);
+  const togglePumpHandlerRef = useRef<(() => void) | null>(null);
+
+  // Mini-Voxel Shaft Sinking & Bedrock Excavation State
+  const [shaftSinkingStats, setShaftSinkingStats] = useState<ShaftSinkingStats | null>(null);
+  const strikeVoxelHandlerRef = useRef<(() => void) | null>(null);
+  const placeTimberHandlerRef = useRef<(() => void) | null>(null);
+
+  // Subterranean Hydrology & Water Table State
+  const [waterTable, setWaterTable] = useState<WaterTableState>({
+    active: true,
+    regionalWaterTableDepth: 55.0,
+    aquiferPressure: 15,
+    floodingActive: false,
+    cornishPumpRunning: false,
+    waterLevelInLevel: {},
+    gallonsPumpedTotal: 0,
+  });
+  const [oxygenPercent, setOxygenPercent] = useState<number>(100);
+  const [isSubmerged, setIsSubmerged] = useState<boolean>(false);
 
   // Geotechnical Pit Wall Shoring State
   const [nearbyTrench, setNearbyTrench] = useState<{
@@ -113,6 +172,11 @@ export default function App() {
     isShored: boolean;
     shoredUntilDepth?: number;
     rocksNeeded: number;
+    woodNeeded?: number;
+    strataName?: string;
+    strataId?: string;
+    materialType?: 'wood' | 'stone' | 'timber_rock' | 'none';
+    strataAdvice?: string;
     canShore: boolean;
   } | null>(null);
   const shoreHandlerRef = useRef<(() => void) | null>(null);
@@ -131,6 +195,58 @@ export default function App() {
         ...prev,
         goldFound: Math.max(0, currentGold - goldCost),
         blocksDug: currentRocks + rockAmount,
+      };
+    });
+  }, [showBanner]);
+
+  const handlePurchaseWood = useCallback((woodAmount: number, goldCost: number) => {
+    setPlayerState((prev) => {
+      const currentGold = typeof prev.goldFound === 'number' && !isNaN(prev.goldFound) ? prev.goldFound : 0;
+      const currentWood = typeof prev.woodPlanks === 'number' && !isNaN(prev.woodPlanks) ? prev.woodPlanks : 0;
+      if (currentGold < goldCost) {
+        showBanner(`Need ${goldCost.toFixed(1)} oz Gold to purchase ${woodAmount} timber planks!`);
+        return prev;
+      }
+      soundEngine.playConstruct();
+      showBanner(`Purchased ${woodAmount} Timber Planks for ${goldCost.toFixed(1)} oz Gold!`);
+      return {
+        ...prev,
+        goldFound: Math.max(0, currentGold - goldCost),
+        woodPlanks: currentWood + woodAmount,
+      };
+    });
+  }, [showBanner]);
+
+  const handleToggleAutoRedeem = useCallback(() => {
+    setPlayerState((prev) => {
+      const nextVal = prev.autoRedeemGold === false ? true : false;
+      if (nextVal) {
+        soundEngine.playCashRegister();
+        showBanner('🪙 Auto-Redeem Active: All excavated gold ore will be instantly redeemed for $20.67/oz cash!');
+      } else {
+        showBanner('🪙 Auto-Redeem Paused: Gold ore will be kept in raw nugget form in your pouch.');
+      }
+      return {
+        ...prev,
+        autoRedeemGold: nextVal,
+      };
+    });
+  }, [showBanner]);
+
+  const handleRedeemAllGold = useCallback(() => {
+    setPlayerState((prev) => {
+      const gold = typeof prev.goldFound === 'number' && !isNaN(prev.goldFound) ? prev.goldFound : 0;
+      if (gold <= 0.05) {
+        showBanner('No raw gold in pouch to redeem!');
+        return prev;
+      }
+      const cashGain = Number((gold * 20.67).toFixed(2));
+      soundEngine.playCashRegister();
+      showBanner(`🪙 Redeemed ${gold.toFixed(1)} oz Raw Gold ➔ +$${cashGain.toFixed(2)} Cash ($20.67/oz)!`);
+      return {
+        ...prev,
+        goldFound: 0,
+        cashDollars: (prev.cashDollars || 0) + cashGain,
       };
     });
   }, [showBanner]);
@@ -196,9 +312,30 @@ export default function App() {
         clue: targetClue,
         landmark: targetLm,
       });
+
+      // Broadcast historic discovery to multiplayer peers
+      if (targetLm) {
+        multiplayer.broadcastDiscovery(targetLm.name, targetLm.shortDesc);
+      }
     },
     [clues, landmarks]
   );
+
+  // Multiplayer Actions
+  const handleUpdateProfile = useCallback((name: string, color: string) => {
+    multiplayer.updateProfile(name, color);
+    setSelfName(name);
+    setSelfColor(color);
+  }, []);
+
+  const handleSendChat = useCallback((text: string, shout = false) => {
+    multiplayer.sendChat(text, shout);
+  }, []);
+
+  const handleTrackPlayer = useCallback((p: MultiplayerPlayer) => {
+    setTrackedPlayerPos({ x: p.x, y: p.y, z: p.z });
+    showBanner(`🧭 Tracking fellow prospector ${p.name} (${Math.round(p.distanceToLocal || 0)}m away)`);
+  }, [showBanner]);
 
   // Handle drinking water
   const handleRefillWater = useCallback(() => {
@@ -259,6 +396,37 @@ export default function App() {
     setIsMapOpen(false);
     soundEngine.playFootstep();
   };
+
+  // Restart Expedition after Fatal Death (lose all gold & claims, start over at Peralta Camp)
+  const handleRestartExpedition = useCallback(() => {
+    setPlayerState({
+      position: { x: -115, y: 5, z: -115 },
+      rotation: { yaw: 0.8, pitch: 0 },
+      health: 100,
+      maxHealth: 100,
+      hydration: 100,
+      isSprinting: false,
+      isInsideMine: false,
+      equippedTool: 'pickaxe',
+      ammo: 24,
+      dynamite: 6,
+      goldFound: 0, // Lost all gold on death
+      blocksDug: 0,
+      bullionBars: 0,
+      activeClaim: null, // Lost claim on death
+      builtStructures: [],
+      discoveredLandmarks: ['trailhead'],
+      collectedClues: ['clue_trailhead'],
+    });
+
+    setGameOverDetails(null);
+
+    if (restartHandlerRef.current) {
+      restartHandlerRef.current();
+    }
+
+    showBanner('🌅 A New Expedition Begins at Peralta Base Camp! Watch your step & keep your canteen full.');
+  }, [showBanner]);
 
   // Keyboard shortcuts (M, J, B, V, 1-9, Esc)
   useEffect(() => {
@@ -378,6 +546,20 @@ export default function App() {
         onRegisterShaftDigHandler={(fn) => {
           shaftDigHandlerRef.current = fn;
         }}
+        onRegisterExcavateRoomHandler={(fn) => {
+          excavateRoomHandlerRef.current = fn;
+        }}
+        onRegisterTimberRoomHandler={(fn) => {
+          timberRoomHandlerRef.current = fn;
+        }}
+        onRegisterTogglePumpHandler={(fn) => {
+          togglePumpHandlerRef.current = fn;
+        }}
+        onUpdateWaterTable={setWaterTable}
+        onUpdateOxygen={(ox, sub) => {
+          setOxygenPercent(ox);
+          setIsSubmerged(sub);
+        }}
         onUpdateShaftLayers={(layers) => {
           setShaftLayers(layers);
         }}
@@ -395,6 +577,44 @@ export default function App() {
         onRegisterShoreHandler={(fn) => {
           shoreHandlerRef.current = fn;
         }}
+        isGameOver={Boolean(gameOverDetails)}
+        onPlayerDeath={(details) => setGameOverDetails(details)}
+        onRegisterRestartHandler={(fn) => {
+          restartHandlerRef.current = fn;
+        }}
+        trackedPlayerPos={trackedPlayerPos}
+        onUpdateShaftSinkingStats={setShaftSinkingStats}
+        onRegisterStrikeVoxelHandler={(fn) => {
+          strikeVoxelHandlerRef.current = fn;
+        }}
+        onRegisterPlaceTimberHandler={(fn) => {
+          placeTimberHandlerRef.current = fn;
+        }}
+      />
+
+      {/* Mini-Voxel Shaft Sinking & Bedrock Strata Gauge */}
+      <ShaftSinkingGauge
+        stats={shaftSinkingStats}
+        onStrikeVoxel={() => {
+          if (strikeVoxelHandlerRef.current) strikeVoxelHandlerRef.current();
+        }}
+        onPlaceTimber={() => {
+          if (placeTimberHandlerRef.current) placeTimberHandlerRef.current();
+        }}
+        equippedTool={playerState.equippedTool}
+      />
+
+      {/* Real-time Frontier Multiplayer HUD & Roster Modal */}
+      <MultiplayerHUD
+        onlinePlayers={onlinePlayers}
+        chatMessages={chatMessages}
+        ping={multiplayerPing}
+        selfId={selfId}
+        selfName={selfName}
+        selfColor={selfColor}
+        onUpdateProfile={handleUpdateProfile}
+        onSendChat={handleSendChat}
+        onTrackPlayer={handleTrackPlayer}
       />
 
       {/* Subterranean Mine Shaft & Strata HUD */}
@@ -403,6 +623,9 @@ export default function App() {
         currentLevel={currentMineLevel}
         maxUnlockedLevel={maxUnlockedMineLevel}
         layers={shaftLayers}
+        waterTable={waterTable}
+        oxygenPercent={oxygenPercent}
+        isSubmerged={isSubmerged}
         onAscend={() => {
           if (shaftTraverseHandlerRef.current) {
             shaftTraverseHandlerRef.current(Math.max(0, currentMineLevel - 1));
@@ -426,6 +649,21 @@ export default function App() {
         onDigDown={() => {
           if (shaftDigHandlerRef.current) {
             shaftDigHandlerRef.current();
+          }
+        }}
+        onExcavateRoom={(dir) => {
+          if (excavateRoomHandlerRef.current) {
+            excavateRoomHandlerRef.current(dir);
+          }
+        }}
+        onTimberRoom={(dir) => {
+          if (timberRoomHandlerRef.current) {
+            timberRoomHandlerRef.current(dir);
+          }
+        }}
+        onTogglePump={() => {
+          if (togglePumpHandlerRef.current) {
+            togglePumpHandlerRef.current();
           }
         }}
       />
@@ -457,10 +695,18 @@ export default function App() {
         onReinforcePortal={handleReinforcePortal}
         onStartPortalExcavation={handleStartExcavation}
         onPurchaseRocks={handlePurchaseRocks}
+        onPurchaseWood={handlePurchaseWood}
+        onToggleAutoRedeem={handleToggleAutoRedeem}
+        onRedeemAllGold={handleRedeemAllGold}
         onToggleSound={() => {
           const next = !soundEnabled;
           setSoundEnabled(next);
           soundEngine.setMuted(!next);
+          if (!next) {
+            if (!westernMusic.getIsMuted()) westernMusic.toggleMute();
+          } else {
+            if (westernMusic.getIsMuted()) westernMusic.toggleMute();
+          }
         }}
         soundEnabled={soundEnabled}
         onToggleCamera={() => setViewMode((prev) => (prev === 'first' ? 'third' : 'first'))}
@@ -526,6 +772,10 @@ export default function App() {
                 <span>Stake a claim at the mining boundary monument [E]. Carve out realistic rock layers, ore veins, and quartz voxels with your pickaxe or blasts!</span>
               </div>
               <div className="flex items-center gap-2">
+                <span className="font-bold text-[#442710] font-serif">Frontier Multiplayer:</span>
+                <span>Explore with fellow prospectors in real time! Share excavation pits, customize your miner outfit, shout telegraph updates [Enter], and track teammates [Compass].</span>
+              </div>
+              <div className="flex items-center gap-2">
                 <span className="font-bold text-[#442710] font-serif">Frontier Perils:</span>
                 <span>Watch out for rattlesnakes, desert wildlife, and hostile outlaw bandits defending territory with firearms!</span>
               </div>
@@ -535,8 +785,9 @@ export default function App() {
               onClick={() => {
                 setHasShownWelcome(true);
                 soundEngine.startAmbiance();
+                westernMusic.play();
               }}
-              className="w-full py-3 bg-[#5c3e21] hover:bg-[#432a13] text-amber-100 font-bold text-sm tracking-wider uppercase rounded-xl shadow-lg transition flex items-center justify-center gap-2 font-sans"
+              className="w-full py-3 bg-[#5c3e21] hover:bg-[#432a13] text-amber-100 font-bold text-sm tracking-wider uppercase rounded-xl shadow-lg transition flex items-center justify-center gap-2 font-sans cursor-pointer"
             >
               Begin Expedition
             </button>
@@ -643,6 +894,14 @@ export default function App() {
           setIsBuilderOpen(true);
         }}
       />
+
+      {/* 0 Health Fatal Defeat / Coroner's Inquest & Panoramic Flight Modal */}
+      {gameOverDetails && (
+        <GameOverModal
+          details={gameOverDetails}
+          onRestart={handleRestartExpedition}
+        />
+      )}
     </div>
   );
 }

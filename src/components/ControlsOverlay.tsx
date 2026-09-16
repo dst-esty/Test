@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Compass,
   Flashlight,
@@ -31,9 +31,19 @@ import {
   Box,
   ShieldAlert,
   Shovel,
+  Music,
+  SkipForward,
+  DollarSign,
+  Layers,
+  TreePine,
+  ChevronDown,
+  ChevronUp,
+  ChevronRight,
 } from 'lucide-react';
 import { MineStructureType, PlayerState, WeatherType } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
+import { westernMusic, WESTERN_TRACKS } from '../audio/westernMusic';
+import { InventoryModal } from './InventoryModal';
 
 interface ControlsOverlayProps {
   playerState: PlayerState;
@@ -66,12 +76,20 @@ interface ControlsOverlayProps {
   onReinforcePortal?: () => void;
   onStartPortalExcavation?: () => void;
   onPurchaseRocks?: (amount: number, goldCost: number) => void;
+  onPurchaseWood?: (amount: number, goldCost: number) => void;
+  onToggleAutoRedeem?: () => void;
+  onRedeemAllGold?: () => void;
   nearbyTrench?: {
     depth: number;
     stability: number;
     isShored: boolean;
     shoredUntilDepth?: number;
     rocksNeeded: number;
+    woodNeeded?: number;
+    strataName?: string;
+    strataId?: string;
+    materialType?: 'wood' | 'stone' | 'timber_rock' | 'none';
+    strataAdvice?: string;
     canShore: boolean;
   } | null;
   onShoreTrench?: () => void;
@@ -108,10 +126,42 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onReinforcePortal,
   onStartPortalExcavation,
   onPurchaseRocks,
+  onPurchaseWood,
+  onToggleAutoRedeem,
+  onRedeemAllGold,
   nearbyTrench,
   onShoreTrench,
 }) => {
   const [showAtmospherePanel, setShowAtmospherePanel] = useState(false);
+  const [musicPlaying, setMusicPlaying] = useState(westernMusic.getIsPlaying());
+  const [currentTrack, setCurrentTrack] = useState(westernMusic.getCurrentTrack());
+  const [showMusicMenu, setShowMusicMenu] = useState(false);
+  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
+  const [isExcavationPanelCollapsed, setIsExcavationPanelCollapsed] = useState(true);
+  const [isTrenchPanelCollapsed, setIsTrenchPanelCollapsed] = useState(true);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.code === 'KeyI') {
+        e.preventDefault();
+        setIsInventoryOpen((prev) => !prev);
+      } else if (e.code === 'Escape' && isInventoryOpen) {
+        setIsInventoryOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isInventoryOpen]);
+
+  useEffect(() => {
+    return westernMusic.subscribe(() => {
+      setMusicPlaying(westernMusic.getIsPlaying());
+      setCurrentTrack(westernMusic.getCurrentTrack());
+    });
+  }, []);
 
   const tools: { id: PlayerState['equippedTool']; label: string; icon: React.ReactNode; key: string }[] = [
     { id: 'compass', label: 'Compass', icon: <Compass className="w-4 h-4" />, key: '1' },
@@ -161,102 +211,105 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       )}
 
       {/* Top Left: Player Survival & Mine Statistics */}
-      <div className="pointer-events-auto flex flex-col gap-2.5 max-w-xs">
-        {/* Health & Hydration Bars */}
-        <div className="flex flex-col gap-1.5 bg-stone-900/85 backdrop-blur-md p-2.5 rounded-2xl border border-stone-700/60 shadow-lg">
-          {/* Health */}
-          <div className="flex items-center gap-2">
-            <Heart
-              className={`w-4 h-4 ${
-                playerState.health < 30 ? 'text-red-500 animate-ping' : 'text-red-400'
-              }`}
-            />
-            <div className="flex-1 bg-stone-800 h-2.5 rounded-full overflow-hidden border border-stone-700/50">
-              <div
-                className={`h-full transition-all duration-300 ${
-                  playerState.health < 30
-                    ? 'bg-red-600'
-                    : playerState.health < 60
-                    ? 'bg-amber-500'
-                    : 'bg-emerald-500'
+      <div className="pointer-events-auto flex flex-col gap-2 max-w-sm">
+        {/* Sleek Compact Vitals & Inventory Pill Row */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Streamlined Health & Hydration Pill */}
+          <div className="flex items-center gap-2.5 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-stone-700/60 shadow-lg text-[10px] font-mono">
+            {/* Health */}
+            <div className="flex items-center gap-1.5" title={`Health: ${Math.round(playerState.health)}%`}>
+              <Heart
+                className={`w-3.5 h-3.5 ${
+                  playerState.health < 30 ? 'text-red-500 animate-ping' : 'text-red-400'
                 }`}
-                style={{ width: `${playerState.health}%` }}
               />
+              <div className="w-12 bg-stone-800 h-2 rounded-full overflow-hidden border border-stone-700/50">
+                <div
+                  className={`h-full transition-all duration-300 ${
+                    playerState.health < 30
+                      ? 'bg-red-600'
+                      : playerState.health < 60
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${playerState.health}%` }}
+                />
+              </div>
+              <span className="text-stone-300">{Math.round(playerState.health)}%</span>
             </div>
-            <span className="text-[10px] font-mono text-stone-300 w-7 text-right">
-              {Math.round(playerState.health)}%
-            </span>
+
+            <div className="w-px h-3 bg-stone-700/60" />
+
+            {/* Hydration */}
+            <div className="flex items-center gap-1.5" title={`Hydration: ${Math.round(playerState.hydration)}%`}>
+              <Droplets
+                className={`w-3.5 h-3.5 ${
+                  playerState.hydration < 25 ? 'text-sky-400 animate-bounce' : 'text-sky-400'
+                }`}
+              />
+              <div className="w-12 bg-stone-800 h-2 rounded-full overflow-hidden border border-stone-700/50">
+                <div
+                  className={`h-full transition-all duration-300 ${
+                    playerState.hydration < 25
+                      ? 'bg-red-500'
+                      : playerState.hydration < 50
+                      ? 'bg-amber-400'
+                      : 'bg-sky-400'
+                  }`}
+                  style={{ width: `${playerState.hydration}%` }}
+                />
+              </div>
+              <span className="text-stone-300">{Math.round(playerState.hydration)}%</span>
+            </div>
           </div>
 
-          {/* Hydration */}
-          <div className="flex items-center gap-2">
-            <Droplets
-              className={`w-4 h-4 ${
-                playerState.hydration < 25 ? 'text-sky-400 animate-bounce' : 'text-sky-400'
-              }`}
-            />
-            <div className="flex-1 bg-stone-800 h-2.5 rounded-full overflow-hidden border border-stone-700/50">
-              <div
-                className={`h-full transition-all duration-300 ${
-                  playerState.hydration < 25
-                    ? 'bg-red-500'
-                    : playerState.hydration < 50
-                    ? 'bg-amber-400'
-                    : 'bg-sky-400'
-                }`}
-                style={{ width: `${playerState.hydration}%` }}
-              />
-            </div>
-            <span className="text-[10px] font-mono text-stone-300 w-7 text-right">
-              {Math.round(playerState.hydration)}%
-            </span>
-          </div>
-        </div>
-
-        {/* Gold & Rocks / Stone Inventory */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 bg-stone-900/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-stone-700/60 text-stone-200 shadow-lg">
-            <Coins className="w-4 h-4 text-amber-400" />
-            <div className="flex flex-col">
-              <span className="text-[9px] text-stone-400 font-mono">GOLD ORE</span>
-              <span className="text-xs font-bold text-amber-300 font-mono">
+          {/* Minimizable Inventory & Supplies Trigger Tab */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setIsInventoryOpen(true)}
+              className="flex items-center gap-2 bg-stone-900/90 hover:bg-stone-850 backdrop-blur-md px-3 py-1.5 rounded-full border border-amber-600/50 hover:border-amber-400 text-stone-200 shadow-lg text-xs font-mono transition-all group cursor-pointer"
+              title="Open Expedition Saddlebag & Supplies [Press I or Tab]"
+            >
+              <Box className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-12 transition-transform" />
+              <span className="font-bold text-amber-300">Inventory [I]</span>
+              <div className="w-px h-3 bg-stone-700/60" />
+              <span className="text-emerald-400 font-semibold">${(playerState.cashDollars || 0).toFixed(2)}</span>
+              <span className="text-amber-300 font-semibold">
                 {(typeof playerState.goldFound === 'number' && !isNaN(playerState.goldFound) ? playerState.goldFound : 0).toFixed(1)} oz
               </span>
-            </div>
-          </div>
+              <span className="text-stone-400 text-[10px]">🪵 {playerState.woodPlanks || 0}</span>
+              <span className="text-stone-400 text-[10px]">🪨 {playerState.blocksDug || 0}</span>
+              <ChevronRight className="w-3.5 h-3.5 text-amber-400/80 group-hover:translate-x-0.5 transition-transform" />
+            </button>
 
-          <div className="flex items-center gap-2 bg-stone-900/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-stone-700/60 text-stone-200 shadow-lg">
-            <Box className="w-4 h-4 text-stone-300" />
-            <div className="flex flex-col">
-              <span className="text-[9px] text-stone-400 font-mono">STONES / ROCKS</span>
-              <span className="text-xs font-bold text-stone-100 font-mono">
-                {playerState.blocksDug || 0}
-              </span>
-            </div>
-            {onOpenRockDepot && (
+            {onRedeemAllGold && (playerState.goldFound || 0) > 0.05 && (
               <button
-                onClick={onOpenRockDepot}
-                className="ml-1 px-1.5 py-0.5 bg-amber-600/90 hover:bg-amber-500 text-stone-950 font-bold rounded text-[10px] font-mono shadow transition-colors"
-                title="Purchase building rocks with gold ore"
+                onClick={onRedeemAllGold}
+                className="px-2 py-1.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-full text-[10px] font-mono shadow transition-colors flex items-center gap-1 cursor-pointer"
+                title="Sell all raw gold ore to frontier assayer ($20.67/oz standard)"
               >
-                + Buy
+                <Coins className="w-3 h-3" />
+                <span>Cash Out</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Portal Excavation & Mountain Strain Warning Card */}
+        {/* Portal Excavation & Mountain Strain Warning Card (Collapsible) */}
         {playerState.portalExcavation && (
           <div
-            className={`flex flex-col gap-1.5 p-2.5 rounded-2xl border backdrop-blur-md shadow-xl transition-all ${
+            className={`flex flex-col gap-1.5 p-2 rounded-2xl border backdrop-blur-md shadow-xl transition-all ${
               playerState.portalExcavation.isReinforced
                 ? 'bg-emerald-950/80 border-emerald-600/60'
                 : playerState.portalExcavation.stability < 65
-                ? 'bg-red-950/90 border-red-500/80 shadow-[0_0_20px_rgba(239,68,68,0.35)] animate-pulse'
+                ? 'bg-red-950/90 border-red-500/80 shadow-[0_0_20px_rgba(239,68,68,0.35)]'
                 : 'bg-stone-900/90 border-amber-600/60'
             }`}
           >
-            <div className="flex items-center justify-between">
+            <div
+              onClick={() => setIsExcavationPanelCollapsed((p) => !p)}
+              className="flex items-center justify-between cursor-pointer hover:opacity-90 select-none"
+            >
               <div className="flex items-center gap-1.5">
                 <Pickaxe
                   className={`w-3.5 h-3.5 ${
@@ -273,12 +326,19 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                     : 'PORTAL EXCAVATION'}
                 </span>
               </div>
-              <span className="text-[10px] font-mono text-stone-300">
-                {playerState.portalExcavation.progress}% dug
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-stone-300">
+                  {playerState.portalExcavation.progress}% dug
+                </span>
+                {isExcavationPanelCollapsed ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
+                ) : (
+                  <ChevronUp className="w-3.5 h-3.5 text-stone-400" />
+                )}
+              </div>
             </div>
 
-            {!playerState.portalExcavation.isReinforced && (
+            {!isExcavationPanelCollapsed && !playerState.portalExcavation.isReinforced && (
               <>
                 {/* Bedrock Stability Bar */}
                 <div className="flex flex-col gap-0.5">
@@ -356,10 +416,10 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           </div>
         )}
 
-        {/* Geotechnical Excavation Pit Stability & Timber Shoring Card */}
+        {/* Geotechnical Excavation Pit Stability & Timber Shoring Card (Collapsible) */}
         {nearbyTrench && (
           <div
-            className={`flex flex-col gap-1.5 p-2.5 rounded-2xl border backdrop-blur-md shadow-xl transition-all ${
+            className={`flex flex-col gap-1.5 p-2 rounded-2xl border backdrop-blur-md shadow-xl transition-all ${
               nearbyTrench.isShored
                 ? 'bg-emerald-950/80 border-emerald-600/60'
                 : nearbyTrench.stability <= 35
@@ -367,7 +427,10 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                 : 'bg-amber-950/80 border-amber-600/60'
             }`}
           >
-            <div className="flex items-center justify-between">
+            <div
+              onClick={() => setIsTrenchPanelCollapsed((p) => !p)}
+              className="flex items-center justify-between cursor-pointer hover:opacity-90 select-none"
+            >
               <div className="flex items-center gap-1.5">
                 <Shovel
                   className={`w-3.5 h-3.5 ${
@@ -382,100 +445,148 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   {nearbyTrench.isShored
                     ? 'TRENCH TIMBER SHORED'
                     : nearbyTrench.shoredUntilDepth
-                    ? 'EXTEND TIMBERS TO NEXT DEPTH'
-                    : 'EXCAVATION TRENCH'}
+                    ? 'EXTEND TIMBERS'
+                    : nearbyTrench.strataId === 'strata_sand'
+                    ? 'WOODEN SHORING IN SAND'
+                    : 'MINE TIMBERING'}
                 </span>
               </div>
-              <span className="text-[10px] font-mono text-stone-300">
-                {nearbyTrench.depth.toFixed(1)}m{' '}
-                {nearbyTrench.shoredUntilDepth
-                  ? `(Shored to ${nearbyTrench.shoredUntilDepth.toFixed(1)}m)`
-                  : 'Deep'}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-stone-300">
+                  {nearbyTrench.depth.toFixed(1)}m{' '}
+                  {nearbyTrench.shoredUntilDepth
+                    ? `(to ${nearbyTrench.shoredUntilDepth.toFixed(1)}m)`
+                    : 'Deep'}
+                </span>
+                {isTrenchPanelCollapsed ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
+                ) : (
+                  <ChevronUp className="w-3.5 h-3.5 text-stone-400" />
+                )}
+              </div>
             </div>
 
-            {!nearbyTrench.isShored ? (
+            {!isTrenchPanelCollapsed && (
               <>
-                <div className="flex flex-col gap-0.5">
-                  <div className="flex justify-between text-[9px] font-mono text-stone-400">
-                    <span>Wall Stability</span>
-                    <span
-                      className={
-                        nearbyTrench.stability <= 35
-                          ? 'text-red-400 font-bold'
-                          : nearbyTrench.stability <= 65
-                          ? 'text-amber-400'
-                          : 'text-emerald-400'
-                      }
-                    >
-                      {Math.round(nearbyTrench.stability)}%
-                    </span>
-                  </div>
-                  <div className="h-1.5 bg-stone-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-300 ${
-                        nearbyTrench.stability <= 35
-                          ? 'bg-red-500'
-                          : nearbyTrench.stability <= 65
-                          ? 'bg-amber-500'
-                          : 'bg-emerald-500'
-                      }`}
-                      style={{ width: `${Math.max(5, nearbyTrench.stability)}%` }}
-                    />
-                  </div>
+                {/* Geological Strata Badge */}
+                <div className="flex items-center justify-between text-[9px] font-mono bg-stone-900/60 px-2 py-0.5 rounded border border-stone-800">
+                  <span className="text-amber-300 font-bold flex items-center gap-1">
+                    <Layers className="w-3 h-3 text-amber-400" />
+                    {nearbyTrench.strataName || 'Desert Stratum'}
+                  </span>
+                  <span className="text-stone-400">
+                    {nearbyTrench.materialType === 'wood'
+                      ? 'High Timber Need'
+                      : nearbyTrench.materialType === 'timber_rock'
+                      ? 'Timber & Stone Anchor'
+                      : nearbyTrench.materialType === 'none'
+                      ? 'Self-Supporting'
+                      : 'Rock Shoring'}
+                  </span>
                 </div>
 
-                {nearbyTrench.stability <= 35 ? (
-                  <div className="flex items-center gap-1 text-[10px] text-red-300 font-semibold leading-tight">
-                    <ShieldAlert className="w-3 h-3 shrink-0 text-red-400" />
-                    <span>⚠️ Pit rim slumping! Un-shored lower earth collapsing into bottom. Shore now!</span>
-                  </div>
-                ) : nearbyTrench.shoredUntilDepth ? (
-                  <div className="text-[10px] text-amber-300 leading-tight font-mono">
-                    ⚠️ Trench dug deeper than timber collar ({nearbyTrench.shoredUntilDepth.toFixed(1)}m). Extend cribbing to secure the next depth.
-                  </div>
+                {!nearbyTrench.isShored ? (
+                  <>
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex justify-between text-[9px] font-mono text-stone-400">
+                        <span>Wall Stability</span>
+                        <span
+                          className={
+                            nearbyTrench.stability <= 35
+                              ? 'text-red-400 font-bold'
+                              : nearbyTrench.stability <= 65
+                              ? 'text-amber-400'
+                              : 'text-emerald-400'
+                          }
+                        >
+                          {Math.round(nearbyTrench.stability)}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-stone-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-300 ${
+                            nearbyTrench.stability <= 35
+                              ? 'bg-red-500'
+                              : nearbyTrench.stability <= 65
+                              ? 'bg-amber-500'
+                              : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.max(5, nearbyTrench.stability)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {nearbyTrench.stability <= 35 ? (
+                      <div className="flex items-center gap-1 text-[10px] text-red-300 font-semibold leading-tight">
+                        <ShieldAlert className="w-3 h-3 shrink-0 text-red-400" />
+                        <span>⚠️ Trench walls buckling! High lateral pressure. Install wooden shoring before fatal cave-in!</span>
+                      </div>
+                    ) : nearbyTrench.shoredUntilDepth ? (
+                      <div className="text-[10px] text-amber-300 leading-tight font-mono">
+                        ⚠️ Trench dug deeper than timber collar ({nearbyTrench.shoredUntilDepth.toFixed(1)}m). Extend cribbing to secure the next depth.
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-stone-400 leading-tight">
+                        {nearbyTrench.strataAdvice || 'Install timber shoring to resist geotechnical soil shear and prevent trench cave-ins.'}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-1 pt-1 border-t border-stone-800 text-[10px] font-mono">
+                      <span className="text-stone-300">
+                        Cost:{' '}
+                        <strong className="text-amber-300">
+                          {nearbyTrench.materialType === 'wood'
+                            ? `${nearbyTrench.woodNeeded ?? 2} Timber Planks`
+                            : nearbyTrench.materialType === 'timber_rock'
+                            ? '1 Plank + 1 Stone'
+                            : nearbyTrench.materialType === 'none'
+                            ? '0 Materials'
+                            : `${nearbyTrench.rocksNeeded} Quarry Stones`}
+                        </strong>
+                      </span>
+                      {onShoreTrench && (
+                        <button
+                          onClick={onShoreTrench}
+                          disabled={!nearbyTrench.canShore}
+                          className={`px-2 py-0.5 rounded font-bold text-[9px] transition ${
+                            nearbyTrench.canShore
+                              ? 'bg-amber-500 hover:bg-amber-400 text-stone-950 cursor-pointer shadow'
+                              : 'bg-stone-800 text-stone-600 cursor-not-allowed'
+                          }`}
+                        >
+                          {nearbyTrench.shoredUntilDepth ? 'Extend [T]' : 'Shore [T]'}
+                        </button>
+                      )}
+                    </div>
+                  </>
                 ) : (
-                  <div className="text-[10px] text-stone-400 leading-tight">
-                    Lateral soil pressure rises with depth. Install pine shoring to lock walls until the next depth.
+                  <div className="flex flex-col gap-1">
+                    <div className="text-[10px] text-emerald-300 flex items-center justify-between font-mono">
+                      <span>🛡️ Secured down to {(nearbyTrench.shoredUntilDepth || nearbyTrench.depth).toFixed(1)}m depth</span>
+                      {nearbyTrench.canShore && onShoreTrench && (
+                        <button
+                          onClick={onShoreTrench}
+                          className="px-2 py-0.5 rounded font-bold text-[9px] bg-amber-500 hover:bg-amber-400 text-stone-950 cursor-pointer shadow font-mono"
+                        >
+                          Extend [T]
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[9px] text-stone-400 leading-tight font-sans">
+                      {nearbyTrench.strataAdvice || `Timbers support walls down to ${(nearbyTrench.shoredUntilDepth || nearbyTrench.depth).toFixed(1)}m.`}
+                    </div>
                   </div>
                 )}
 
-                <div className="flex items-center justify-between gap-1 pt-1 border-t border-stone-800 text-[10px] font-mono">
-                  <span className="text-stone-300">
-                    Cost: <strong className="text-amber-300">3 Quarry Stones</strong>
-                  </span>
-                  {onShoreTrench && (
-                    <button
-                      onClick={onShoreTrench}
-                      disabled={!nearbyTrench.canShore}
-                      className={`px-2 py-0.5 rounded font-bold text-[9px] transition ${
-                        nearbyTrench.canShore
-                          ? 'bg-amber-500 hover:bg-amber-400 text-stone-950 cursor-pointer shadow'
-                          : 'bg-stone-800 text-stone-600 cursor-not-allowed'
-                      }`}
-                    >
-                      {nearbyTrench.shoredUntilDepth ? 'Extend [T]' : 'Shore [T]'}
-                    </button>
-                  )}
-                </div>
+                {nearbyTrench.depth >= 0.8 && onInteract && (
+                  <button
+                    onClick={onInteract}
+                    className="mt-1.5 px-3 py-1 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-[10px] rounded-lg shadow font-mono flex items-center justify-center gap-1.5 transition-colors cursor-pointer w-full border border-amber-300"
+                  >
+                    <span>⛏️ Enter Subterranean Mine Shaft [E]</span>
+                  </button>
+                )}
               </>
-            ) : (
-              <div className="flex flex-col gap-1">
-                <div className="text-[10px] text-emerald-300 flex items-center justify-between font-mono">
-                  <span>🛡️ Secured down to {(nearbyTrench.shoredUntilDepth || nearbyTrench.depth).toFixed(1)}m depth</span>
-                  {nearbyTrench.canShore && onShoreTrench && (
-                    <button
-                      onClick={onShoreTrench}
-                      className="px-2 py-0.5 rounded font-bold text-[9px] bg-amber-500 hover:bg-amber-400 text-stone-950 cursor-pointer shadow font-mono"
-                    >
-                      Extend [T]
-                    </button>
-                  )}
-                </div>
-                <div className="text-[9px] text-stone-400 leading-tight font-sans">
-                  Timbers support walls down to {(nearbyTrench.shoredUntilDepth || nearbyTrench.depth).toFixed(1)}m. Digging deeper into the next depth will require extending framing.
-                </div>
-              </div>
             )}
           </div>
         )}
@@ -595,6 +706,21 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             >
               ⛰️ 4:00 PM Needle Shadow Alignment
             </button>
+
+            {/* Browser Graphics Hardware Acceleration Status */}
+            <div className="pt-2 border-t border-stone-800 flex flex-col gap-1 text-[10px] font-mono text-stone-400">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1 text-emerald-400 font-bold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                  GPU Hardware Acceleration
+                </span>
+                <span className="text-stone-300">WebGL2 Active</span>
+              </div>
+              <div className="flex justify-between text-[9px] text-stone-500">
+                <span>Filtering: 16x Anisotropic</span>
+                <span>Tone: ACES Filmic</span>
+              </div>
+            </div>
           </div>
         )}
 
@@ -831,6 +957,93 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                 <VolumeX className="w-4 h-4 text-stone-500" />
               )}
             </button>
+            <div className="relative">
+              <button
+                title={musicPlaying ? `Western Soundtrack: ${currentTrack.title} (Playing)` : 'Play Western Soundtrack'}
+                onClick={() => setShowMusicMenu((prev) => !prev)}
+                className={`p-2 rounded-xl transition flex items-center gap-1.5 ${
+                  musicPlaying
+                    ? 'text-amber-300 bg-amber-950/60 border border-amber-600/60 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
+                    : 'text-stone-400 hover:text-white hover:bg-stone-800/60'
+                }`}
+              >
+                <Music className={`w-4 h-4 ${musicPlaying ? 'animate-bounce text-amber-400' : ''}`} />
+                <span className="hidden lg:inline text-[11px] font-mono whitespace-nowrap">
+                  {musicPlaying ? currentTrack.title : 'Western Music'}
+                </span>
+              </button>
+
+              {/* Western Music Popover Menu */}
+              {showMusicMenu && (
+                <div className="absolute bottom-12 left-0 z-50 w-72 bg-stone-950/95 backdrop-blur-xl border-2 border-amber-800/80 rounded-2xl p-3.5 shadow-2xl text-stone-200 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                  <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-stone-800">
+                    <div className="flex items-center gap-2">
+                      <Music className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs font-mono font-bold uppercase tracking-wider text-amber-300">
+                        Old West Soundtrack
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => westernMusic.togglePlay()}
+                      className={`p-1.5 rounded-lg text-xs font-mono font-bold transition flex items-center gap-1 ${
+                        musicPlaying
+                          ? 'bg-amber-600 text-stone-950 hover:bg-amber-500'
+                          : 'bg-stone-800 text-stone-200 hover:bg-stone-700'
+                      }`}
+                    >
+                      {musicPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                      <span>{musicPlaying ? 'Pause' : 'Play'}</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5 mb-3">
+                    {WESTERN_TRACKS.map((t) => {
+                      const isCurr = t.id === currentTrack.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => {
+                            westernMusic.switchTrack(t.id);
+                            if (!westernMusic.getIsPlaying()) westernMusic.play();
+                          }}
+                          className={`w-full text-left px-2.5 py-2 rounded-xl text-xs transition flex flex-col ${
+                            isCurr
+                              ? 'bg-amber-900/60 border border-amber-600/70 text-amber-100 shadow-md'
+                              : 'hover:bg-stone-800/80 text-stone-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between font-semibold">
+                            <span>{t.title}</span>
+                            {isCurr && musicPlaying && (
+                              <span className="text-[9px] font-mono text-amber-400 font-bold uppercase tracking-widest animate-pulse">
+                                Playing
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-stone-400 mt-0.5">{t.subtitle}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-stone-800 text-[11px] font-mono">
+                    <button
+                      onClick={() => westernMusic.nextTrack()}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-stone-900 hover:bg-stone-800 text-amber-300 transition"
+                    >
+                      <SkipForward className="w-3.5 h-3.5" />
+                      <span>Next Track</span>
+                    </button>
+                    <button
+                      onClick={() => setShowMusicMenu(false)}
+                      className="text-stone-400 hover:text-stone-200 px-2 py-1"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Center: Tool Rack (1-7) */}
@@ -891,6 +1104,18 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Full Expedition Inventory Saddlebag & Frontier Assayer Modal */}
+      <InventoryModal
+        isOpen={isInventoryOpen}
+        onClose={() => setIsInventoryOpen(false)}
+        playerState={playerState}
+        onRedeemAllGold={onRedeemAllGold}
+        onToggleAutoRedeem={onToggleAutoRedeem}
+        onPurchaseWood={onPurchaseWood}
+        onOpenRockDepot={onOpenRockDepot}
+        onSelectTool={onSelectTool}
+      />
     </div>
   );
 };

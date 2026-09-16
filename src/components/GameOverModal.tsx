@@ -13,6 +13,7 @@ import {
   Clock,
   Layers,
   ChevronDown,
+  Droplets,
 } from 'lucide-react';
 
 interface GameOverModalProps {
@@ -58,6 +59,15 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ details, onRestart
           glow: 'from-red-950/80 via-stone-950/90 to-black/95',
           icon: <Crosshair className="w-8 h-8 text-red-400 animate-pulse" />,
           epitaphHeader: 'SHOT DOWN IN AN UNMARKED CANYON',
+        };
+      case 'drowning':
+        return {
+          badge: 'SUBTERRANEAN AQUIFER DROWNING',
+          color: 'text-cyan-400',
+          borderColor: 'border-cyan-700/60',
+          glow: 'from-blue-950/80 via-stone-950/90 to-black/95',
+          icon: <Droplets className="w-8 h-8 text-cyan-400 animate-pulse" />,
+          epitaphHeader: 'DROWNED IN FLOODED MINE DRIFTS',
         };
       case 'dynamite':
       default:

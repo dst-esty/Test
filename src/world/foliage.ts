@@ -17,6 +17,7 @@ export interface StrikeFoliageResult {
   debrisType?: DebrisType;
   goldAwarded?: number;
   blocksDug?: number;
+  woodAwarded?: number;
   hydrationAwarded?: number;
   message?: string;
   depositId?: string;
@@ -25,8 +26,376 @@ export interface StrikeFoliageResult {
 export interface ExplodeFoliageResult {
   goldBlasted: number;
   rocksBlasted: number;
+  woodBlasted: number;
   hydrationBlasted: number;
   destroyedPoints: Array<{ pos: THREE.Vector3; type: DebrisType }>;
+}
+
+// Palette of authentic mineral colors found across the Superstition Mountains and Sonoran desert
+const DESERT_ROCK_PALETTES = [
+  // Weathered iron terracotta sandstone (Supai / Redwall formations)
+  new THREE.Color(0x8f4327),
+  new THREE.Color(0xa24d2d),
+  new THREE.Color(0x7c3820),
+  new THREE.Color(0xb25833),
+  // Dark manganese desert varnish & weathered basalt
+  new THREE.Color(0x2d241f),
+  new THREE.Color(0x382e28),
+  new THREE.Color(0x433730),
+  new THREE.Color(0x322822),
+  // Buff & golden tan sandstone (Coconino / Navajo strata)
+  new THREE.Color(0xb5824e),
+  new THREE.Color(0xc69460),
+  new THREE.Color(0xa77543),
+  new THREE.Color(0x9d6c3e),
+  // Weathered granite & quartzite gray (salt & pepper bedrock)
+  new THREE.Color(0x6a645d),
+  new THREE.Color(0x7b746c),
+  new THREE.Color(0x8a837b),
+  // Deep hematite / burnt umber
+  new THREE.Color(0x562b1e),
+  new THREE.Color(0x653324),
+];
+
+/**
+ * 1. Angular Chiseled Talus Block (Fractured Basalt & Dacite)
+ * Sharp cleavage facets, directional fracture shearing, and a flat seating base.
+ */
+function createAngularRockGeometry(): THREE.BufferGeometry {
+  const geo = new THREE.DodecahedronGeometry(1.05, 0);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    let x = pos.getX(i);
+    let y = pos.getY(i);
+    let z = pos.getZ(i);
+
+    // Flatten underside so it rests naturally on desert soil
+    if (y < 0) {
+      y = -0.28 + (y + 0.28) * 0.42;
+    }
+    // Asymmetric directional cleavage & fracture facet displacement
+    x += Math.sin(y * 3.2 + z * 2.1) * 0.22;
+    z += Math.cos(x * 2.6 + y * 1.9) * 0.20;
+    y += Math.sin(x * 3.5) * 0.14;
+
+    pos.setXYZ(i, x, y, z);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * 2. Flat Tabular Sandstone Slab / Flagstone
+ * Thin, layered rectangular-polygonal slab common in desert washes and scree slopes.
+ */
+function createSlabRockGeometry(): THREE.BufferGeometry {
+  const geo = new THREE.CylinderGeometry(1.2, 1.45, 0.42, 7, 1);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    let x = pos.getX(i);
+    const y = pos.getY(i);
+    let z = pos.getZ(i);
+
+    const angle = Math.atan2(z, x);
+    const rad = Math.hypot(x, z);
+    const perturb = 1.0 + Math.sin(angle * 3.0) * 0.25 + Math.cos(angle * 5.0) * 0.14;
+
+    x = Math.cos(angle) * rad * perturb;
+    z = Math.sin(angle) * rad * perturb;
+
+    pos.setXYZ(i, x, y, z);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * 3. Weathered Desert Granite Corestone / Whaleback Boulder
+ * Oblong, sub-rounded, heavily pitted corestone with natural erosion hollows and flat base.
+ */
+function createWeatheredCorestoneGeometry(): THREE.BufferGeometry {
+  const geo = new THREE.IcosahedronGeometry(1.0, 1);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    let x = pos.getX(i);
+    let y = pos.getY(i);
+    let z = pos.getZ(i);
+
+    // Oblong elongation
+    z *= 1.35;
+    y *= 0.72;
+    x *= 1.12;
+
+    if (y < -0.1) {
+      y = -0.18 + (y + 0.1) * 0.35;
+    }
+    const d = Math.sin(x * 3.5) * Math.cos(z * 2.8) * 0.12;
+    x += d;
+    z += d;
+
+    pos.setXYZ(i, x, y, z);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Outcrop A: Jagged Volcanic Crag / Cliff Fin (Massif Dacite Buttress)
+ * Sheer vertical columnar jointing, talus apron, and serrated jagged knife-edge summit (NO mushroom cap!).
+ */
+function createVolcanicCragGeometry(): THREE.BufferGeometry {
+  const height = 18.0;
+  const radialSegments = 8;
+  const heightSegments = 22;
+  const geo = new THREE.CylinderGeometry(2.4, 5.2, height, radialSegments, heightSegments);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 3);
+
+  for (let i = 0; i < pos.count; i++) {
+    let px = pos.getX(i);
+    let py = pos.getY(i);
+    let pz = pos.getZ(i);
+
+    const t = (py + height / 2) / height;
+    const angle = Math.atan2(pz, px);
+    const radius = Math.hypot(px, pz);
+
+    // Base talus apron (t < 0.20)
+    let profileScale = 1.0;
+    if (t < 0.20) {
+      profileScale = 1.1 + Math.pow((0.20 - t) / 0.20, 2.0) * 0.9;
+    } else if (t >= 0.82) {
+      // Jagged serrated summit crest with asymmetric knife-edge fangs (NO mushroom!)
+      const crest = Math.cos(angle * 2.0 + 0.6) * 0.32;
+      profileScale = Math.max(0.25, (1.0 - (t - 0.82) / 0.18 * 0.65) * (1.0 + crest));
+      py += Math.pow(Math.max(0, Math.sin(angle * 2.0)), 2.0) * 2.4;
+    } else {
+      // Sheer vertical column with subtle terracing
+      profileScale = 0.94 + Math.sin(t * 18.0) * 0.06;
+    }
+
+    // Columnar vertical jointing & rock faceting
+    const jointFacet = Math.cos(angle * 4.0) * 0.18 + Math.sin(angle * 8.0) * 0.08;
+    const strataGroove = Math.sin(py * 3.8) * 0.06;
+
+    const newRadius = radius * profileScale * (1.0 + jointFacet + strataGroove);
+    px = Math.cos(angle) * newRadius;
+    pz = Math.sin(angle) * newRadius;
+
+    pos.setXYZ(i, px, py, pz);
+
+    // Weathered volcanic rock colors (desert varnish on summit, iron red body, dacite brown)
+    const band = Math.sin(py * 1.8 + angle * 0.5) * 0.5 + 0.5;
+    let r = 0.55, g = 0.28, b = 0.19;
+    if (t > 0.78) {
+      // Dark desert varnish patina
+      r = 0.32 + band * 0.06;
+      g = 0.23 + band * 0.05;
+      b = 0.20 + band * 0.03;
+    } else if (band > 0.5) {
+      // Iron-rich terracotta
+      r = 0.66 + band * 0.08;
+      g = 0.32 + band * 0.06;
+      b = 0.20 + band * 0.04;
+    } else {
+      // Dacite ash brown
+      r = 0.48 + band * 0.06;
+      g = 0.27 + band * 0.04;
+      b = 0.19 + band * 0.03;
+    }
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Outcrop B: Stepped Mesa Butte / Sandstone Shelf Outcrop
+ * Authentic flat-top caprock mesa with stepped horizontal benches and vertical drops.
+ */
+function createSteppedMesaGeometry(): THREE.BufferGeometry {
+  const height = 13.0;
+  const radialSegments = 12;
+  const heightSegments = 24;
+  const geo = new THREE.CylinderGeometry(4.5, 6.8, height, radialSegments, heightSegments);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 3);
+
+  for (let i = 0; i < pos.count; i++) {
+    let px = pos.getX(i);
+    let py = pos.getY(i);
+    let pz = pos.getZ(i);
+
+    const t = (py + height / 2) / height;
+    const angle = Math.atan2(pz, px);
+    const radius = Math.hypot(px, pz);
+
+    // Stepped horizontal benches with vertical drops
+    let profileScale = 1.0;
+    if (t < 0.18) {
+      // Talus scree base
+      profileScale = 1.05 + (0.18 - t) * 1.8;
+    } else if (t >= 0.88) {
+      // Distinct flat mesa caprock plateau
+      profileScale = 1.02;
+    } else {
+      // S-curve steps (distinct horizontal benches)
+      const stepIdx = Math.floor((t - 0.18) * 6.0);
+      const stepFrac = ((t - 0.18) * 6.0) % 1.0;
+      const stepTerrace = stepIdx * 0.07 + Math.pow(stepFrac, 3.2) * 0.07;
+      profileScale = 0.90 + stepTerrace;
+    }
+
+    // Angular blocky corners (quadrangular mesa)
+    const blocky = Math.cos(angle * 4.0) * 0.12 + Math.sin(angle * 2.0) * 0.06;
+    const newRadius = radius * profileScale * (1.0 + blocky);
+
+    px = Math.cos(angle) * newRadius;
+    pz = Math.sin(angle) * newRadius;
+
+    pos.setXYZ(i, px, py, pz);
+
+    // Horizontal sedimentary strata banding (buff Coconino sandstone & red Supai)
+    const strata = Math.sin(py * 3.5) * 0.5 + 0.5;
+    let r = 0.74, g = 0.46, b = 0.28;
+    if (t > 0.86) {
+      // Dark caprock patina
+      r = 0.36 + strata * 0.06;
+      g = 0.26 + strata * 0.05;
+      b = 0.21 + strata * 0.04;
+    } else if (strata > 0.52) {
+      // Buff sandstone bench
+      r = 0.78 + strata * 0.06;
+      g = 0.52 + strata * 0.06;
+      b = 0.32 + strata * 0.04;
+    } else {
+      // Deep terracotta siltstone
+      r = 0.62 + strata * 0.06;
+      g = 0.28 + strata * 0.04;
+      b = 0.17 + strata * 0.03;
+    }
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Outcrop C: Tilted Fault-Block Monocline / Sandstone Fin
+ * Tectonic fault block with smooth sloping 35-degree dip face and sheer vertical scarp.
+ */
+function createFaultMonoclineGeometry(): THREE.BufferGeometry {
+  const height = 15.0;
+  const radialSegments = 8;
+  const heightSegments = 20;
+  const geo = new THREE.CylinderGeometry(2.2, 4.5, height, radialSegments, heightSegments);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 3);
+
+  for (let i = 0; i < pos.count; i++) {
+    let px = pos.getX(i);
+    let py = pos.getY(i);
+    let pz = pos.getZ(i);
+
+    const t = (py + height / 2) / height;
+    const angle = Math.atan2(pz, px);
+    const radius = Math.hypot(px, pz);
+
+    // Tilted monocline: shear along X axis
+    const tiltShift = Math.sin(angle) * (t * 2.8);
+    const scarpCut = Math.cos(angle) > 0.2 ? 0.85 : 1.15;
+
+    const profileScale = (t < 0.2 ? 1.2 : 0.95 - t * 0.3) * scarpCut;
+    const newRadius = radius * profileScale;
+
+    px = Math.cos(angle) * newRadius + tiltShift;
+    pz = Math.sin(angle) * newRadius;
+
+    pos.setXYZ(i, px, py, pz);
+
+    const band = Math.sin(py * 2.4 + px * 0.6) * 0.5 + 0.5;
+    let r = 0.65, g = 0.34, b = 0.21;
+    if (Math.cos(angle) > 0.2) {
+      // Sheltered scarp face with dark varnish
+      r = 0.35 + band * 0.06;
+      g = 0.24 + band * 0.05;
+      b = 0.20 + band * 0.03;
+    } else {
+      // Exposed sunlit dip-slope (rich red sandstone)
+      r = 0.72 + band * 0.08;
+      g = 0.38 + band * 0.06;
+      b = 0.24 + band * 0.04;
+    }
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Outcrop D: Weathered Tapering Canyon Spire / Needle
+ * Slender volcanic pinnacle tapering gracefully to a craggy pointed summit (NO mushroom cap!).
+ */
+function createNeedleSpireGeometry(): THREE.BufferGeometry {
+  const height = 21.0;
+  const radialSegments = 10;
+  const heightSegments = 26;
+  const geo = new THREE.CylinderGeometry(1.1, 4.8, height, radialSegments, heightSegments);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 3);
+
+  for (let i = 0; i < pos.count; i++) {
+    let px = pos.getX(i);
+    let py = pos.getY(i);
+    let pz = pos.getZ(i);
+
+    const t = (py + height / 2) / height;
+    const angle = Math.atan2(pz, px);
+    const radius = Math.hypot(px, pz);
+
+    // Continuous tapering from talus base to needle tip
+    let profileScale = 1.0;
+    if (t < 0.22) {
+      profileScale = 1.35 + Math.pow((0.22 - t) / 0.22, 1.8) * 0.85;
+    } else {
+      const fluting = Math.sin(angle * 5.0) * 0.12;
+      profileScale = (1.0 - (t - 0.22) * 0.65) * (1.0 + fluting);
+    }
+
+    const newRadius = radius * profileScale;
+    px = Math.cos(angle) * newRadius;
+    pz = Math.sin(angle) * newRadius;
+
+    pos.setXYZ(i, px, py, pz);
+
+    const band = Math.sin(py * 2.0) * 0.5 + 0.5;
+    let r = 0.56, g = 0.29, b = 0.20;
+    if (t > 0.8) {
+      // Dark needle summit
+      r = 0.34 + band * 0.05;
+      g = 0.24 + band * 0.04;
+      b = 0.19 + band * 0.03;
+    } else if (band > 0.5) {
+      r = 0.68 + band * 0.08;
+      g = 0.35 + band * 0.06;
+      b = 0.22 + band * 0.04;
+    }
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
 }
 
 export class DesertFoliageManager {
@@ -35,11 +404,13 @@ export class DesertFoliageManager {
   public saguaroGroup: THREE.Group = new THREE.Group();
   public barrelMesh!: THREE.InstancedMesh;
   public boulderMesh!: THREE.InstancedMesh;
+  public boulderMeshes: THREE.InstancedMesh[] = [];
   public scrubMesh!: THREE.InstancedMesh;
   public grassMesh!: THREE.InstancedMesh;
   public pricklyMesh!: THREE.InstancedMesh;
   public chollaMesh!: THREE.InstancedMesh;
   public outcroppingMesh!: THREE.InstancedMesh;
+  public outcroppingMeshes: THREE.InstancedMesh[] = [];
 
   private scene: THREE.Scene;
   private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -152,34 +523,84 @@ export class DesertFoliageManager {
     this.scene.add(this.barrelMesh);
 
     // ==========================================
-    // 3. Desert Boulders & Red Rock Scree (Instanced)
+    // 3. Desert Boulders, Talus Scree & Flat Sandstone Slabs (Instanced with Mineral Color Variation)
     // ==========================================
-    const boulderCount = 400;
-    const boulderGeo = new THREE.DodecahedronGeometry(1.2, 1);
-    const boulderMat = new THREE.MeshStandardMaterial({
-      color: 0x9b4a2e,
-      roughness: 0.95,
-    });
-    this.boulderMesh = new THREE.InstancedMesh(boulderGeo, boulderMat, boulderCount);
-    this.boulderMesh.castShadow = true;
-    this.boulderMesh.receiveShadow = true;
+    // Replace uniform round red balls with 3 authentic geological rock archetypes:
+    // A. Angular Chiseled Talus Blocks (fractured basalt/dacite with sharp cleavage planes)
+    // B. Flat Tabular Sandstone Slabs (horizontal flagstones layered in washes and slopes)
+    // C. Weathered Granite Corestones (pitted, oblong whaleback corestones)
+    const rockArchetypes = [
+      { geo: createAngularRockGeometry(), count: 180, flatShading: true, baseScale: 1.1 },
+      { geo: createSlabRockGeometry(), count: 140, flatShading: true, baseScale: 1.2 },
+      { geo: createWeatheredCorestoneGeometry(), count: 110, flatShading: false, baseScale: 1.15 },
+    ];
 
-    let rIdx = 0;
-    for (let i = 0; i < boulderCount; i++) {
-      const rx = (Math.random() - 0.5) * 380;
-      const rz = (Math.random() - 0.5) * 380;
-      const ry = getTerrainHeight(rx, rz);
+    this.boulderMeshes = [];
 
-      const s = 0.6 + Math.random() * 2.2;
-      dummy.position.set(rx, ry + s * 0.3, rz);
-      dummy.scale.set(s * (0.8 + Math.random() * 0.5), s, s * (0.8 + Math.random() * 0.5));
-      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      dummy.updateMatrix();
-      this.boulderMesh.setMatrixAt(rIdx++, dummy.matrix);
+    for (let archIdx = 0; archIdx < rockArchetypes.length; archIdx++) {
+      const arch = rockArchetypes[archIdx];
+      const mat = new THREE.MeshStandardMaterial({
+        roughness: 0.94,
+        metalness: 0.08,
+        flatShading: arch.flatShading,
+      });
+
+      const mesh = new THREE.InstancedMesh(arch.geo, mat, arch.count);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+
+      let rCount = 0;
+      for (let i = 0; i < arch.count; i++) {
+        const rx = (Math.random() - 0.5) * 380;
+        const rz = (Math.random() - 0.5) * 380;
+        const ry = getTerrainHeight(rx, rz);
+
+        // Natural scale variation: pebbles/scree (0.5), typical stones (1.0-1.8), large monolith boulders (2.0-2.8)
+        const scaleRoll = Math.random();
+        let s = 1.0;
+        if (scaleRoll < 0.25) {
+          s = 0.5 + Math.random() * 0.4; // Scree gravel & small stones
+        } else if (scaleRoll < 0.85) {
+          s = 0.9 + Math.random() * 0.9; // Medium field rocks
+        } else {
+          s = 1.9 + Math.random() * 0.9; // Monumental weathered boulders
+        }
+        s *= arch.baseScale;
+
+        // Position on surface, sunken slightly so flat bottom is embedded in soil
+        dummy.position.set(rx, ry + s * 0.15, rz);
+
+        if (archIdx === 1) {
+          // Sandstone slabs: flatter aspect ratio, subtle tilt following slope
+          dummy.scale.set(s * (1.0 + Math.random() * 0.5), s * 0.45, s * (1.0 + Math.random() * 0.5));
+          dummy.rotation.set((Math.random() - 0.5) * 0.25, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.25);
+        } else {
+          // Angular and corestones: natural 3D proportioning
+          dummy.scale.set(s * (0.8 + Math.random() * 0.4), s * (0.75 + Math.random() * 0.35), s * (0.8 + Math.random() * 0.4));
+          dummy.rotation.set((Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.3);
+        }
+
+        dummy.updateMatrix();
+        mesh.setMatrixAt(rCount, dummy.matrix);
+
+        // Assign individual natural mineral color to every rock:
+        // Manganese desert varnish, terracotta red sandstone, buff tan, or salt-and-pepper granite
+        const randColor = DESERT_ROCK_PALETTES[Math.floor(Math.random() * DESERT_ROCK_PALETTES.length)];
+        mesh.setColorAt(rCount, randColor);
+
+        rCount++;
+      }
+
+      mesh.count = rCount;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+
+      this.scene.add(mesh);
+      this.boulderMeshes.push(mesh);
     }
-    this.boulderMesh.count = rIdx;
-    this.boulderMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.boulderMesh);
+
+    // Keep primary boulderMesh pointing to first mesh for legacy access
+    this.boulderMesh = this.boulderMeshes[0];
 
     // ==========================================
     // 4. Desert Scrub & Creosote Bushes
@@ -310,35 +731,115 @@ export class DesertFoliageManager {
     this.scene.add(this.chollaMesh);
 
     // ==========================================
-    // 4E. Monumental Sandstone Outcroppings & Hoodoos
+    // 4E. Monumental Southwestern Outcroppings & Canyon Formations (4 Geological Archetypes)
     // ==========================================
-    const outcroppingCount = 45;
-    const hoodooGeo = new THREE.CylinderGeometry(2.2, 3.8, 12, 7);
-    const outcroppingMat = new THREE.MeshStandardMaterial({
-      color: 0xaa5832,
-      roughness: 0.9,
-      metalness: 0.05,
-    });
-    this.outcroppingMesh = new THREE.InstancedMesh(hoodooGeo, outcroppingMat, outcroppingCount);
-    let ocIdx = 0;
-    for (let i = 0; i < outcroppingCount; i++) {
-      const angle = (i / outcroppingCount) * Math.PI * 2 + Math.random() * 0.3;
-      const r = 50 + Math.random() * 120;
-      const ox = Math.cos(angle) * r;
-      const oz = Math.sin(angle) * r;
-      const oy = getTerrainHeight(ox, oz);
+    // Replaces uniform mushroom hoodoos with authentic Arizona geology:
+    // 1. Jagged Volcanic Crags / Cliff Fins (serrated knife-edge crests, columnar jointing)
+    // 2. Stepped Mesa Buttes (horizontal sedimentary benches, sheer drops, flat caprock)
+    // 3. Tilted Fault Monoclines (35-degree dipping slip-faces & sheer fault scarps)
+    // 4. Weathered Canyon Spire Needles (tall pinnacles tapering gracefully to pointed summits)
+    const outcroppingArchetypes = [
+      {
+        name: 'volcanic_crag',
+        geo: createVolcanicCragGeometry(),
+        count: 16,
+        baseHeight: 18.0,
+        heightOffsetFrac: 0.44,
+      },
+      {
+        name: 'stepped_mesa',
+        geo: createSteppedMesaGeometry(),
+        count: 16,
+        baseHeight: 13.0,
+        heightOffsetFrac: 0.46,
+      },
+      {
+        name: 'fault_monocline',
+        geo: createFaultMonoclineGeometry(),
+        count: 14,
+        baseHeight: 15.0,
+        heightOffsetFrac: 0.45,
+      },
+      {
+        name: 'canyon_spire',
+        geo: createNeedleSpireGeometry(),
+        count: 12,
+        baseHeight: 21.0,
+        heightOffsetFrac: 0.42,
+      },
+    ];
 
-      const s = 0.8 + Math.random() * 1.4;
-      dummy.position.set(ox, oy + 5 * s, oz);
-      dummy.scale.set(s * (0.8 + Math.random() * 0.4), s, s * (0.8 + Math.random() * 0.4));
-      dummy.rotation.set((Math.random() - 0.5) * 0.15, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.15);
-      dummy.updateMatrix();
-      this.outcroppingMesh.setMatrixAt(ocIdx++, dummy.matrix);
+    this.outcroppingMeshes = [];
+    const totalOutcrops = 58;
+    const globalAngles = Array.from({ length: totalOutcrops }, (_, i) => (i / totalOutcrops) * Math.PI * 2);
+    let globalAngleIdx = 0;
+
+    for (let archIdx = 0; archIdx < outcroppingArchetypes.length; archIdx++) {
+      const arch = outcroppingArchetypes[archIdx];
+      const mat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.92,
+        metalness: 0.06,
+        flatShading: false,
+      });
+
+      const mesh = new THREE.InstancedMesh(arch.geo, mat, arch.count);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+
+      let ocCount = 0;
+      for (let i = 0; i < arch.count; i++) {
+        const baseAngle = globalAngles[globalAngleIdx % totalOutcrops];
+        globalAngleIdx++;
+        const angle = baseAngle + (Math.random() - 0.5) * 0.28;
+        const r = 45 + Math.random() * 155;
+        const ox = Math.cos(angle) * r;
+        const oz = Math.sin(angle) * r;
+        const oy = getTerrainHeight(ox, oz);
+
+        // Aspect ratio variations: some wide massif bluffs, some high soaring towers
+        const baseScale = 0.85 + Math.random() * 1.35;
+        let sx = baseScale;
+        let sy = baseScale;
+        let sz = baseScale;
+
+        if (arch.name === 'stepped_mesa') {
+          // Broad, imposing flat-topped mesas
+          sx *= 1.3 + Math.random() * 0.5;
+          sy *= 0.8 + Math.random() * 0.4;
+          sz *= 1.3 + Math.random() * 0.5;
+        } else if (arch.name === 'canyon_spire') {
+          // Slender, soaring canyon needle pinnacles
+          sx *= 0.75 + Math.random() * 0.3;
+          sy *= 1.25 + Math.random() * 0.5;
+          sz *= 0.75 + Math.random() * 0.3;
+        } else if (arch.name === 'volcanic_crag') {
+          // Asymmetric crag buttresses
+          sx *= 1.2 + Math.random() * 0.5;
+          sy *= 0.95 + Math.random() * 0.4;
+          sz *= 0.9 + Math.random() * 0.35;
+        } else {
+          // Fault monoclines: elongated along fault strike
+          sx *= 1.1 + Math.random() * 0.4;
+          sy *= 1.0 + Math.random() * 0.35;
+          sz *= 1.4 + Math.random() * 0.5;
+        }
+
+        dummy.position.set(ox, oy + (arch.baseHeight * arch.heightOffsetFrac) * sy, oz);
+        dummy.scale.set(sx, sy, sz);
+        dummy.rotation.set((Math.random() - 0.5) * 0.12, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.12);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(ocCount++, dummy.matrix);
+      }
+
+      mesh.count = ocCount;
+      mesh.instanceMatrix.needsUpdate = true;
+      this.scene.add(mesh);
+      this.outcroppingMeshes.push(mesh);
     }
-    this.outcroppingMesh.castShadow = true;
-    this.outcroppingMesh.receiveShadow = true;
-    this.outcroppingMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.outcroppingMesh);
+
+    // Keep primary outcroppingMesh pointing to first mesh for legacy access
+    this.outcroppingMesh = this.outcroppingMeshes[0];
 
     // ==========================================
     // 5. Rich Gold Quartz Deposits for Mining
@@ -412,19 +913,19 @@ export class DesertFoliageManager {
       }
     }
 
-    // 2. Check Desert Boulders
-    if (this.boulderMesh) {
-      const boulderHits = raycaster.intersectObject(this.boulderMesh, false);
+    // 2. Check Desert Boulders & Rock Formations
+    for (const bMesh of this.boulderMeshes) {
+      const boulderHits = raycaster.intersectObject(bMesh, false);
       if (boulderHits.length > 0 && boulderHits[0].distance <= maxDist && boulderHits[0].instanceId !== undefined) {
         const id = boulderHits[0].instanceId;
         const matrix = new THREE.Matrix4();
-        this.boulderMesh.getMatrixAt(id, matrix);
+        bMesh.getMatrixAt(id, matrix);
         const scale = new THREE.Vector3();
         scale.setFromMatrixScale(matrix);
 
         if (scale.x > 0.05) {
-          this.boulderMesh.setMatrixAt(id, this.zeroMatrix);
-          this.boulderMesh.instanceMatrix.needsUpdate = true;
+          bMesh.setMatrixAt(id, this.zeroMatrix);
+          bMesh.instanceMatrix.needsUpdate = true;
 
           const goldRoll = Math.random() < 0.35 ? 1 : 0;
           return {
@@ -436,26 +937,26 @@ export class DesertFoliageManager {
             goldAwarded: goldRoll,
             message:
               goldRoll > 0
-                ? '💥 Shattered Desert Boulder! (+2 Quarry Rocks, +1 oz Placer Gold)'
-                : '💥 Shattered Desert Boulder! (+2 Quarry Rocks for Building)',
+                ? '💥 Shattered Desert Stone! (+2 Quarry Rocks, +1 oz Placer Gold)'
+                : '💥 Shattered Desert Stone! (+2 Quarry Rocks for Building)',
           };
         }
       }
     }
 
-    // 3. Check Monumental Sandstone Outcroppings / Hoodoos
-    if (this.outcroppingMesh) {
-      const ocHits = raycaster.intersectObject(this.outcroppingMesh, false);
+    // 3. Check Monumental Outcroppings & Canyon Crags
+    for (const ocMesh of this.outcroppingMeshes) {
+      const ocHits = raycaster.intersectObject(ocMesh, false);
       if (ocHits.length > 0 && ocHits[0].distance <= maxDist && ocHits[0].instanceId !== undefined) {
         const id = ocHits[0].instanceId;
         const matrix = new THREE.Matrix4();
-        this.outcroppingMesh.getMatrixAt(id, matrix);
+        ocMesh.getMatrixAt(id, matrix);
         const scale = new THREE.Vector3();
         scale.setFromMatrixScale(matrix);
 
         if (scale.x > 0.05) {
-          this.outcroppingMesh.setMatrixAt(id, this.zeroMatrix);
-          this.outcroppingMesh.instanceMatrix.needsUpdate = true;
+          ocMesh.setMatrixAt(id, this.zeroMatrix);
+          ocMesh.instanceMatrix.needsUpdate = true;
           return {
             hit: true,
             type: 'outcropping',
@@ -463,7 +964,7 @@ export class DesertFoliageManager {
             debrisType: 'sandstone',
             blocksDug: 3,
             goldAwarded: Math.random() < 0.35 ? 1 : 0,
-            message: '⛏️ Excavated Sandstone Outcropping! (+3 Building Stones)',
+            message: '⛏️ Excavated Rock Outcropping! (+3 Building Stones)',
           };
         }
       }
@@ -566,7 +1067,8 @@ export class DesertFoliageManager {
           hitPoint: scrubHits[0].point.clone(),
           debrisType: 'wood',
           blocksDug: 1,
-          message: '🌿 Chopped Creosote Scrub for kindling (+1 Wood / Rock)',
+          woodAwarded: 2,
+          message: '🌿 Chopped Desert Ironwood Scrub (+2 Timber Planks for Pit Shoring, +1 Stone)',
         };
       }
     }
@@ -580,6 +1082,7 @@ export class DesertFoliageManager {
   public explodeFoliageAt(center: THREE.Vector3, radius: number = 4.8): ExplodeFoliageResult {
     let goldBlasted = 0;
     let rocksBlasted = 0;
+    let woodBlasted = 0;
     let hydrationBlasted = 0;
     const destroyedPoints: Array<{ pos: THREE.Vector3; type: DebrisType }> = [];
 
@@ -594,19 +1097,19 @@ export class DesertFoliageManager {
       }
     }
 
-    // Boulders
-    if (this.boulderMesh) {
+    // Boulders & Rocks
+    for (const bMesh of this.boulderMeshes) {
       const matrix = new THREE.Matrix4();
       const pos = new THREE.Vector3();
       const scale = new THREE.Vector3();
-      for (let i = 0; i < this.boulderMesh.count; i++) {
-        this.boulderMesh.getMatrixAt(i, matrix);
+      for (let i = 0; i < bMesh.count; i++) {
+        bMesh.getMatrixAt(i, matrix);
         scale.setFromMatrixScale(matrix);
         if (scale.x > 0.05) {
           pos.setFromMatrixPosition(matrix);
           if (pos.distanceTo(center) <= radius) {
-            this.boulderMesh.setMatrixAt(i, this.zeroMatrix);
-            this.boulderMesh.instanceMatrix.needsUpdate = true;
+            bMesh.setMatrixAt(i, this.zeroMatrix);
+            bMesh.instanceMatrix.needsUpdate = true;
             rocksBlasted += 2;
             if (Math.random() < 0.35) goldBlasted += 1;
             destroyedPoints.push({ pos: pos.clone(), type: 'granite' });
@@ -616,18 +1119,18 @@ export class DesertFoliageManager {
     }
 
     // Outcroppings
-    if (this.outcroppingMesh) {
+    for (const ocMesh of this.outcroppingMeshes) {
       const matrix = new THREE.Matrix4();
       const pos = new THREE.Vector3();
       const scale = new THREE.Vector3();
-      for (let i = 0; i < this.outcroppingMesh.count; i++) {
-        this.outcroppingMesh.getMatrixAt(i, matrix);
+      for (let i = 0; i < ocMesh.count; i++) {
+        ocMesh.getMatrixAt(i, matrix);
         scale.setFromMatrixScale(matrix);
         if (scale.x > 0.05) {
           pos.setFromMatrixPosition(matrix);
           if (pos.distanceTo(center) <= radius * 1.3) {
-            this.outcroppingMesh.setMatrixAt(i, this.zeroMatrix);
-            this.outcroppingMesh.instanceMatrix.needsUpdate = true;
+            ocMesh.setMatrixAt(i, this.zeroMatrix);
+            ocMesh.instanceMatrix.needsUpdate = true;
             rocksBlasted += 3;
             destroyedPoints.push({ pos: pos.clone(), type: 'sandstone' });
           }
@@ -686,7 +1189,27 @@ export class DesertFoliageManager {
       }
     }
 
-    return { goldBlasted, rocksBlasted, hydrationBlasted, destroyedPoints };
+    // Desert Scrub Bushes (yield wood planks)
+    if (this.scrubMesh) {
+      const matrix = new THREE.Matrix4();
+      const pos = new THREE.Vector3();
+      const scale = new THREE.Vector3();
+      for (let i = 0; i < this.scrubMesh.count; i++) {
+        this.scrubMesh.getMatrixAt(i, matrix);
+        scale.setFromMatrixScale(matrix);
+        if (scale.x > 0.05) {
+          pos.setFromMatrixPosition(matrix);
+          if (pos.distanceTo(center) <= radius) {
+            this.scrubMesh.setMatrixAt(i, this.zeroMatrix);
+            this.scrubMesh.instanceMatrix.needsUpdate = true;
+            woodBlasted += 2;
+            destroyedPoints.push({ pos: pos.clone(), type: 'wood' });
+          }
+        }
+      }
+    }
+
+    return { goldBlasted, rocksBlasted, woodBlasted, hydrationBlasted, destroyedPoints };
   }
 
   public dispose() {
@@ -697,9 +1220,9 @@ export class DesertFoliageManager {
       this.scene.remove(this.barrelMesh);
       this.barrelMesh.geometry.dispose();
     }
-    if (this.boulderMesh) {
-      this.scene.remove(this.boulderMesh);
-      this.boulderMesh.geometry.dispose();
+    for (const bMesh of this.boulderMeshes) {
+      this.scene.remove(bMesh);
+      bMesh.geometry.dispose();
     }
     if (this.scrubMesh) {
       this.scene.remove(this.scrubMesh);
@@ -717,9 +1240,9 @@ export class DesertFoliageManager {
       this.scene.remove(this.chollaMesh);
       this.chollaMesh.geometry.dispose();
     }
-    if (this.outcroppingMesh) {
-      this.scene.remove(this.outcroppingMesh);
-      this.outcroppingMesh.geometry.dispose();
+    for (const ocMesh of this.outcroppingMeshes) {
+      this.scene.remove(ocMesh);
+      ocMesh.geometry.dispose();
     }
     for (const gd of this.goldDeposits) {
       this.scene.remove(gd.mesh);

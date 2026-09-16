@@ -2,21 +2,160 @@ import * as THREE from 'three';
 import { WeatherType } from '../types';
 import { soundEngine } from '../audio/soundEffects';
 
-interface CloudPuff {
+interface CloudCluster {
   mesh: THREE.Group;
+  topSprites: THREE.Sprite[];
+  baseSprites: THREE.Sprite[];
   speed: number;
   baseY: number;
+}
+
+/**
+ * Procedural soft radial cumulus puff texture.
+ * Generates organic, billowy fractal edges with zero sharp polygon boundaries.
+ */
+function createCloudPuffTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, 256, 256);
+
+  // Overlapping Gaussian billow puffs creating a soft, voluminous cumulus contour
+  const puffs = [
+    { x: 128, y: 128, r: 86, a: 0.85 },
+    { x: 96, y: 138, r: 72, a: 0.72 },
+    { x: 160, y: 134, r: 74, a: 0.72 },
+    { x: 128, y: 96, r: 68, a: 0.80 },
+    { x: 86, y: 110, r: 58, a: 0.62 },
+    { x: 168, y: 106, r: 60, a: 0.62 },
+    { x: 128, y: 162, r: 70, a: 0.55 },
+    { x: 68, y: 142, r: 48, a: 0.45 },
+    { x: 188, y: 140, r: 50, a: 0.45 },
+    { x: 144, y: 78, r: 46, a: 0.52 },
+    { x: 108, y: 80, r: 44, a: 0.52 },
+  ];
+
+  puffs.forEach(({ x, y, r, a }) => {
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, `rgba(255, 255, 255, ${a})`);
+    grad.addColorStop(0.42, `rgba(255, 255, 255, ${a * 0.75})`);
+    grad.addColorStop(0.72, `rgba(255, 255, 255, ${a * 0.28})`);
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Optical solar corona texture.
+ * Features a pure circular radial falloff with high-intensity core and soft golden Mie halo.
+ * 100% circular — completely eliminates hard square quad edges.
+ */
+function createSunCoronaTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, 512, 512);
+
+  const cx = 256;
+  const cy = 256;
+
+  // Outer atmospheric corona halo
+  const outerGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 252);
+  outerGrad.addColorStop(0, 'rgba(255, 255, 242, 0.95)');
+  outerGrad.addColorStop(0.08, 'rgba(255, 242, 190, 0.82)');
+  outerGrad.addColorStop(0.24, 'rgba(255, 218, 130, 0.45)');
+  outerGrad.addColorStop(0.48, 'rgba(255, 185, 80, 0.18)');
+  outerGrad.addColorStop(0.76, 'rgba(255, 155, 45, 0.05)');
+  outerGrad.addColorStop(1.0, 'rgba(255, 125, 20, 0)');
+  ctx.fillStyle = outerGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 252, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Intense blinding white inner core
+  const innerGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 84);
+  innerGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+  innerGrad.addColorStop(0.35, 'rgba(255, 255, 235, 0.92)');
+  innerGrad.addColorStop(0.70, 'rgba(255, 242, 185, 0.45)');
+  innerGrad.addColorStop(1.0, 'rgba(255, 222, 140, 0)');
+  ctx.fillStyle = innerGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 84, 0, Math.PI * 2);
+  ctx.fill();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Optical lunar glow texture.
+ */
+function createMoonGlowTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, 256, 256);
+
+  const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 124);
+  grad.addColorStop(0, 'rgba(235, 244, 255, 0.92)');
+  grad.addColorStop(0.20, 'rgba(195, 220, 255, 0.52)');
+  grad.addColorStop(0.55, 'rgba(150, 185, 245, 0.18)');
+  grad.addColorStop(0.85, 'rgba(110, 150, 235, 0.04)');
+  grad.addColorStop(1.0, 'rgba(90, 130, 220, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 export class AtmosphereManager {
   private scene: THREE.Scene;
   private skyDome: THREE.Mesh;
   private skyMaterial: THREE.ShaderMaterial;
-  private sunMesh: THREE.Mesh;
-  private sunGlow: THREE.Mesh;
-  private moonMesh: THREE.Mesh;
+
+  // Celestial bodies (Grouped and anchored to optical infinity)
+  private sunGroup: THREE.Group = new THREE.Group();
+  private sunDiscMesh: THREE.Mesh;
+  private sunCoronaSprite: THREE.Sprite;
+  private sunOuterGlowSprite: THREE.Sprite;
+
+  private moonGroup: THREE.Group = new THREE.Group();
+  private moonDiscMesh: THREE.Mesh;
+  private moonGlowSprite: THREE.Sprite;
+
+  // Volumetric procedural cloud banks
   private cloudGroup: THREE.Group = new THREE.Group();
-  private clouds: CloudPuff[] = [];
+  private clouds: CloudCluster[] = [];
+  private cloudTexture: THREE.CanvasTexture;
+  private sunTexture: THREE.CanvasTexture;
+  private moonTexture: THREE.CanvasTexture;
+
+  // Rain and storm lightning
   private rainGroup: THREE.Group = new THREE.Group();
   private rainParticles: THREE.Points | null = null;
   private rainPositions: Float32Array | null = null;
@@ -33,23 +172,31 @@ export class AtmosphereManager {
   constructor(scene: THREE.Scene) {
     this.scene = scene;
 
-    // 1. Realistic Atmospheric Scattering Sky Dome
-    const skyGeo = new THREE.SphereGeometry(550, 32, 24);
+    // Generate high-fidelity procedural textures
+    this.cloudTexture = createCloudPuffTexture();
+    this.sunTexture = createSunCoronaTexture();
+    this.moonTexture = createMoonGlowTexture();
+
+    // 1. Physically Accurate Atmospheric Scattering Sky Dome
+    // Uses camera-relative ray directions so the sky dome is 100% immune to camera position distortion
+    const skyGeo = new THREE.SphereGeometry(550, 48, 32);
     this.skyMaterial = new THREE.ShaderMaterial({
       vertexShader: `
-        varying vec3 vWorldPosition;
+        varying vec3 vDirection;
         void main() {
+          // Since the sky dome is positioned at the camera/player center,
+          // the sphere vertex position represents the pure angular view ray direction!
+          vDirection = position;
           vec4 worldPos = modelMatrix * vec4(position, 1.0);
-          vWorldPosition = worldPos.xyz;
           gl_Position = projectionMatrix * viewMatrix * worldPos;
         }
       `,
       fragmentShader: `
-        uniform vec3 uSunPosition;
+        uniform vec3 uSunPosition; // Normalized sun direction vector
         uniform float uTime;
         uniform float uTimeOfDay;
-        uniform float uWeather; // 0=clear/clouds, 1=sunset, 2=night, 3=storm
-        varying vec3 vWorldPosition;
+        uniform float uWeather; // 0=clear/clouds, 1=sunset/golden hour, 2=night, 3=storm
+        varying vec3 vDirection;
 
         float starHash(vec3 p) {
           p = fract(p * 0.3183099 + 0.1);
@@ -58,57 +205,72 @@ export class AtmosphereManager {
         }
 
         void main() {
-          vec3 viewDir = normalize(vWorldPosition);
+          vec3 viewDir = normalize(vDirection);
           vec3 sunDir = normalize(uSunPosition);
           float sunDot = max(dot(viewDir, sunDir), 0.0);
           float horizon = clamp(viewDir.y, 0.0, 1.0);
 
           // Rayleigh scattering gradient curves
-          vec3 zenith = vec3(0.16, 0.42, 0.85);
-          vec3 horizonCol = vec3(0.92, 0.78, 0.62);
+          // Default: Brilliant Arizona desert azure sky
+          vec3 zenith = vec3(0.18, 0.44, 0.88);
+          vec3 horizonCol = vec3(0.76, 0.86, 0.94);
 
-          if (uTimeOfDay >= 15.5 && uTimeOfDay <= 19.5) {
-            // Golden hour into Arizona alpenglow sunset
-            float t = (uTimeOfDay - 15.5) / 4.0;
-            zenith = mix(vec3(0.18, 0.36, 0.68), vec3(0.08, 0.05, 0.22), t);
-            horizonCol = mix(vec3(0.98, 0.56, 0.18), vec3(0.85, 0.22, 0.12), t);
+          if (uTimeOfDay >= 15.0 && uTimeOfDay <= 19.5) {
+            // Golden hour into Arizona alpenglow and desert twilight
+            float t = clamp((uTimeOfDay - 15.0) / 4.5, 0.0, 1.0);
+            zenith = mix(vec3(0.19, 0.36, 0.68), vec3(0.08, 0.07, 0.22), t);
+            horizonCol = mix(vec3(0.98, 0.62, 0.24), vec3(0.88, 0.28, 0.12), t);
           } else if (uTimeOfDay > 19.5 || uTimeOfDay < 5.5) {
-            // Deep starlit desert night
-            zenith = vec3(0.012, 0.018, 0.045);
-            horizonCol = vec3(0.035, 0.045, 0.095);
+            // Pristine starlit desert night
+            zenith = vec3(0.012, 0.016, 0.038);
+            horizonCol = vec3(0.032, 0.042, 0.088);
           }
 
           if (uWeather > 2.5) {
             // Monsoonal thunderstorm sky
-            zenith = vec3(0.11, 0.13, 0.16);
-            horizonCol = vec3(0.18, 0.20, 0.24);
+            zenith = vec3(0.13, 0.15, 0.19);
+            horizonCol = vec3(0.20, 0.22, 0.26);
           }
 
-          vec3 sky = mix(horizonCol, zenith, pow(horizon, 0.48));
+          vec3 sky = mix(horizonCol, zenith, pow(horizon, 0.52));
 
-          // Physical Sun Disc and Mie scattering glow
-          if (sunDir.y > -0.05 && uWeather < 2.5) {
-            float sunHalo = pow(sunDot, 160.0) * 3.5 + pow(sunDot, 14.0) * 0.45;
-            vec3 haloCol = (uTimeOfDay >= 15.5 && uTimeOfDay <= 19.5) ? vec3(1.0, 0.58, 0.22) : vec3(1.0, 0.95, 0.84);
-            sky += haloCol * sunHalo;
+          // Physical Sun Disc and Mie scattering corona on the celestial sky dome
+          if (sunDir.y > -0.08 && uWeather < 2.5) {
+            // Razor-sharp optical solar disc with soft limb darkening
+            float sunDisc = smoothstep(0.9993, 0.9998, sunDot);
+
+            // Forward Mie atmospheric scattering corona
+            float innerCorona = pow(sunDot, 320.0) * 3.5;
+            float outerCorona = pow(sunDot, 24.0) * 0.75;
+            float wideGlare = pow(sunDot, 5.0) * 0.18;
+
+            vec3 sunHue = (uTimeOfDay >= 15.0 && uTimeOfDay <= 19.5)
+              ? vec3(1.0, 0.76, 0.38)
+              : vec3(1.0, 0.96, 0.88);
+
+            sky += sunHue * (innerCorona + outerCorona + wideGlare);
+            sky += vec3(1.0, 1.0, 0.95) * sunDisc * 2.5;
           }
 
-          // Celestial Night Stars and Procedural Milky Way Lane
-          if (uTimeOfDay > 19.5 || uTimeOfDay < 5.5) {
-            float nightFade = (uTimeOfDay > 19.5 && uTimeOfDay < 21.0)
-              ? (uTimeOfDay - 19.5) / 1.5
-              : (uTimeOfDay >= 4.5 && uTimeOfDay <= 5.5 ? (5.5 - uTimeOfDay) : 1.0);
+          // Celestial Night Stars and Procedural Milky Way
+          if (uTimeOfDay > 19.2 || uTimeOfDay < 5.8) {
+            float nightFade = 1.0;
+            if (uTimeOfDay >= 19.2 && uTimeOfDay < 20.8) {
+              nightFade = (uTimeOfDay - 19.2) / 1.6;
+            } else if (uTimeOfDay >= 4.8 && uTimeOfDay <= 5.8) {
+              nightFade = (5.8 - uTimeOfDay);
+            }
 
             float star = step(0.9962, starHash(floor(viewDir * 420.0))) * nightFade;
-            float milkyBand = pow(max(0.0, 1.0 - abs(viewDir.x * 0.72 + viewDir.z * 0.69)), 5.5) * 0.28 * nightFade;
-            sky += vec3(0.94, 0.96, 1.0) * star + vec3(0.68, 0.76, 0.98) * milkyBand;
+            float milkyBand = pow(max(0.0, 1.0 - abs(viewDir.x * 0.72 + viewDir.z * 0.69)), 5.5) * 0.30 * nightFade;
+            sky += vec3(0.94, 0.96, 1.0) * star + vec3(0.70, 0.78, 0.98) * milkyBand;
           }
 
           gl_FragColor = vec4(sky, 1.0);
         }
       `,
       uniforms: {
-        uSunPosition: { value: new THREE.Vector3(100, 150, 100) },
+        uSunPosition: { value: new THREE.Vector3(0.6, 0.7, 0.3).normalize() },
         uTime: { value: 0 },
         uTimeOfDay: { value: 16.0 },
         uWeather: { value: 0 },
@@ -120,56 +282,72 @@ export class AtmosphereManager {
     this.skyDome = new THREE.Mesh(skyGeo, this.skyMaterial);
     this.scene.add(this.skyDome);
 
-    // 2. Visible Sun disc & Solar Corona
-    const sunGeo = new THREE.SphereGeometry(6.5, 16, 16);
-    const sunMat = new THREE.MeshBasicMaterial({
-      color: 0xfffaed,
+    // 2. Optical Sun System (Spherical Core + Circular Camera-Facing Sprites)
+    // Never uses untextured flat square PlaneGeometry quads!
+    const sunDiscGeo = new THREE.SphereGeometry(6.0, 32, 32);
+    const sunDiscMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
       fog: false,
     });
-    this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
+    this.sunDiscMesh = new THREE.Mesh(sunDiscGeo, sunDiscMat);
+    this.sunGroup.add(this.sunDiscMesh);
 
-    // Glowing halo around sun
-    const glowGeo = new THREE.PlaneGeometry(36, 36);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: 0xffcc44,
-      transparent: true,
-      opacity: 0.45,
+    // Luminous inner corona flare sprite
+    const coronaMat = new THREE.SpriteMaterial({
+      map: this.sunTexture,
       blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.92,
       fog: false,
       depthWrite: false,
     });
-    this.sunGlow = new THREE.Mesh(glowGeo, glowMat);
-    this.sunMesh.add(this.sunGlow);
-    this.scene.add(this.sunMesh);
+    this.sunCoronaSprite = new THREE.Sprite(coronaMat);
+    this.sunCoronaSprite.scale.set(58, 58, 1);
+    this.sunGroup.add(this.sunCoronaSprite);
 
-    // 3. Visible Moon
-    const moonGeo = new THREE.SphereGeometry(5.0, 16, 16);
-    const moonMat = new THREE.MeshBasicMaterial({
-      color: 0xe0e7ff,
-      fog: false,
-    });
-    this.moonMesh = new THREE.Mesh(moonGeo, moonMat);
-
-    const moonGlowGeo = new THREE.PlaneGeometry(28, 28);
-    const moonGlowMat = new THREE.MeshBasicMaterial({
-      color: 0x818cf8,
-      transparent: true,
-      opacity: 0.35,
+    // Atmospheric wide bloom sprite
+    const outerGlowMat = new THREE.SpriteMaterial({
+      map: this.sunTexture,
       blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.38,
       fog: false,
       depthWrite: false,
     });
-    const moonGlow = new THREE.Mesh(moonGlowGeo, moonGlowMat);
-    this.moonMesh.add(moonGlow);
-    this.scene.add(this.moonMesh);
+    this.sunOuterGlowSprite = new THREE.Sprite(outerGlowMat);
+    this.sunOuterGlowSprite.scale.set(130, 130, 1);
+    this.sunGroup.add(this.sunOuterGlowSprite);
 
-    // 4. Volumetric Desert Clouds
+    this.scene.add(this.sunGroup);
+
+    // 3. Optical Moon System
+    const moonDiscGeo = new THREE.SphereGeometry(5.2, 32, 32);
+    const moonDiscMat = new THREE.MeshBasicMaterial({
+      color: 0xe2e8f0,
+      fog: false,
+    });
+    this.moonDiscMesh = new THREE.Mesh(moonDiscGeo, moonDiscMat);
+    this.moonGroup.add(this.moonDiscMesh);
+
+    const moonGlowMat = new THREE.SpriteMaterial({
+      map: this.moonTexture,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      opacity: 0.55,
+      fog: false,
+      depthWrite: false,
+    });
+    this.moonGlowSprite = new THREE.Sprite(moonGlowMat);
+    this.moonGlowSprite.scale.set(42, 42, 1);
+    this.moonGroup.add(this.moonGlowSprite);
+
+    this.scene.add(this.moonGroup);
+
+    // 4. Volumetric Realistic Desert Clouds
     this.scene.add(this.cloudGroup);
-    this.spawnClouds();
+    this.spawnRealisticClouds();
 
-    // 5. Rain & Storm System
+    // 5. Rain Particle System
     this.scene.add(this.rainGroup);
     this.initRainSystem();
 
@@ -181,47 +359,73 @@ export class AtmosphereManager {
     this.updateAtmosphere(this.timeOfDay, this.weather);
   }
 
-  // --- PROCEDURAL CLOUDS ---
-  private spawnClouds() {
-    const cloudMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.9,
-      metalness: 0.05,
-      transparent: true,
-      opacity: 0.88,
-      flatShading: false,
-    });
+  /**
+   * Spawns natural cumulus cloud formations.
+   * Built with layered, soft camera-facing billow puffs.
+   * Explicitly sets fog: false so clouds are NEVER stained brown by low-altitude ground dust fog!
+   */
+  private spawnRealisticClouds() {
+    const cloudClusterCount = 14;
 
-    // Spawn 14 puffy drifting cloud formations across the sky dome
-    for (let i = 0; i < 14; i++) {
-      const group = new THREE.Group();
-      const puffCount = 5 + Math.floor(Math.random() * 5);
+    for (let c = 0; c < cloudClusterCount; c++) {
+      const clusterGroup = new THREE.Group();
+      const topSprites: THREE.Sprite[] = [];
+      const baseSprites: THREE.Sprite[] = [];
+
+      // Organic cluster composition: 10 to 14 overlapping billow puffs
+      const puffCount = 10 + Math.floor(Math.random() * 5);
+      const clusterWidth = 65 + Math.random() * 45;
+      const clusterDepth = 45 + Math.random() * 30;
 
       for (let p = 0; p < puffCount; p++) {
-        const radius = 9 + Math.random() * 9;
-        const puff = new THREE.Mesh(
-          new THREE.DodecahedronGeometry(radius, 1),
-          cloudMat.clone()
-        );
-        puff.position.set(
-          (p - puffCount / 2) * 11 + (Math.random() - 0.5) * 6,
-          (Math.random() - 0.5) * 4,
-          (Math.random() - 0.5) * 12
-        );
-        puff.scale.set(1.2, 0.65 + Math.random() * 0.25, 1.0);
-        group.add(puff);
+        const isTopBillow = p > puffCount * 0.45;
+        const puffSize = 28 + Math.random() * 22;
+
+        const puffMat = new THREE.SpriteMaterial({
+          map: this.cloudTexture,
+          transparent: true,
+          opacity: isTopBillow ? 0.88 : 0.82,
+          fog: false, // CRITICAL: Clouds sit high in troposphere and must NOT absorb ground dust fog
+          depthWrite: false,
+        });
+
+        const sprite = new THREE.Sprite(puffMat);
+        sprite.scale.set(puffSize, puffSize * (0.75 + Math.random() * 0.25), 1);
+
+        // Position puffs organically: flat base along bottom, rising dome billows in center/top
+        const xOffset = (Math.random() - 0.5) * clusterWidth;
+        const zOffset = (Math.random() - 0.5) * clusterDepth;
+        // Central puffs billow higher
+        const distFromCenter = Math.hypot(xOffset / clusterWidth, zOffset / clusterDepth);
+        const domeElevation = Math.max(0, 1.0 - distFromCenter * 1.6) * 14;
+        const yOffset = isTopBillow ? (domeElevation + Math.random() * 4) : (-4 + Math.random() * 3);
+
+        sprite.position.set(xOffset, yOffset, zOffset);
+        clusterGroup.add(sprite);
+
+        if (isTopBillow) {
+          topSprites.push(sprite);
+        } else {
+          baseSprites.push(sprite);
+        }
       }
 
-      const x = (Math.random() - 0.5) * 360;
-      const z = (Math.random() - 0.5) * 360;
-      const y = 85 + Math.random() * 16;
-      group.position.set(x, y, z);
+      // Distribute across the vast desert sky dome
+      const angle = (c / cloudClusterCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+      const dist = 140 + Math.random() * 180;
+      const x = Math.cos(angle) * dist;
+      const z = Math.sin(angle) * dist;
+      const altitude = 135 + Math.random() * 35; // Lofty altitude above all mountains
 
-      this.cloudGroup.add(group);
+      clusterGroup.position.set(x, altitude, z);
+      this.cloudGroup.add(clusterGroup);
+
       this.clouds.push({
-        mesh: group,
-        speed: 1.8 + Math.random() * 1.5,
-        baseY: y,
+        mesh: clusterGroup,
+        topSprites,
+        baseSprites,
+        speed: 1.2 + Math.random() * 1.6,
+        baseY: altitude,
       });
     }
   }
@@ -258,7 +462,6 @@ export class AtmosphereManager {
     this.lightningActiveTimer = 0.12;
     this.lightningLight.intensity = 5.5;
 
-    // Random bolt origin over mountain peaks
     const startX = (Math.random() - 0.5) * 120 + 40;
     const startZ = (Math.random() - 0.5) * 120;
     const startY = 85;
@@ -271,7 +474,6 @@ export class AtmosphereManager {
       this.lightningMesh = null;
     }
 
-    // Procedural jagged lightning bolt
     const points: THREE.Vector3[] = [];
     let curX = startX;
     let curY = startY;
@@ -298,7 +500,9 @@ export class AtmosphereManager {
     soundEngine.playThunder();
   }
 
-  // --- ATMOSPHERE & LIGHTING UPDATE ---
+  /**
+   * Synchronizes lighting, fog, and cloud coloration with the astronomical time and weather.
+   */
   public updateAtmosphere(
     time: number,
     weather: WeatherType,
@@ -308,152 +512,137 @@ export class AtmosphereManager {
     this.timeOfDay = time;
     this.weather = weather;
 
-    // 1. Sun & Moon Orbital Trajectory
-    // Solar angle: 0 at 6am (east), Math.PI/2 at 12pm (noon zenith), Math.PI at 18pm (west)
+    // 1. Calculate astronomical solar vector
     const solarFraction = (time - 6) / 12;
     const sunAngle = solarFraction * Math.PI;
-    const orbitDist = 260;
+    const sunY = Math.sin(sunAngle) * 0.88 + 0.12;
+    const sunDir = new THREE.Vector3(
+      Math.cos(sunAngle),
+      sunY,
+      Math.sin(sunAngle * 0.5) * 0.38
+    ).normalize();
 
-    const sunX = Math.cos(sunAngle) * orbitDist;
-    const sunY = Math.sin(sunAngle) * 160 + 20;
-    const sunZ = Math.sin(sunAngle * 0.5) * 70;
+    const isSunUp = sunY > 0.02;
+    this.sunGroup.visible = isSunUp && weather !== 'storm';
+    this.moonGroup.visible = !isSunUp || weather === 'night';
 
-    this.sunMesh.position.set(sunX, sunY, sunZ);
-    this.sunGlow.lookAt(0, 0, 0);
-
-    // Lunar orbit (opposite the sun)
-    const lunarFraction = (time - 18) / 12;
-    const moonAngle = lunarFraction * Math.PI;
-    const moonX = Math.cos(moonAngle) * orbitDist;
-    const moonY = Math.sin(moonAngle) * 150 + 20;
-    const moonZ = Math.sin(moonAngle * 0.5) * 70;
-
-    this.moonMesh.position.set(moonX, moonY, moonZ);
-    this.moonMesh.children[0]?.lookAt(0, 0, 0);
-
-    // Update shader uniforms
-    this.skyMaterial.uniforms.uSunPosition.value.set(sunX, sunY, sunZ);
+    // Update sky shader uniforms
+    this.skyMaterial.uniforms.uSunPosition.value.copy(sunDir);
     this.skyMaterial.uniforms.uTimeOfDay.value = time;
+
     let weatherCode = 0;
-    if (weather === 'sunset' || (time >= 15.5 && time <= 19.5)) weatherCode = 1;
+    if (weather === 'sunset' || (time >= 15.0 && time <= 19.5)) weatherCode = 1;
     if (weather === 'night' || time < 5.5 || time > 19.5) weatherCode = 2;
     if (weather === 'storm') weatherCode = 3;
     this.skyMaterial.uniforms.uWeather.value = weatherCode;
 
-    if (sunLight) {
-      sunLight.position.set(sunX, Math.max(sunY, -30), sunZ);
-    }
-
-    const isSunUp = sunY > 0;
-    this.sunMesh.visible = isSunUp && weather !== 'storm';
-    this.moonMesh.visible = !isSunUp || weather === 'night';
-
-    // 2. Weather & Color Schemes
+    // 2. Weather Lighting & Realistic Cloud Colors
     if (weather === 'storm') {
       // Monsoonal Desert Thunderstorm
-      this.scene.background = new THREE.Color(0x1a202c);
-      if (this.scene.fog) {
-        this.scene.fog.color = new THREE.Color(0x1a202c);
-        (this.scene.fog as THREE.Fog).near = 15;
-        (this.scene.fog as THREE.Fog).far = 180;
+      if (this.scene.fog && 'color' in this.scene.fog) {
+        this.scene.fog.color.setHex(0x1a202c);
+        if ('density' in this.scene.fog) (this.scene.fog as THREE.FogExp2).density = 0.0055;
       }
       if (sunLight) {
-        sunLight.color = new THREE.Color(0x64748b);
-        sunLight.intensity = 0.4;
+        sunLight.color.setHex(0x64748b);
+        sunLight.intensity = 0.45;
       }
       if (hemiLight) {
-        hemiLight.color = new THREE.Color(0x334155);
-        hemiLight.groundColor = new THREE.Color(0x0f172a);
+        hemiLight.color.setHex(0x334155);
+        hemiLight.groundColor.setHex(0x1e293b);
       }
       if (this.rainParticles) this.rainParticles.visible = true;
 
-      // Darken clouds to ominous storm clouds
-      this.cloudGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          (child.material as THREE.MeshStandardMaterial).color.setHex(0x374151);
-          (child.material as THREE.MeshStandardMaterial).opacity = 0.96;
-        }
-      });
-    } else if (weather === 'sunset' || (time >= 15.5 && time <= 19.5)) {
+      // Storm clouds: dramatic slate blue-gray with dark turbulent undersides
+      this.updateCloudColors(0x64748b, 0x334155, 0.94);
+
+    } else if (weather === 'sunset' || (time >= 15.0 && time <= 19.5)) {
       // Warm Arizona Golden Hour (Needle Shadow Legend at 16:00!)
-      const sunsetCol = new THREE.Color(0xd97706); // Rich copper
-      this.scene.background = sunsetCol;
-      if (this.scene.fog) {
-        this.scene.fog.color = new THREE.Color(0xd97706);
-        (this.scene.fog as THREE.Fog).near = 35;
-        (this.scene.fog as THREE.Fog).far = 320;
+      // Atmosphere has warm desert haze on mountains, but clouds reflect clean golden light
+      if (this.scene.fog && 'color' in this.scene.fog) {
+        this.scene.fog.color.setHex(0xd49b6a); // Clean desert atmospheric haze
+        if ('density' in this.scene.fog) (this.scene.fog as THREE.FogExp2).density = 0.0028;
       }
       if (sunLight) {
-        sunLight.color = new THREE.Color(0xff8c42);
+        sunLight.color.setHex(0xffaa5e);
         sunLight.intensity = 2.4;
       }
       if (hemiLight) {
-        hemiLight.color = new THREE.Color(0xfba465);
-        hemiLight.groundColor = new THREE.Color(0x6b2816);
+        hemiLight.color.setHex(0xffdfba); // Warm golden sky
+        hemiLight.groundColor.setHex(0x995830); // Warm terracotta ground bounce
       }
       if (this.rainParticles) this.rainParticles.visible = false;
 
-      // Golden tinged clouds
-      this.cloudGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          (child.material as THREE.MeshStandardMaterial).color.setHex(0xfecba1);
-          (child.material as THREE.MeshStandardMaterial).opacity = 0.88;
-        }
-      });
+      // Realistic Golden Hour Clouds:
+      // Tops: Radiant golden-ivory rim lighting from the low western sun
+      // Undersides: Atmospheric soft twilight periwinkle/slate — NEVER muddy brown!
+      this.updateCloudColors(0xfef3c7, 0xb0c0d6, 0.90);
+
     } else if (weather === 'night' || time < 5.5 || time > 19.5) {
       // Starry desert night
-      this.scene.background = new THREE.Color(0x050814);
-      if (this.scene.fog) {
-        this.scene.fog.color = new THREE.Color(0x050814);
-        (this.scene.fog as THREE.Fog).near = 40;
-        (this.scene.fog as THREE.Fog).far = 300;
+      if (this.scene.fog && 'color' in this.scene.fog) {
+        this.scene.fog.color.setHex(0x060913);
+        if ('density' in this.scene.fog) (this.scene.fog as THREE.FogExp2).density = 0.0035;
       }
       if (sunLight) {
-        sunLight.color = new THREE.Color(0x384a75);
+        sunLight.color.setHex(0x384a75);
         sunLight.intensity = 0.35;
       }
       if (hemiLight) {
-        hemiLight.color = new THREE.Color(0x1e293b);
-        hemiLight.groundColor = new THREE.Color(0x030712);
+        hemiLight.color.setHex(0x1e293b);
+        hemiLight.groundColor.setHex(0x0b0f19);
       }
       if (this.rainParticles) this.rainParticles.visible = false;
 
-      this.cloudGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          (child.material as THREE.MeshStandardMaterial).color.setHex(0x1e293b);
-          (child.material as THREE.MeshStandardMaterial).opacity = 0.7;
-        }
-      });
+      // Night clouds: Translucent silvery-indigo silhouettes under starlight
+      this.updateCloudColors(0x334155, 0x182030, 0.45);
+
     } else {
-      // Brilliant Arizona Blue Sky (Noon / Clear / Clouds)
-      const azureBlue = new THREE.Color(0x38bdf8);
-      this.scene.background = azureBlue;
-      if (this.scene.fog) {
-        this.scene.fog.color = new THREE.Color(0xdbeafe);
-        (this.scene.fog as THREE.Fog).near = 50;
-        (this.scene.fog as THREE.Fog).far = 350;
+      // Brilliant Clear Arizona Blue Sky (Midday)
+      if (this.scene.fog && 'color' in this.scene.fog) {
+        this.scene.fog.color.setHex(0xc2ddf8); // Soft distant blue horizon haze
+        if ('density' in this.scene.fog) (this.scene.fog as THREE.FogExp2).density = 0.0020;
       }
       if (sunLight) {
-        sunLight.color = new THREE.Color(0xfffaed);
+        sunLight.color.setHex(0xfffaed);
         sunLight.intensity = 2.0;
       }
       if (hemiLight) {
-        hemiLight.color = new THREE.Color(0xe0f2fe);
-        hemiLight.groundColor = new THREE.Color(0x78350f);
+        hemiLight.color.setHex(0xe0f2fe);
+        hemiLight.groundColor.setHex(0x94653d);
       }
       if (this.rainParticles) this.rainParticles.visible = false;
 
-      // Clean puffy white clouds
-      this.cloudGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          (child.material as THREE.MeshStandardMaterial).color.setHex(0xffffff);
-          (child.material as THREE.MeshStandardMaterial).opacity = weather === 'clouds' ? 0.95 : 0.75;
-        }
-      });
+      // Daylight clouds: Crisp radiant pure white tops with soft ambient azure shadows
+      this.updateCloudColors(0xffffff, 0xdbeafe, weather === 'clouds' ? 0.94 : 0.82);
     }
   }
 
-  // --- ANIMATION UPDATE LOOP ---
+  /**
+   * Colors the cloud formations with physical lighting.
+   * Tops reflect direct sunlight; undersides reflect diffuse ambient tropospheric skylight.
+   */
+  private updateCloudColors(topHex: number, baseHex: number, opacity: number) {
+    const topCol = new THREE.Color(topHex);
+    const baseCol = new THREE.Color(baseHex);
+
+    this.clouds.forEach((c) => {
+      c.topSprites.forEach((s) => {
+        s.material.color.copy(topCol);
+        s.material.opacity = opacity;
+      });
+      c.baseSprites.forEach((s) => {
+        s.material.color.copy(baseCol);
+        s.material.opacity = opacity * 0.92;
+      });
+    });
+  }
+
+  /**
+   * Main per-frame animation loop.
+   * Anchors the Sky Dome, Sun, and Moon relative to the player's camera position.
+   * This guarantees ZERO parallax displacement between the shader sky and 3D celestial bodies!
+   */
   public update(
     delta: number,
     playerPos: THREE.Vector3,
@@ -466,25 +655,51 @@ export class AtmosphereManager {
     // Follow player so sky dome is always centered on camera
     this.skyDome.position.copy(playerPos);
 
-    // 1. Drifting Clouds
+    // Compute celestial orbit vectors
+    const solarFraction = (this.timeOfDay - 6) / 12;
+    const sunAngle = solarFraction * Math.PI;
+    const sunY = Math.sin(sunAngle) * 0.88 + 0.12;
+    const sunDir = new THREE.Vector3(
+      Math.cos(sunAngle),
+      sunY,
+      Math.sin(sunAngle * 0.5) * 0.38
+    ).normalize();
+
+    const moonDir = sunDir.clone().negate();
+
+    // Place Sun and Moon at optical infinity (450 units) relative to player position
+    // This aligns the optical solar disc, corona sprites, and sky shader flawlessly
+    this.sunGroup.position.copy(playerPos).addScaledVector(sunDir, 450);
+    this.moonGroup.position.copy(playerPos).addScaledVector(moonDir, 450);
+
+    // Keep shader uniform aligned with true celestial vector
+    this.skyMaterial.uniforms.uSunPosition.value.copy(sunDir);
+
+    // Align directional shadow-casting sunlight with celestial angle
+    if (sunLight) {
+      sunLight.position.copy(playerPos).addScaledVector(sunDir, 160);
+      sunLight.target.position.copy(playerPos);
+      sunLight.target.updateMatrixWorld();
+    }
+
+    // 1. Drifting Clouds with graceful wrap-around
     this.clouds.forEach((c) => {
       c.mesh.position.x += c.speed * delta;
-      if (c.mesh.position.x > 220) {
-        c.mesh.position.x = -220;
+      if (c.mesh.position.x > 260) {
+        c.mesh.position.x = -260;
         c.mesh.position.z = (Math.random() - 0.5) * 360;
       }
     });
 
-    // 2. Storm Rain Animation & Lightning
+    // 2. Storm Rain & Lightning
     if (this.weather === 'storm') {
       this.stormTimer += delta;
 
-      // Move rain around player
       if (this.rainParticles && this.rainPositions) {
         const count = this.rainPositions.length / 3;
         for (let i = 0; i < count; i++) {
           this.rainPositions[i * 3 + 1] -= 42 * delta; // Falling velocity
-          this.rainPositions[i * 3] += 5 * delta; // Wind angle
+          this.rainPositions[i * 3] += 6 * delta; // Wind angle
 
           if (this.rainPositions[i * 3 + 1] < 0) {
             this.rainPositions[i * 3 + 1] = 65;
@@ -495,14 +710,12 @@ export class AtmosphereManager {
         this.rainParticles.geometry.attributes.position.needsUpdate = true;
       }
 
-      // Lightning strike schedule
       if (this.stormTimer >= this.nextLightningTime) {
         this.triggerLightningFlash();
         this.stormTimer = 0;
         this.nextLightningTime = 3.5 + Math.random() * 5.5;
       }
 
-      // Lightning decay
       if (this.lightningActiveTimer > 0) {
         this.lightningActiveTimer -= delta;
         if (this.lightningActiveTimer <= 0) {
@@ -521,24 +734,42 @@ export class AtmosphereManager {
     this.scene.remove(this.skyDome);
     this.skyDome.geometry.dispose();
     this.skyMaterial.dispose();
-    this.scene.remove(this.sunMesh);
-    this.scene.remove(this.moonMesh);
+
+    this.scene.remove(this.sunGroup);
+    this.sunDiscMesh.geometry.dispose();
+    (this.sunDiscMesh.material as THREE.Material).dispose();
+    this.sunCoronaSprite.material.dispose();
+    this.sunOuterGlowSprite.material.dispose();
+
+    this.scene.remove(this.moonGroup);
+    this.moonDiscMesh.geometry.dispose();
+    (this.moonDiscMesh.material as THREE.Material).dispose();
+    this.moonGlowSprite.material.dispose();
+
     this.scene.remove(this.cloudGroup);
+    this.clouds.forEach((c) => {
+      c.mesh.traverse((child) => {
+        if (child instanceof THREE.Sprite) {
+          child.material.dispose();
+        }
+      });
+    });
+    this.clouds = [];
+
+    this.cloudTexture.dispose();
+    this.sunTexture.dispose();
+    this.moonTexture.dispose();
+
     this.scene.remove(this.rainGroup);
+    if (this.rainParticles) {
+      this.rainParticles.geometry.dispose();
+      (this.rainParticles.material as THREE.Material).dispose();
+    }
+
     this.scene.remove(this.lightningLight);
     if (this.lightningMesh) {
       this.scene.remove(this.lightningMesh);
       this.lightningMesh.geometry.dispose();
     }
-    this.clouds.forEach((c) => {
-      c.mesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
-          else child.material.dispose();
-        }
-      });
-    });
-    this.clouds = [];
   }
 }

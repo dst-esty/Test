@@ -77,28 +77,56 @@ let activeTerrainMesh: THREE.Mesh | null = null;
  * Calculates the pristine, undisturbed procedural elevation of the Superstition Mountains terrain at (x, z).
  */
 export function getBaseTerrainHeight(x: number, z: number): number {
-  // Boundary falloff so the world feels like a mountain basin surrounded by imposing outer ridges
-  const distFromCenter = Math.hypot(x, z);
-  const boundaryFalloff = Math.max(0, (distFromCenter - 265) * 0.45);
-
   // Canyon valley & ridge systems
   const scale1 = 0.008;
-  const broadRidges = fbm(x * scale1, z * scale1, 4) * 38;
+  const broadRidges = fbm(x * scale1, z * scale1, 4) * 36;
 
   // Rugged red rock strata & mesas
-  const scale2 = 0.025;
-  const rockyCrags = Math.pow(fbm(x * scale2 + 50, z * scale2 + 50, 3), 1.8) * 22;
+  const scale2 = 0.024;
+  const rockyCrags = Math.pow(fbm(x * scale2 + 50, z * scale2 + 50, 3), 1.7) * 24;
 
-  // Wash / arroyo carving: dry riverbeds and canyon passes
+  // Geological stepped cliff-and-bench terracing (resistant caprock & sandstone ledges)
+  let rawElev = broadRidges + rockyCrags;
+  if (rawElev > 6.0) {
+    const terraceStep = 5.2;
+    const terraceBlend = Math.min(1.0, (rawElev - 6.0) / 10.0);
+    const step = Math.floor(rawElev / terraceStep);
+    const frac = (rawElev % terraceStep) / terraceStep;
+    // S-curve creates vertical cliff drop-offs with broad plateau shelves
+    const terraced = step * terraceStep + Math.pow(frac, 2.6) * terraceStep;
+    rawElev = rawElev * (1.0 - terraceBlend * 0.55) + terraced * (terraceBlend * 0.55);
+  }
+
+  // Winding box canyon gorge network: carved canyon passes with sheer sidewalls
+  const canyonCurve = Math.sin(x * 0.013 + 0.9) * 38 + Math.cos(x * 0.006) * 20;
+  const distToCanyon = Math.abs(z - canyonCurve);
+  let canyonCarve = 0;
+  if (distToCanyon < 26 && Math.abs(x) < 210) {
+    const cFactor = 1.0 - distToCanyon / 26;
+    canyonCarve = -Math.pow(cFactor, 0.55) * 13.5;
+  }
+
+  // Wash / arroyo carving: dry riverbeds and alluvial fans
   const wash = Math.sin(x * 0.015 + z * 0.01) * Math.cos(z * 0.012 - x * 0.008);
-  const arroyo = Math.abs(wash) * -8;
+  const arroyo = Math.abs(wash) * -7.5;
+
+  // Imposing perimeter mountain wall with jagged volcanic ridges and knife-edge peaks (Superstition Massif)
+  const distFromCenter = Math.hypot(x, z);
+  let perimeterMountains = 0;
+  if (distFromCenter > 200) {
+    const pDist = (distFromCenter - 200) / 140;
+    // Ridged noise for sharp knife-edge crests and serrated crags
+    const ridgeNoise = (1.0 - Math.abs(fbm(x * 0.016, z * 0.016, 3) * 2.0 - 1.0)) * 32;
+    const cragPeaks = Math.pow(fbm(x * 0.026 + 140, z * 0.026 + 140, 4), 1.9) * 42;
+    perimeterMountains = Math.pow(pDist, 1.3) * (32 + ridgeNoise + cragPeaks);
+  }
 
   // Special landmark features:
-  // 1. Weaver's Needle base hill
+  // 1. Weaver's Needle base hill (prominent volcanic plug pedestal)
   const distToNeedle = Math.hypot(x - 80, z - 15);
   let needleBase = 0;
-  if (distToNeedle < 45) {
-    needleBase = Math.max(0, (45 - distToNeedle) * 1.1);
+  if (distToNeedle < 55) {
+    needleBase = Math.pow((55 - distToNeedle) / 55, 1.6) * 28;
   }
 
   // 2. Hieroglyphic canyon wash (oasis depression with pool)
@@ -119,11 +147,10 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   const distToMine = Math.hypot(x - 160, z - 110);
   let mineRidge = 0;
   if (distToMine < 50) {
-    // Ridge surrounding the hidden cove
     mineRidge = Math.sin(Math.atan2(z - 110, x - 160) * 2) * 5 + 6;
   }
 
-  const rawHeight = (broadRidges + rockyCrags + arroyo + needleBase + springDepression + mineRidge) * trailheadFlatten + boundaryFalloff;
+  const rawHeight = (rawElev + canyonCarve + arroyo + needleBase + springDepression + mineRidge) * trailheadFlatten + perimeterMountains;
 
   return Math.max(0.4, rawHeight);
 }
@@ -138,21 +165,31 @@ export function getTerrainHeight(x: number, z: number): number {
   for (let i = 0; i < activeDugHoles.length; i++) {
     const hole = activeDugHoles[i];
     const dist = Math.hypot(x - hole.x, z - hole.z);
-    if (dist < hole.radius) {
-      const norm = dist / hole.radius;
-      // Parabolic bowl indentation
-      const depression = hole.depth * (1.0 - norm * norm);
+
+    // Smooth, continuous excavation collar pit on 2D heightfield mesh:
+    // Surface collar depth gently sinks to ~2.2m (the collar staging bench), while the vertical shaft descends down to underground layers.
+    // The influence radius spans 5.8m+ to cover multiple grid vertices smoothly, with continuous cosine-squared falloff to eliminate mesh tearing.
+    const collarDepth = Math.min(2.2, Math.max(0.2, hole.depth * 0.55 + 0.15));
+    const collarRadius = Math.max(5.8, (hole.radius || 2.0) * 2.2);
+
+    if (dist < collarRadius) {
+      const norm = dist / collarRadius;
+      // Cosine-squared curve guarantees horizontal tangent at center (norm=0) and perimeter (norm=1)
+      const factor = Math.cos(norm * Math.PI * 0.5);
+      const depression = collarDepth * (factor * factor);
       h -= depression;
-    } else if (dist < hole.radius * 1.5) {
-      // Excavated dirt mound rim
-      const rimDist = (dist - hole.radius) / (hole.radius * 0.5);
-      const mound = Math.sin(rimDist * Math.PI) * (hole.depth * 0.15);
-      h += mound;
+
+      // Subtle excavated dirt spoil berm around perimeter rim
+      if (dist > collarRadius * 0.75) {
+        const rimPhase = (dist - collarRadius * 0.75) / (collarRadius * 0.25);
+        const rimMound = Math.sin(rimPhase * Math.PI) * (collarDepth * 0.08);
+        h += rimMound;
+      }
     }
   }
 
-  // Clamped so mining can never puncture below the world bedrock floor
-  return Math.max(0.4, h);
+  // Clamped so surface mining can never puncture through the world bedrock floor or tear geometry
+  return Math.max(2.5, h);
 }
 
 export interface GeologicalLayer {
@@ -166,80 +203,115 @@ export interface GeologicalLayer {
   debrisType: DebrisType;
   color: number;
   vertexColor: [number, number, number];
-  hardness: number; // 1: soft dirt, 2: tough caliche, 3: dense sandstone, 4: hard granite bedrock, 5: deep quartz bonanza
+  hardness: number; // 1: loose sand/dirt, 2: caliche, 3: volcanic tuff, 4: banded gneiss, 5: granite bedrock, 6: bonanza quartz
+  shoringRequirement: 'heavy' | 'moderate' | 'minimal' | 'none';
+  stabilityFactor: number; // 0.25 (sand) to 1.0 (granite/bonanza)
   description: string;
+  shoringAdvice: string;
 }
 
 export const GEOLOGICAL_STRATA_LAYERS: GeologicalLayer[] = [
   {
     index: 0,
-    id: 'strata_alluvial',
-    name: 'Alluvial Desert Loam & Wash Gravel',
-    strata: 'Surface Quaternary Silt & Wash Gravels',
+    id: 'strata_sand',
+    name: 'Desert Dune Sand & Wash Gravel',
+    strata: 'Loose Quaternary Aeolian Sand & Wash Alluvium',
     minDepth: 0.0,
-    maxDepth: 1.0,
+    maxDepth: 1.4,
     rockType: 'dirt',
     debrisType: 'dirt',
-    color: 0x825432,
-    vertexColor: [0.38, 0.24, 0.14],
+    color: 0xc89e67,
+    vertexColor: [0.78, 0.62, 0.40],
     hardness: 1,
-    description: 'Loose red silt, dry wash gravel, and desert loam. Rich in fine alluvial placer gold flakes.',
+    shoringRequirement: 'heavy',
+    stabilityFactor: 0.20,
+    description: 'Loose, shifting silica sand and dry wash gravel. Prone to swift sidewall slumping unless shored with wooden timber lagging.',
+    shoringAdvice: '⚠️ High Sand Slump Risk! Install wooden timber shoring with dense pine lagging boards to prevent sand cave-in.',
   },
   {
     index: 1,
     id: 'strata_caliche',
     name: 'Desert Caliche Hardpan (Duricrust)',
     strata: 'Chalky Calcite Cemented Carbonate Crust',
-    minDepth: 1.0,
-    maxDepth: 2.5,
+    minDepth: 1.4,
+    maxDepth: 2.8,
     rockType: 'calcite',
     debrisType: 'calcite',
     color: 0xede4d4,
     vertexColor: [0.72, 0.70, 0.62],
     hardness: 2,
-    description: 'Dense, pale calcium carbonate crust that early Spanish explorers and miners had to fracture.',
+    shoringRequirement: 'moderate',
+    stabilityFactor: 0.65,
+    description: 'Dense calcium carbonate duricrust. Moderately cohesive; requires timber sets past 2.2m depth.',
+    shoringAdvice: 'Moderate stability. Timber sets recommended beyond 2.2m depth.',
   },
   {
     index: 2,
-    id: 'strata_sandstone',
-    name: 'Hematite Red Sandstone Shelf',
-    strata: 'Oxidized Sedimentary Red Sandstone',
-    minDepth: 2.5,
+    id: 'strata_tuff',
+    name: 'Superstition Volcanic Tuff & Welded Ash',
+    strata: 'Welded Rhyolite Volcanic Ash-Flow Tuff',
+    minDepth: 2.8,
     maxDepth: 5.5,
     rockType: 'sandstone',
     debrisType: 'sandstone',
-    color: 0xc87d46,
-    vertexColor: [0.58, 0.24, 0.14],
+    color: 0x9e8874,
+    vertexColor: [0.60, 0.52, 0.44],
     hardness: 3,
-    description: 'Dense red sandstone stratum bearing rich quartz stringers, fossil tracks, and building stone.',
+    shoringRequirement: 'minimal',
+    stabilityFactor: 0.88,
+    description: 'Consolidated volcanic ash-flow tuff from ancient Superstition calderas. Solid, cohesive rock requiring minimal timber shoring.',
+    shoringAdvice: '🌋 Competent volcanic rock; naturally arched and self-supporting with minimal shoring needed.',
   },
   {
     index: 3,
-    id: 'strata_granite',
-    name: 'Precambrian Granite & Basalt Bedrock',
-    strata: 'Crystalline Igneous Basement Bedrock',
+    id: 'strata_gneiss',
+    name: 'Banded Gneiss & Metamorphic Schist',
+    strata: 'Precambrian Foliated Crystalline Gneiss',
     minDepth: 5.5,
-    maxDepth: 9.0,
+    maxDepth: 8.5,
     rockType: 'granite',
     debrisType: 'granite',
-    color: 0x5a504a,
-    vertexColor: [0.22, 0.20, 0.20],
+    color: 0x48494c,
+    vertexColor: [0.28, 0.29, 0.31],
     hardness: 4,
-    description: 'Extremely tough dark crystalline bedrock. Sparks fly under the pickaxe; yields quarry granite blocks.',
+    shoringRequirement: 'minimal',
+    stabilityFactor: 0.96,
+    description: 'Ancient Precambrian banded quartz-feldspar gneiss. Extremely rigid structural bedrock that holds high vertical faces without shoring.',
+    shoringAdvice: '💎 High compressive shear strength; very stable bedrock requiring little to no shoring.',
   },
   {
     index: 4,
+    id: 'strata_granite',
+    name: 'Peralta Granodiorite & Granite Bedrock',
+    strata: 'Massive Crystalline Igneous Pluton',
+    minDepth: 8.5,
+    maxDepth: 13.0,
+    rockType: 'granite',
+    debrisType: 'granite',
+    color: 0x363433,
+    vertexColor: [0.21, 0.20, 0.20],
+    hardness: 5,
+    shoringRequirement: 'none',
+    stabilityFactor: 1.0,
+    description: 'Massive plutonic granite bedrock. Compressive strength exceeds 22,000 PSI; 100% self-supporting subterranean rock walls with zero slump risk.',
+    shoringAdvice: '🛡️ Rock-solid crystalline granite. Zero shoring needed; self-supporting bedrock caverns.',
+  },
+  {
+    index: 5,
     id: 'strata_bonanza',
     name: 'Hydrothermal Quartz Gold Chimney',
-    strata: 'The Lost Dutchman Bonanza Quartz Lode',
-    minDepth: 9.0,
-    maxDepth: 18.0,
+    strata: 'Native Gold Wire in Crystalline Quartz Vein',
+    minDepth: 13.0,
+    maxDepth: 25.0,
     rockType: 'quartz_gold',
-    debrisType: 'quartz_gold',
-    color: 0xf5f0e1,
-    vertexColor: [0.94, 0.84, 0.45],
-    hardness: 5,
-    description: 'The ancient hydrothermal mother lode! Glistening milky quartz laden with crystalline electrum and raw rose gold.',
+    debrisType: 'quartz',
+    color: 0xf5df65,
+    vertexColor: [0.96, 0.88, 0.40],
+    hardness: 6,
+    shoringRequirement: 'none',
+    stabilityFactor: 1.0,
+    description: 'Legendary hydrothermal quartz bonanza vein glittering with native wire gold and tellurides.',
+    shoringAdvice: 'Native gold bonanza in competent quartz bedrock. 100% self-supporting.',
   },
 ];
 
@@ -282,6 +354,7 @@ export interface DigResult {
   layer: GeologicalLayer;
   strataMessage: string;
   rocksAwarded: number;
+  woodAwarded?: number;
   goldAwarded: number;
   itemFound?: {
     name: string;
@@ -296,6 +369,8 @@ export interface DigResult {
   needsShoring: boolean;
   slumpDamage: number; // Physical crush damage dealt to careless prospector
   slumpFatal: boolean; // True if overburden burial was completely fatal
+  shaftCollarEstablished?: boolean;
+  breakthroughToMine?: boolean;
 }
 
 /**
@@ -337,22 +412,33 @@ export function digHoleInTerrain(
     effectiveIncrement = Math.max(2.2, depthIncrement * 1.5);
   }
 
-  // Maximum excavation depth clamped to impermeable mountain bedrock floor
-  // Prevents digging through mountain walls to the other side or through the world floor
+  // Maximum surface open-trench excavation depth clamped to solid bedrock collar (~4.8m)
+  // Prevents the 2D surface heightfield mesh from tearing, stretching into the void, or puncturing the world floor.
+  // When a prospector reaches this depth, they establish a Subterranean Mine Shaft Collar that connects
+  // directly down into the 3D enclosed underground chambers (Layer 1, Layer 2, etc.)!
   const baseElev = getBaseTerrainHeight(x, z);
-  const maxSafeDepth = Math.max(2.2, Math.min(16.0, baseElev - 0.4));
+  const maxSafeDepth = Math.max(2.0, Math.min(4.8, baseElev - 2.5));
 
+  let shaftCollarEstablished = false;
   if (hole) {
-    hole.depth = Math.min(maxSafeDepth, hole.depth + effectiveIncrement);
+    const targetDepth = Math.min(maxSafeDepth, hole.depth + effectiveIncrement);
+    if ((targetDepth >= 1.0 && hole.depth < 1.0) || targetDepth >= maxSafeDepth - 0.05) {
+      shaftCollarEstablished = true;
+    }
+    hole.depth = targetDepth;
     // Expand pit radius as it gets deeper to maintain walkable natural excavation slope
-    hole.radius = Math.min(5.2, 1.85 + hole.depth * 0.18);
+    hole.radius = Math.min(4.8, 1.85 + hole.depth * 0.18);
     hole.excavationCount++;
   } else {
+    const initialDepth = Math.min(maxSafeDepth, effectiveIncrement);
+    if (initialDepth >= 1.0 || initialDepth >= maxSafeDepth - 0.05) {
+      shaftCollarEstablished = true;
+    }
     hole = {
       id: `hole_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       x,
       z,
-      depth: Math.min(maxSafeDepth, effectiveIncrement),
+      depth: initialDepth,
       radius,
       excavationCount: 1,
       createdAt: Date.now(),
@@ -372,6 +458,7 @@ export function digHoleInTerrain(
   let slumpFatal = false;
 
   const shoredUntil = hole.shoredUntilDepth || 0;
+  const currentStrata = getGeologicalLayerAtDepth(hole.depth);
 
   // Timber shoring secures the pit up to shoredUntilDepth!
   // Digging past that depth exposes un-shored lower walls, requiring the next tier of shoring.
@@ -381,37 +468,48 @@ export function digHoleInTerrain(
   } else {
     hole.isShored = false;
 
-    if (hole.depth >= 1.15) {
-      // Un-shored excavation: Lateral soil pressure & overburden tension on newly exposed deep earth
-      const unShoredDepth = hole.depth - shoredUntil;
-      const depthStress = 8.0 + Math.pow(unShoredDepth, 1.35) * 4.5;
-      hole.stability = Math.max(0, (hole.stability !== undefined ? hole.stability : 100) - depthStress);
-
-      if (hole.stability <= 25) {
-        // ⚠️ CATASTROPHIC PIT RIM SLUMP!
-        // Unsupported lower earth collapses back into the trench bottom!
-        slumpAmount = Math.min(hole.depth * 0.45, 0.4 + Math.random() * 0.5);
-        // Slump fills back un-shored bench, but timbers protect upper shored bench
-        hole.depth = Math.max(Math.max(0.85, shoredUntil), hole.depth - slumpAmount);
-        hole.totalSlumpedDepth = (hole.totalSlumpedDepth || 0) + slumpAmount;
-        hole.lastSlumpTime = Date.now();
-        slumpOccurred = true;
-
-        // Greedy/desperate prospectors digging without shoring face serious injury or fatal burial
-        if (hole.stability <= 5) {
-          // Digging blindly at zero stability triggers complete burial!
-          slumpDamage = 100;
-          slumpFatal = true;
-          hole.stability = 45;
-        } else {
-          slumpDamage = 35 + Math.floor(Math.random() * 25);
-          hole.stability = 50;
-        }
-      } else if (hole.stability <= 65) {
-        needsShoring = true;
-      }
+    // Strata-dependent geotechnical stability & slump resistance:
+    // - Granite (index 4) & Bonanza Quartz (index 5): Massive bedrock, 100% self-supporting, zero shoring needed!
+    // - Banded Gneiss (index 3): Dense crystalline metamorphic rock, virtually self-supporting.
+    // - Volcanic Tuff (index 2): Solid welded ash, competent rock, minimal shoring needed.
+    // - Caliche (index 1): Cemented hardpan, moderate slump risk past 2.2m.
+    // - Loose Sand (index 0): Unconsolidated sand/gravel wash, HIGH slump risk past 0.70m without wooden lagging!
+    if (currentStrata.shoringRequirement === 'none') {
+      hole.stability = 100; // Completely self-supporting bedrock!
     } else {
-      hole.stability = 100;
+      const rockResistance = currentStrata.stabilityFactor;
+      // In loose sand, even 0.70m without wooden timber lagging risks sidewall slumping.
+      // In volcanic tuff and gneiss, cohesive rock arches hold vertical faces naturally!
+      const criticalDepth =
+        currentStrata.id === 'strata_sand' ? 0.70 :
+        currentStrata.id === 'strata_caliche' ? 2.2 :
+        currentStrata.id === 'strata_tuff' ? 4.8 : 7.0;
+
+      if (hole.depth >= criticalDepth) {
+        const soilStressMultiplier = Math.max(0.02, 1.0 - rockResistance);
+        const unShoredDepth = hole.depth - shoredUntil;
+        const depthStress = (1.6 + Math.pow(unShoredDepth, 1.2) * 2.4) * soilStressMultiplier;
+        hole.stability = Math.max(0, (hole.stability !== undefined ? hole.stability : 100) - depthStress);
+
+        if (hole.stability <= 20) {
+          // Pit rim slump: unsupported earth slumps back down into trench
+          slumpAmount = Math.min(hole.depth * (currentStrata.id === 'strata_sand' ? 0.35 : 0.15), 0.20 + Math.random() * 0.20);
+          // Slump fills back un-shored bench, but timbers protect upper shored bench
+          hole.depth = Math.max(Math.max(0.5, shoredUntil), hole.depth - slumpAmount);
+          hole.totalSlumpedDepth = (hole.totalSlumpedDepth || 0) + slumpAmount;
+          hole.lastSlumpTime = Date.now();
+          slumpOccurred = true;
+
+          // Controlled, survivable slump damage (6-12 HP) with warning
+          slumpDamage = currentStrata.id === 'strata_sand' ? 5 + Math.floor(Math.random() * 5) : 8 + Math.floor(Math.random() * 5);
+          slumpFatal = false;
+          hole.stability = 50;
+        } else if (hole.stability <= 55) {
+          needsShoring = true;
+        }
+      } else {
+        hole.stability = 100;
+      }
     }
   }
 
@@ -430,54 +528,11 @@ export function digHoleInTerrain(
   }
 
   // Deform terrain vertices and shade excavation pit according to real geological strata in real-time
-  if (activeTerrainMesh) {
-    const geom = activeTerrainMesh.geometry as THREE.BufferGeometry;
-    const pos = geom.attributes.position as THREE.BufferAttribute;
-    const colors = geom.attributes.color as THREE.BufferAttribute;
-
-    const R = hole.radius * 1.65;
-    const segSize = TERRAIN_SEG_SIZE;
-    const minIX = Math.max(0, Math.floor((hole.x - R + HALF_WORLD_SIZE) / segSize));
-    const maxIX = Math.min(TERRAIN_SEGMENTS, Math.ceil((hole.x + R + HALF_WORLD_SIZE) / segSize));
-    const minIZ = Math.max(0, Math.floor((hole.z - R + HALF_WORLD_SIZE) / segSize));
-    const maxIZ = Math.min(TERRAIN_SEGMENTS, Math.ceil((hole.z + R + HALF_WORLD_SIZE) / segSize));
-
-    for (let iz = minIZ; iz <= maxIZ; iz++) {
-      for (let ix = minIX; ix <= maxIX; ix++) {
-        const i = iz * TERRAIN_VERTICES_PER_ROW + ix;
-        if (i < 0 || i >= pos.count) continue;
-        const vx = pos.getX(i);
-        const vz = pos.getZ(i);
-        const dist = Math.hypot(vx - hole.x, vz - hole.z);
-        if (dist <= R) {
-          const newY = getTerrainHeight(vx, vz);
-          pos.setY(i, newY);
-
-          if (dist <= hole.radius * 1.35 && colors) {
-            const baseY = getBaseTerrainHeight(vx, vz);
-            const vertexDepth = Math.max(0, baseY - newY);
-            const vLayer = getGeologicalLayerAtDepth(vertexDepth);
-            const blendFactor = Math.min(1.0, vertexDepth / 0.45);
-
-            // Interpolate vertex color smoothly towards the exposed geological rock strata color
-            colors.setXYZ(
-              i,
-              THREE.MathUtils.lerp(colors.getX(i), vLayer.vertexColor[0], blendFactor),
-              THREE.MathUtils.lerp(colors.getY(i), vLayer.vertexColor[1], blendFactor),
-              THREE.MathUtils.lerp(colors.getZ(i), vLayer.vertexColor[2], blendFactor)
-            );
-          }
-        }
-      }
-    }
-
-    pos.needsUpdate = true;
-    if (colors) colors.needsUpdate = true;
-    geom.computeVertexNormals();
-  }
+  updateTerrainMeshForHole(hole);
 
   // Calculate strata-specific rock yields
   let rocksAwarded = 1;
+  let woodAwarded = 0;
   if (newLayer.index === 1) rocksAwarded = 2; // Caliche crust blocks
   else if (newLayer.index === 2) rocksAwarded = 3; // Quarry sandstone
   else if (newLayer.index === 3) rocksAwarded = 4; // Granite blocks
@@ -489,27 +544,35 @@ export function digHoleInTerrain(
   const roll = Math.random();
 
   if (newLayer.index === 0) {
-    // Surface Alluvial Layer: fine placer gold, pioneer debris
-    if (roll < 0.40) {
-      goldAwarded = parseFloat((0.2 + Math.random() * 0.7).toFixed(1));
+    // Surface Dune Sand & Wash Alluvium: loose placer flakes & prospector debris
+    if (roll < 0.45) {
+      goldAwarded = parseFloat((0.3 + Math.random() * 0.8).toFixed(1));
       itemFound = {
-        name: `${goldAwarded} oz Alluvial Placer Flakes`,
+        name: `${goldAwarded} oz Desert Sand Placer Flakes`,
         type: 'gold',
         value: goldAwarded,
-        description: 'Fine alluvial gold flakes scooped from the wash gravels.',
+        description: 'Fine alluvial gold flakes sifted from loose desert dune sand and dry wash gravel.',
       };
-    } else if (roll < 0.55) {
+    } else if (roll < 0.62) {
       itemFound = {
         name: 'Pioneer Mule Horseshoe',
         type: 'relic',
         value: 0.5,
-        description: 'Hand-forged 1870s iron shoe from a prospector pack train.',
+        description: 'Hand-forged 1870s iron shoe from a prospector pack train buried in desert sand.',
+      };
+    } else if (roll < 0.85) {
+      woodAwarded = 1;
+      itemFound = {
+        name: 'Desert Ironwood Timber Plank',
+        type: 'mineral',
+        value: 0.5,
+        description: 'Seasoned desert timber plank salvaged from the dry wash—ready for wooden shoring in sand!',
       };
     }
   } else if (newLayer.index === 1) {
     // Caliche Hardpan: Spanish colonial relics & cemented coarse nuggets
     if (roll < 0.50) {
-      goldAwarded = parseFloat((0.8 + Math.random() * 1.4).toFixed(1));
+      goldAwarded = parseFloat((0.8 + Math.random() * 1.5).toFixed(1));
       itemFound = {
         name: `${goldAwarded} oz Caliche-Coated Gold Nugget`,
         type: 'gold',
@@ -526,51 +589,76 @@ export function digHoleInTerrain(
       itemFound = { name: picked.name, type: 'relic', value: picked.value, description: picked.desc };
     }
   } else if (newLayer.index === 2) {
-    // Red Sandstone Strata: Oxidized quartz veins & Peralta maps
-    if (roll < 0.60) {
-      goldAwarded = parseFloat((1.5 + Math.random() * 2.2).toFixed(1));
+    // Superstition Volcanic Tuff: Rhyolitic quartz stringers & volcanic geodes
+    if (roll < 0.58) {
+      goldAwarded = parseFloat((1.6 + Math.random() * 2.2).toFixed(1));
       itemFound = {
-        name: `${goldAwarded} oz Hematite Quartz-Gold Specimen`,
+        name: `${goldAwarded} oz Volcanic Tuff Gold Stringer`,
         type: 'gold',
         value: goldAwarded,
-        description: 'Rich wire gold stringer embedded in oxidized red sandstone.',
+        description: 'Coarse wire gold embedded in welded rhyolitic ash-flow tuff.',
       };
     } else if (roll < 0.75) {
       itemFound = {
-        name: 'Carved Peralta Stone Map Piece',
-        type: 'relic',
-        value: 3.0,
-        description: 'Red sandstone fragment carved with mysterious Spanish mining trails.',
-      };
-    } else if (roll < 0.85) {
-      itemFound = {
-        name: 'Banded Desert Agate Geode',
+        name: 'Superstition Obsidian Geode',
         type: 'mineral',
-        value: 1.2,
-        description: 'Hollow silica nodule filled with sparkling quartz crystals!',
+        value: 1.8,
+        description: 'Volcanic thunder-egg nodule filled with sparkling micro-quartz crystals!',
+      };
+    } else if (roll < 0.88) {
+      itemFound = {
+        name: 'Apache Basalt Mortar Fragment',
+        type: 'relic',
+        value: 2.2,
+        description: 'Prehistoric stone grinding basin pecked from dense volcanic basalt.',
       };
     }
   } else if (newLayer.index === 3) {
-    // Granite Bedrock: High-grade electrum ore, silver veins, amethyst geodes
-    if (roll < 0.70) {
-      goldAwarded = parseFloat((2.8 + Math.random() * 3.4).toFixed(1));
+    // Banded Gneiss: Crystalline metamorphic electrum & silver veins
+    if (roll < 0.65) {
+      goldAwarded = parseFloat((2.4 + Math.random() * 2.8).toFixed(1));
       itemFound = {
-        name: `${goldAwarded} oz High-Grade Electrum Bedrock Ore`,
+        name: `${goldAwarded} oz Foliated Gneiss Electrum Ore`,
         type: 'gold',
         value: goldAwarded,
-        description: 'Dense crystalline gold-silver alloy fractured from the Precambrian granite basement.',
+        description: 'High-purity crystalline electrum interlaced along foliated quartz-gneiss bands.',
       };
-    } else if (roll < 0.85) {
+    } else if (roll < 0.82) {
+      itemFound = {
+        name: 'Deep Almandine Garnet Cluster',
+        type: 'mineral',
+        value: 2.4,
+        description: 'Deep ruby-red dodecahedral garnet crystals embedded in mica schist.',
+      };
+    } else if (roll < 0.92) {
+      itemFound = {
+        name: 'Native Horn Silver (Cerargyrite)',
+        type: 'mineral',
+        value: 3.2,
+        description: 'Waxy high-grade silver ore cleaved from deep metamorphic fracture joints.',
+      };
+    }
+  } else if (newLayer.index === 4) {
+    // Peralta Granite Bedrock: High-grade electrum ore & royal amethyst
+    if (roll < 0.72) {
+      goldAwarded = parseFloat((3.4 + Math.random() * 3.8).toFixed(1));
+      itemFound = {
+        name: `${goldAwarded} oz Peralta Granite Gold Lode Ore`,
+        type: 'gold',
+        value: goldAwarded,
+        description: 'Dense crystalline gold-silver alloy fractured from the massive igneous granite basement.',
+      };
+    } else if (roll < 0.88) {
       itemFound = {
         name: 'Sparkling Deep Amethyst Geode',
         type: 'mineral',
-        value: 2.5,
-        description: 'Spectacular royal-purple quartz crystal cluster extracted from a bedrock tectonic fissure.',
+        value: 3.0,
+        description: 'Spectacular royal-purple quartz crystal cluster extracted from a granite pluton tectonic fissure.',
       };
     }
   } else {
     // Hydrothermal Quartz Chimney: BONANZA MOTHER LODE!
-    goldAwarded = parseFloat((5.0 + Math.random() * 6.5).toFixed(1));
+    goldAwarded = parseFloat((5.5 + Math.random() * 7.5).toFixed(1));
     itemFound = {
       name: `${goldAwarded} oz Pure Bonanza Rose Gold Slab`,
       type: 'gold',
@@ -581,7 +669,9 @@ export function digHoleInTerrain(
 
   // Construct informative strata announcement banner
   let strataMessage = '';
-  if (slumpOccurred) {
+  if (shaftCollarEstablished) {
+    strataMessage = `⛏️ BEDROCK REACHED (-${hole.depth.toFixed(1)}m)! Penetrated through desert crust & established Subterranean Mine Shaft Collar! Press [E] to Descend into Endless Mine Drifts!`;
+  } else if (slumpOccurred) {
     strataMessage = `⚠️ PIT WALL SLUMP! ${slumpAmount.toFixed(2)}m of unsupported gravel collapsed into the pit! Depth reduced to ${hole.depth.toFixed(1)}m. Press [T] to Shore Trench!`;
   } else if (layerChanged && hole.depth >= 1.0) {
     strataMessage = `⚡ PENETRATED NEW STRATA: [${newLayer.name.toUpperCase()}] at ${hole.depth.toFixed(1)}m deep!`;
@@ -602,6 +692,7 @@ export function digHoleInTerrain(
     layer: newLayer,
     strataMessage,
     rocksAwarded,
+    woodAwarded,
     goldAwarded,
     itemFound,
     slumpOccurred,
@@ -610,6 +701,8 @@ export function digHoleInTerrain(
     needsShoring,
     slumpDamage,
     slumpFatal,
+    shaftCollarEstablished: shaftCollarEstablished || hole.depth >= 1.0,
+    breakthroughToMine: shaftCollarEstablished || hole.depth >= 1.0,
   };
 }
 
@@ -622,7 +715,7 @@ export function updateTerrainMeshForHole(hole: DugHole) {
   const pos = geom.attributes.position as THREE.BufferAttribute;
   const colors = geom.attributes.color as THREE.BufferAttribute;
 
-  const R = hole.radius * 1.65;
+  const R = Math.max(9.5, (hole.radius || 2.0) * 3.4);
   const segSize = TERRAIN_SEG_SIZE;
   const minIX = Math.max(0, Math.floor((hole.x - R + HALF_WORLD_SIZE) / segSize));
   const maxIX = Math.min(TERRAIN_SEGMENTS, Math.ceil((hole.x + R + HALF_WORLD_SIZE) / segSize));
@@ -640,11 +733,11 @@ export function updateTerrainMeshForHole(hole: DugHole) {
         const newY = getTerrainHeight(vx, vz);
         pos.setY(i, newY);
 
-        if (dist <= hole.radius * 1.35 && colors) {
+        if (dist <= hole.radius * 1.8 && colors) {
           const baseY = getBaseTerrainHeight(vx, vz);
           const vertexDepth = Math.max(0, baseY - newY);
-          const vLayer = getGeologicalLayerAtDepth(vertexDepth);
-          const blendFactor = Math.min(1.0, vertexDepth / 0.45);
+          const vLayer = getGeologicalLayerAtDepth(Math.max(vertexDepth, hole.depth * 0.7));
+          const blendFactor = Math.min(1.0, Math.max(0.2, vertexDepth / 0.5));
 
           colors.setXYZ(
             i,
@@ -663,159 +756,510 @@ export function updateTerrainMeshForHole(hole: DugHole) {
 }
 
 /**
- * Creates a detailed 3D historical Timber Trench Shoring & Cribbing structure:
- * - Square pine collar box at ground level
- * - 4 heavy upright timber lagging posts sunk down into the excavation
- * - Heavy horizontal cross-struts (walers) with iron bracket connectors
- * - Stone foundation pads anchoring the upright timbers
+ * Creates authentic 19th-Century American West Underground Mine Shoring:
+ * - In Sand (depth <= 1.4m): Heavy wooden timber box cribbing with dense horizontal pine lagging planks
+ *   lining all four walls to prevent loose desert sand cave-ins, plus corner stakes and wedges.
+ * - In Deep Rock Strata (depth > 1.4m): Complete Comstock square-set underground mine framing with
+ *   heavy posts (stulls), cap beams, 45-degree angle knee braces, iron drift plates, hanging brass
+ *   miner's kerosene lantern with dynamic warm PointLight, overhead ore-hoist gallows with cast-iron
+ *   pulley wheel and hanging iron ore bucket, floor tramway railway ties, and full-depth access ladder!
  */
 export function createTrenchShoringMesh(hole: DugHole): THREE.Group {
   const group = new THREE.Group();
   group.name = `shoring_${hole.id}`;
 
   const baseY = getBaseTerrainHeight(hole.x, hole.z);
-  // Timbers only reach down to the currently shored depth tier
-  const shoringDepth = Math.max(1.15, Math.min(hole.depth, hole.shoredUntilDepth || hole.depth));
-  const R = hole.radius * 0.88;
+  const shoringDepth = Math.max(0.75, Math.min(hole.depth, hole.shoredUntilDepth || hole.depth));
+  const R = Math.max(1.3, hole.radius * 0.85);
+  const isInSand = hole.depth <= 1.4;
 
-  // Authentic 19th-Century Rough-Sawn Pine Timbers
-  const timberMat = new THREE.MeshStandardMaterial({
-    color: 0x6e4a2d,
+  // Authentic 19th-Century Mine Materials
+  const pineWoodMat = new THREE.MeshStandardMaterial({
+    color: 0x684424,
     roughness: 0.88,
-    metalness: 0.08,
-  });
-
-  const ironMat = new THREE.MeshStandardMaterial({
-    color: 0x242220,
-    roughness: 0.65,
-    metalness: 0.85,
-  });
-
-  const stoneMat = new THREE.MeshStandardMaterial({
-    color: 0x5a504a,
-    roughness: 0.9,
     metalness: 0.05,
   });
 
-  // 1. Surface Collar Box (4 interlocking heavy timbers around pit rim)
-  const collarSize = R * 2.1;
+  const altPinePlankMat = new THREE.MeshStandardMaterial({
+    color: 0x5a391c,
+    roughness: 0.90,
+    metalness: 0.05,
+  });
+
+  const lightPinePlankMat = new THREE.MeshStandardMaterial({
+    color: 0x77502c,
+    roughness: 0.86,
+    metalness: 0.04,
+  });
+
+  const darkTimberMat = new THREE.MeshStandardMaterial({
+    color: 0x3d2411,
+    roughness: 0.92,
+    metalness: 0.05,
+  });
+
+  const weatheredPlankMat = new THREE.MeshStandardMaterial({
+    color: 0x826950,
+    roughness: 0.94,
+    metalness: 0.02,
+  });
+
+  const forgedIronMat = new THREE.MeshStandardMaterial({
+    color: 0x22201e,
+    roughness: 0.60,
+    metalness: 0.85,
+  });
+
+  const galvanizedBucketMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4c50,
+    roughness: 0.50,
+    metalness: 0.75,
+  });
+
+  const brassMat = new THREE.MeshStandardMaterial({
+    color: 0xb88e36,
+    roughness: 0.38,
+    metalness: 0.82,
+  });
+
+  const dressedStoneMat = new THREE.MeshStandardMaterial({
+    color: 0x48423d,
+    roughness: 0.94,
+    metalness: 0.04,
+  });
+
+  const lanternFlameMat = new THREE.MeshStandardMaterial({
+    color: 0xfff0a0,
+    emissive: 0xff8c1a,
+    emissiveIntensity: 2.2,
+    roughness: 0.15,
+  });
+
+  const ropeMat = new THREE.MeshStandardMaterial({
+    color: 0x9b8560,
+    roughness: 0.96,
+    metalness: 0.02,
+  });
+
+  // 1. Surface Timber Collar Frame (Heavy interlocking rough-sawn pine beams)
+  const collarSize = R * 2.05;
   const collarThickness = 0.28;
-  const collarHeight = 0.28;
+  const collarHeight = 0.26;
 
-  // North & South beams
-  [-R * 1.05, R * 1.05].forEach((posZ) => {
+  // North & South surface header beams
+  [-R * 1.02, R * 1.02].forEach((posZ) => {
     const beam = new THREE.Mesh(
-      new THREE.BoxGeometry(collarSize + 0.35, collarHeight, collarThickness),
-      timberMat
+      new THREE.BoxGeometry(collarSize + 0.44, collarHeight, collarThickness),
+      darkTimberMat
     );
-    beam.position.set(0, 0.14, posZ);
+    beam.position.set(0, 0.13, posZ);
     beam.castShadow = true;
     group.add(beam);
   });
 
-  // East & West beams
-  [-R * 1.05, R * 1.05].forEach((posX) => {
+  // East & West surface header beams
+  [-R * 1.02, R * 1.02].forEach((posX) => {
     const beam = new THREE.Mesh(
-      new THREE.BoxGeometry(collarThickness, collarHeight, collarSize + 0.35),
-      timberMat
+      new THREE.BoxGeometry(collarThickness, collarHeight, collarSize + 0.44),
+      darkTimberMat
     );
-    beam.position.set(posX, 0.14, 0);
+    beam.position.set(posX, 0.13, 0);
     beam.castShadow = true;
     group.add(beam);
   });
 
-  // 2. Corner Upright Timber Lagging Posts (4 vertical legs sinking into the pit)
-  const postThickness = 0.26;
+  // Iron corner joint dog spikes
   const cornerOffsets = [
-    [-R * 0.95, -R * 0.95],
-    [R * 0.95, -R * 0.95],
-    [-R * 0.95, R * 0.95],
-    [R * 0.95, R * 0.95],
+    [-R * 0.94, -R * 0.94],
+    [R * 0.94, -R * 0.94],
+    [-R * 0.94, R * 0.94],
+    [R * 0.94, R * 0.94],
   ];
 
   cornerOffsets.forEach(([cx, cz]) => {
-    const post = new THREE.Mesh(
-      new THREE.BoxGeometry(postThickness, shoringDepth + 0.35, postThickness),
-      timberMat
+    const ironPin = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.025, 0.32, 6),
+      forgedIronMat
     );
-    post.position.set(cx, -shoringDepth / 2 + 0.1, cz);
+    ironPin.position.set(cx, 0.22, cz);
+    group.add(ironPin);
+  });
+
+  // 2. Corner Upright Timber Posts (Stulls)
+  const postThickness = 0.26;
+  cornerOffsets.forEach(([cx, cz]) => {
+    const post = new THREE.Mesh(
+      new THREE.BoxGeometry(postThickness, shoringDepth + 0.32, postThickness),
+      pineWoodMat
+    );
+    post.position.set(cx, -shoringDepth / 2 + 0.10, cz);
     post.castShadow = true;
     group.add(post);
 
-    // Dressed granite foundation pad at bottom of upright
-    const pad = new THREE.Mesh(
-      new THREE.BoxGeometry(postThickness * 1.5, 0.22, postThickness * 1.5),
-      stoneMat
+    // Dressed granite footer stone pad at pit bottom
+    const footer = new THREE.Mesh(
+      new THREE.BoxGeometry(postThickness * 1.5, 0.16, postThickness * 1.5),
+      dressedStoneMat
     );
-    pad.position.set(cx, -shoringDepth + 0.1, cz);
-    group.add(pad);
+    footer.position.set(cx, -shoringDepth + 0.08, cz);
+    group.add(footer);
+
+    // Iron corner drift plate at top
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(postThickness * 1.18, 0.10, postThickness * 1.18),
+      forgedIronMat
+    );
+    plate.position.set(cx, 0.18, cz);
+    group.add(plate);
   });
 
-  // 3. Heavy Pine Cross-Struts (Walers bracing against trench wall collapse)
-  const tiers = Math.max(1, Math.floor(shoringDepth / 1.4));
-  for (let tier = 1; tier <= tiers; tier++) {
-    const tierY = -(tier * (shoringDepth / (tiers + 1)));
+  // 3. Wooden Shoring in Sand: Dense Horizontal Pine Lagging Planks
+  // In sand (0.0 to 1.4m), tight continuous horizontal wooden planks line all 4 walls to brace loose sand
+  const sandLaggingHeight = Math.min(shoringDepth, 1.4);
+  const plankTiers = Math.max(3, Math.floor(sandLaggingHeight / 0.19));
+  const plankMats = [pineWoodMat, altPinePlankMat, lightPinePlankMat, weatheredPlankMat];
 
-    // Cross brace X
-    const braceX = new THREE.Mesh(
-      new THREE.BoxGeometry(collarSize * 0.88, 0.20, 0.20),
-      timberMat
-    );
-    braceX.position.set(0, tierY, 0);
-    braceX.castShadow = true;
-    group.add(braceX);
+  for (let p = 0; p < plankTiers; p++) {
+    const py = -0.10 - p * 0.19;
+    const curMat = plankMats[p % plankMats.length];
 
-    // Cross brace Z
-    const braceZ = new THREE.Mesh(
-      new THREE.BoxGeometry(0.20, 0.20, collarSize * 0.88),
-      timberMat
+    // North wall sand lagging plank
+    const plankN = new THREE.Mesh(
+      new THREE.BoxGeometry(collarSize * 0.94, 0.16, 0.09),
+      curMat
     );
-    braceZ.position.set(0, tierY - 0.11, 0);
-    braceZ.castShadow = true;
-    group.add(braceZ);
+    plankN.position.set(0, py, -R * 0.96);
+    plankN.castShadow = true;
+    group.add(plankN);
 
-    // Iron connector plates at intersection
-    const bracket = new THREE.Mesh(
-      new THREE.BoxGeometry(0.26, 0.26, 0.26),
-      ironMat
+    // South wall sand lagging plank
+    const plankS = new THREE.Mesh(
+      new THREE.BoxGeometry(collarSize * 0.94, 0.16, 0.09),
+      curMat
     );
-    bracket.position.set(0, tierY - 0.05, 0);
-    group.add(bracket);
+    plankS.position.set(0, py, R * 0.96);
+    plankS.castShadow = true;
+    group.add(plankS);
+
+    // East wall sand lagging plank
+    const plankE = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, 0.16, collarSize * 0.94),
+      curMat
+    );
+    plankE.position.set(R * 0.96, py, 0);
+    plankE.castShadow = true;
+    group.add(plankE);
+
+    // West wall sand lagging plank
+    const plankW = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, 0.16, collarSize * 0.94),
+      curMat
+    );
+    plankW.position.set(-R * 0.96, py, 0);
+    plankW.castShadow = true;
+    group.add(plankW);
   }
 
-  // 4. Perimeter Side Lagging Planks (bracing loose side walls)
-  const plankCount = 4;
-  for (let i = 0; i < plankCount; i++) {
-    const angle = (i / plankCount) * Math.PI * 2 + Math.PI / 4;
-    const px = Math.cos(angle) * (R * 1.02);
-    const pz = Math.sin(angle) * (R * 1.02);
-    const plank = new THREE.Mesh(
-      new THREE.BoxGeometry(0.10, shoringDepth * 0.85, 0.75),
-      timberMat
-    );
-    plank.position.set(px, -shoringDepth * 0.45, pz);
-    plank.rotation.y = angle + Math.PI / 2;
-    group.add(plank);
+  // Solid timber plank floor deck across the pit bottom inside the collar
+  const floorDeck = new THREE.Mesh(
+    new THREE.BoxGeometry(collarSize * 0.94, 0.08, collarSize * 0.94),
+    darkTimberMat
+  );
+  floorDeck.position.set(0, -shoringDepth + 0.04, 0);
+  floorDeck.receiveShadow = true;
+  group.add(floorDeck);
+
+  // Wooden stakes driven into sand at the perimeter corners
+  if (isInSand) {
+    [
+      [-R * 1.15, -R * 1.15],
+      [R * 1.15, -R * 1.15],
+      [-R * 1.15, R * 1.15],
+      [R * 1.15, R * 1.15],
+    ].forEach(([sx, sz]) => {
+      const stake = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.02, 0.55, 6),
+        darkTimberMat
+      );
+      stake.position.set(sx, 0.08, sz);
+      stake.rotation.z = (Math.random() - 0.5) * 0.2;
+      group.add(stake);
+    });
   }
+
+  // 4. Deep Underground Mine Features (for Depth > 1.4m):
+  // Comstock Square Sets, Knee Braces, Timber Wedges, Gallows Hoist, Iron Pulley, Ore Bucket, Tramway Ties!
+  if (!isInSand || shoringDepth > 1.4) {
+    // 45-degree angle timber knee braces under top collar
+    const braceLen = 0.65;
+    const braceGeom = new THREE.BoxGeometry(0.18, braceLen, 0.18);
+    [
+      { x: -R * 0.94 + 0.22, y: -0.22, z: -R * 0.94, rz: Math.PI / 4 },
+      { x: R * 0.94 - 0.22, y: -0.22, z: -R * 0.94, rz: -Math.PI / 4 },
+      { x: -R * 0.94 + 0.22, y: -0.22, z: R * 0.94, rz: Math.PI / 4 },
+      { x: R * 0.94 - 0.22, y: -0.22, z: R * 0.94, rz: -Math.PI / 4 },
+    ].forEach((b) => {
+      const brace = new THREE.Mesh(braceGeom, pineWoodMat);
+      brace.position.set(b.x, b.y, b.z);
+      brace.rotation.z = b.rz;
+      group.add(brace);
+    });
+
+    // Multi-tier square set cross-timbers (caps and girts) every 1.35m depth
+    const tiers = Math.max(1, Math.floor(shoringDepth / 1.35));
+    for (let tier = 1; tier <= tiers; tier++) {
+      const tierY = -(tier * (shoringDepth / (tiers + 1)));
+
+      // Cross-girt X
+      const beamX = new THREE.Mesh(
+        new THREE.BoxGeometry(collarSize * 0.92, 0.22, 0.22),
+        pineWoodMat
+      );
+      beamX.position.set(0, tierY, 0);
+      beamX.castShadow = true;
+      group.add(beamX);
+
+      // Cross-girt Z
+      const beamZ = new THREE.Mesh(
+        new THREE.BoxGeometry(0.22, 0.22, collarSize * 0.92),
+        pineWoodMat
+      );
+      beamZ.position.set(0, tierY - 0.11, 0);
+      beamZ.castShadow = true;
+      group.add(beamZ);
+
+      // Iron center crossing plate & bolts
+      const plate = new THREE.Mesh(
+        new THREE.BoxGeometry(0.28, 0.28, 0.28),
+        forgedIronMat
+      );
+      plate.position.set(0, tierY - 0.05, 0);
+      group.add(plate);
+
+      // Timber wedges pinning posts to subterranean rock walls
+      cornerOffsets.forEach(([cx, cz]) => {
+        const wedge = new THREE.Mesh(
+          new THREE.ConeGeometry(0.08, 0.22, 4),
+          lightPinePlankMat
+        );
+        wedge.position.set(cx * 1.04, tierY, cz * 1.04);
+        wedge.rotation.y = Math.PI / 4;
+        group.add(wedge);
+      });
+    }
+
+    // Authentic Mine Ore-Hoist Gallows (Overhead A-Frame / Cross-arm & Iron Pulley Wheel)
+    const gallowsHeight = 1.35;
+    // Left & Right overhead gallows posts
+    [-R * 0.70, R * 0.70].forEach((gx) => {
+      const gPost = new THREE.Mesh(
+        new THREE.BoxGeometry(0.20, gallowsHeight, 0.20),
+        darkTimberMat
+      );
+      gPost.position.set(gx, gallowsHeight / 2 + 0.12, 0);
+      gPost.castShadow = true;
+      group.add(gPost);
+    });
+
+    // Overhead heavy cross-arm timber
+    const crossArm = new THREE.Mesh(
+      new THREE.BoxGeometry(R * 1.65, 0.22, 0.22),
+      darkTimberMat
+    );
+    crossArm.position.set(0, gallowsHeight + 0.12, 0);
+    crossArm.castShadow = true;
+    group.add(crossArm);
+
+    // Cast-iron hoist pulley wheel hanging from the cross-arm
+    const pulleyWheel = new THREE.Mesh(
+      new THREE.TorusGeometry(0.18, 0.035, 8, 16),
+      forgedIronMat
+    );
+    pulleyWheel.position.set(0, gallowsHeight - 0.08, 0);
+    pulleyWheel.rotation.y = Math.PI / 2;
+    group.add(pulleyWheel);
+
+    const pulleyHub = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.05, 0.12, 8),
+      forgedIronMat
+    );
+    pulleyHub.position.set(0, gallowsHeight - 0.08, 0);
+    pulleyHub.rotation.z = Math.PI / 2;
+    group.add(pulleyHub);
+
+    // Hemp hoist rope descending down shaft
+    const rope = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.015, 0.015, 1.2, 6),
+      ropeMat
+    );
+    rope.position.set(0, gallowsHeight - 0.65, 0);
+    group.add(rope);
+
+    // Galvanized iron ore haulage bucket suspended over the shaft mouth
+    const bucket = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.26, 0.20, 0.40, 10),
+      galvanizedBucketMat
+    );
+    bucket.position.set(0, gallowsHeight - 1.25, 0);
+    bucket.castShadow = true;
+    group.add(bucket);
+
+    // Bucket bail handle
+    const bail = new THREE.Mesh(
+      new THREE.TorusGeometry(0.22, 0.02, 6, 12, Math.PI),
+      forgedIronMat
+    );
+    bail.position.set(0, gallowsHeight - 1.05, 0);
+    group.add(bail);
+
+    // Ore Cart Tramway Floor Sleepers & Dual Iron Rails at pit bottom
+    for (let s = -1; s <= 1; s++) {
+      const sleeper = new THREE.Mesh(
+        new THREE.BoxGeometry(collarSize * 0.70, 0.10, 0.18),
+        darkTimberMat
+      );
+      sleeper.position.set(0, -shoringDepth + 0.05, s * (R * 0.50));
+      group.add(sleeper);
+    }
+    // Dual iron guide rails
+    [-0.28, 0.28].forEach((rx) => {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.06, collarSize * 0.85),
+        forgedIronMat
+      );
+      rail.position.set(rx, -shoringDepth + 0.11, 0);
+      group.add(rail);
+    });
+
+    // Weathered wooden mine shaft placard mounted on South top header
+    const placard = new THREE.Mesh(
+      new THREE.BoxGeometry(0.68, 0.16, 0.03),
+      weatheredPlankMat
+    );
+    placard.position.set(0, 0.18, R * 1.02 + 0.15);
+    group.add(placard);
+  }
+
+  // 5. Miner's Sturdy Wooden Access Ladder (Affixed along the West wall)
+  const ladderX = -R * 0.88;
+  const ladderZ = 0;
+  const ladderHeight = shoringDepth + 0.35;
+  [-0.18, 0.18].forEach((offsetZ) => {
+    const rail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, ladderHeight, 0.08),
+      darkTimberMat
+    );
+    rail.position.set(ladderX, -ladderHeight / 2 + 0.20, ladderZ + offsetZ);
+    group.add(rail);
+  });
+  // Rungs every 0.30m
+  const rungCount = Math.floor(ladderHeight / 0.30);
+  for (let r = 0; r < rungCount; r++) {
+    const rungY = 0.10 - r * 0.30;
+    const rung = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.025, 0.36, 6),
+      pineWoodMat
+    );
+    rung.position.set(ladderX, rungY, ladderZ);
+    rung.rotation.x = Math.PI / 2;
+    group.add(rung);
+  }
+
+  // 6. Authentic Hanging Brass Miner's Lantern with Warm Glowing THREE.PointLight
+  const lanternGroup = new THREE.Group();
+  lanternGroup.position.set(isInSand ? 0 : 0.35, -0.45, isInSand ? 0 : 0.25);
+
+  // Iron suspension ring & chain
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.05, 0.015, 6, 12),
+    forgedIronMat
+  );
+  ring.position.set(0, 0.24, 0);
+  lanternGroup.add(ring);
+
+  // Brass lantern hood & ventilator
+  const lanternHood = new THREE.Mesh(
+    new THREE.ConeGeometry(0.12, 0.10, 8),
+    brassMat
+  );
+  lanternHood.position.set(0, 0.15, 0);
+  lanternGroup.add(lanternHood);
+
+  // Brass base oil fount
+  const lanternBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.11, 0.13, 0.08, 8),
+    brassMat
+  );
+  lanternBase.position.set(0, -0.12, 0);
+  lanternGroup.add(lanternBase);
+
+  // Glowing kerosene flame core
+  const flame = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.06, 0.14, 8),
+    lanternFlameMat
+  );
+  flame.position.set(0, 0.01, 0);
+  lanternGroup.add(flame);
+
+  // Protective wire cage bars
+  for (let w = 0; w < 4; w++) {
+    const angle = (w / 4) * Math.PI * 2;
+    const wire = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 0.20, 4),
+      forgedIronMat
+    );
+    wire.position.set(Math.cos(angle) * 0.09, 0.01, Math.sin(angle) * 0.09);
+    lanternGroup.add(wire);
+  }
+
+  // Real 3D Underground PointLight illuminating timbers and rock strata with warm amber ambiance
+  const lanternLight = new THREE.PointLight(0xffa238, 1.8, 11.0, 1.2);
+  lanternLight.position.set(0, 0, 0);
+  lanternGroup.add(lanternLight);
+
+  group.add(lanternGroup);
 
   group.position.set(hole.x, baseY, hole.z);
   return group;
 }
 
 /**
- * Reinforces an active excavation trench with heavy timber cribbing, protecting it from overburden collapse.
+ * Reinforces an active excavation trench with heavy wooden mine timber cribbing & sand lagging,
+ * protecting it from overburden collapse. Adapts material cost to geological strata:
+ * - Sand: Uses 2 Wood Planks for dense horizontal pine wall lagging.
+ * - Caliche: Uses 1 Wood Plank + 1 Stone.
+ * - Volcanic Tuff & Gneiss: Cohesive bedrock; requires minimal timber (1 Wood Plank, 0 Stone).
+ * - Granite & Bonanza: 100% self-supporting bedrock; requires 0 materials!
  */
 export function shoreExcavationPit(
   holeId: string,
   scene?: THREE.Scene
-): { success: boolean; message: string; rocksUsed: number; hole?: DugHole } {
+): {
+  success: boolean;
+  message: string;
+  rocksUsed: number;
+  woodUsed: number;
+  materialType: 'wood' | 'stone' | 'timber_rock' | 'none';
+  hole?: DugHole;
+} {
   const hole = activeDugHoles.find((h) => h.id === holeId);
   if (!hole) {
-    return { success: false, message: 'Excavation trench not found.', rocksUsed: 0 };
+    return { success: false, message: 'Excavation trench not found.', rocksUsed: 0, woodUsed: 0, materialType: 'wood' };
   }
 
-  if (hole.depth < 0.9) {
-    return { success: false, message: 'Trench is too shallow to require timber shoring (depth < 1.0m). Dig deeper first!', rocksUsed: 0, hole };
+  const currentLayer = getGeologicalLayerAtDepth(hole.depth);
+
+  // In loose sand, allow shoring from 0.50m so prospectors can brace loose walls immediately!
+  const minRequiredDepth = currentLayer.id === 'strata_sand' ? 0.50 : 0.85;
+  if (hole.depth < minRequiredDepth) {
+    return {
+      success: false,
+      message: `Trench is too shallow to require timber shoring (depth < ${minRequiredDepth.toFixed(1)}m). Dig deeper first!`,
+      rocksUsed: 0,
+      woodUsed: 0,
+      materialType: 'wood',
+      hole,
+    };
   }
 
   const prevShored = hole.shoredUntilDepth || 0;
@@ -825,6 +1269,8 @@ export function shoreExcavationPit(
       success: false,
       message: `Trench is already securely timbered down to ${prevShored.toFixed(1)}m! Dig deeper to the next depth tier before extending framing.`,
       rocksUsed: 0,
+      woodUsed: 0,
+      materialType: 'wood',
       hole,
     };
   }
@@ -854,12 +1300,52 @@ export function shoreExcavationPit(
   }
 
   const isExtension = prevShored > 0;
+  let shoreMsg = '';
+  let woodUsed = 1;
+  let rocksUsed = 0;
+  let materialType: 'wood' | 'stone' | 'timber_rock' | 'none' = 'wood';
+
+  if (currentLayer.id === 'strata_sand') {
+    woodUsed = 2;
+    rocksUsed = 0;
+    materialType = 'wood';
+    shoreMsg = isExtension
+      ? `🪵 Extended Wooden Mine Shoring in Sand! Side lagging planks and corner timber sets secured down to ${nextShoredDepth.toFixed(1)}m depth.`
+      : `🪵 Installed Wooden Mine Shoring in Sand! Dense pine lagging planks and stull frames lock loose desert sand down to ${nextShoredDepth.toFixed(1)}m depth.`;
+  } else if (currentLayer.id === 'strata_caliche') {
+    woodUsed = 1;
+    rocksUsed = 1;
+    materialType = 'timber_rock';
+    shoreMsg = isExtension
+      ? `⛏️ Extended Caliche Hardpan Timbering with stone footers down to ${nextShoredDepth.toFixed(1)}m depth.`
+      : `⛏️ Caliche Hardpan Shored! Heavy timber sets and stone footers secured down to ${nextShoredDepth.toFixed(1)}m depth.`;
+  } else if (currentLayer.id === 'strata_tuff') {
+    woodUsed = 1;
+    rocksUsed = 0;
+    materialType = 'wood';
+    shoreMsg = isExtension
+      ? `🌋 Volcanic Tuff Shoring Extended! Cohesive ash-flow rock arch braced down to ${nextShoredDepth.toFixed(1)}m depth.`
+      : `🌋 Superstition Volcanic Tuff Shored! Cohesive volcanic ash rock is naturally arched; light timber set secured down to ${nextShoredDepth.toFixed(1)}m.`;
+  } else if (currentLayer.id === 'strata_gneiss') {
+    woodUsed = 1;
+    rocksUsed = 0;
+    materialType = 'wood';
+    shoreMsg = isExtension
+      ? `💎 Banded Gneiss Shoring Extended down to ${nextShoredDepth.toFixed(1)}m depth.`
+      : `💎 Banded Gneiss Crystalline Bedrock Shored! High shear-strength metamorphic rock braced down to ${nextShoredDepth.toFixed(1)}m.`;
+  } else if (currentLayer.shoringRequirement === 'none') {
+    woodUsed = 0;
+    rocksUsed = 0;
+    materialType = 'none';
+    shoreMsg = `🛡️ Massive ${currentLayer.name} is 100% self-supporting! Access ladder and hanging lantern secured down to ${nextShoredDepth.toFixed(1)}m with zero shoring needed.`;
+  }
+
   return {
     success: true,
-    message: isExtension
-      ? `🛡️ Timber Shoring Extended! Lower walls secured down to ${nextShoredDepth.toFixed(1)}m depth for the next excavation tier.`
-      : `🛡️ Timber Shoring Installed! Pit walls secured down to ${nextShoredDepth.toFixed(1)}m depth against collapse.`,
-    rocksUsed: 3,
+    message: shoreMsg,
+    woodUsed,
+    rocksUsed,
+    materialType,
     hole,
   };
 }
@@ -885,6 +1371,53 @@ export function getNearbyDugHole(x: number, z: number, maxDist: number = 3.8): D
  */
 export function getActiveDugHoles(): DugHole[] {
   return activeDugHoles;
+}
+
+/**
+ * Synchronizes an excavation hole from a remote multiplayer prospector,
+ * updating local terrain deformation and shoring timber geometry.
+ */
+export function syncRemoteDugHole(remoteHole: Partial<DugHole> & { x: number; z: number; depth: number }, scene?: THREE.Scene): DugHole {
+  let hole = activeDugHoles.find((h) => Math.hypot(h.x - remoteHole.x, h.z - remoteHole.z) <= Math.max(2.8, (h.radius || 2) * 1.15));
+  if (!hole) {
+    hole = {
+      id: remoteHole.id || `hole_${Math.round(remoteHole.x)}_${Math.round(remoteHole.z)}`,
+      x: remoteHole.x,
+      z: remoteHole.z,
+      depth: remoteHole.depth,
+      radius: remoteHole.radius || 1.85,
+      excavationCount: remoteHole.excavationCount || 1,
+      createdAt: remoteHole.createdAt || Date.now(),
+      maxLayerReached: remoteHole.maxLayerReached || 0,
+      stability: remoteHole.stability ?? 100,
+      isShored: !!remoteHole.isShored,
+      shoredUntilDepth: remoteHole.shoredUntilDepth,
+      lastStrataName: remoteHole.lastStrataName,
+    };
+    activeDugHoles.push(hole);
+  } else {
+    hole.depth = Math.max(hole.depth, remoteHole.depth);
+    if (remoteHole.isShored) {
+      hole.isShored = true;
+      hole.stability = remoteHole.stability ?? 100;
+      hole.shoredUntilDepth = remoteHole.shoredUntilDepth ?? hole.depth;
+    }
+  }
+
+  // Update terrain vertices for this excavation
+  updateTerrainMeshForHole(hole);
+
+  // If shored, ensure shoring mesh is rendered in scene
+  if (hole.isShored && scene) {
+    if (hole.shoringMesh && hole.shoringMesh.parent) {
+      hole.shoringMesh.parent.remove(hole.shoringMesh);
+    }
+    const mesh = createTrenchShoringMesh(hole);
+    scene.add(mesh);
+    hole.shoringMesh = mesh;
+  }
+
+  return hole;
 }
 
 /**
@@ -955,6 +1488,7 @@ export function generateTerrainNoiseTexture(size = 256): THREE.DataTexture {
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = true;
+  texture.anisotropy = 16;
   texture.needsUpdate = true;
   return texture;
 }
@@ -969,6 +1503,8 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
     roughness: 0.88,
     metalness: 0.04,
     flatShading: false,
+    side: THREE.DoubleSide,
+    shadowSide: THREE.DoubleSide,
   });
 
   material.onBeforeCompile = (shader) => {
@@ -1012,16 +1548,24 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
       blend /= (blend.x + blend.y + blend.z);
       vec4 rockTex = texX * blend.x + texY * blend.y + texZ * blend.z;
 
-      // Realistic horizontal sedimentary strata bands on cliffs and crags
-      float strata = sin(vWorldPos.y * 1.55 + rockTex.r * 2.8) * 0.14 + cos(vWorldPos.y * 0.62) * 0.09;
-      vec3 cliffRock = vec3(0.74, 0.29, 0.16) + strata * vec3(0.19, 0.09, 0.05);
-      cliffRock = mix(cliffRock, vec3(0.24, 0.18, 0.14), rockTex.a * 0.38); // Desert varnish patina
+      // Multi-layer sedimentary geological strata (Coconino sandstone, Supai terracing, Hermit shale)
+      float fineBanding = sin(vWorldPos.y * 2.1 + rockTex.r * 3.2) * 0.5 + 0.5;
+      float coarseStrata = sin(vWorldPos.y * 0.52 + rockTex.g * 1.4) * 0.5 + 0.5;
+
+      vec3 terracotta = vec3(0.66, 0.30, 0.18);
+      vec3 buffSand = vec3(0.77, 0.50, 0.32);
+      vec3 deepHematite = vec3(0.48, 0.18, 0.12);
+      vec3 darkVarnish = vec3(0.22, 0.16, 0.14);
+
+      vec3 cliffRock = mix(terracotta, buffSand, coarseStrata * 0.55);
+      cliffRock = mix(cliffRock, deepHematite, fineBanding * 0.35);
+      cliffRock = mix(cliffRock, darkVarnish, rockTex.a * 0.42); // Desert varnish patina on exposed faces
 
       // Sandy wash / arroyo base with micro pebble grit
       vec3 sandBase = diffuseColor.rgb * (0.86 + rockTex.g * 0.22);
 
       // Blend based on steepness of the terrain surface
-      diffuseColor.rgb = mix(sandBase, cliffRock, smoothstep(0.26, 0.68, slope));
+      diffuseColor.rgb = mix(sandBase, cliffRock, smoothstep(0.24, 0.65, slope));
       `
     );
 

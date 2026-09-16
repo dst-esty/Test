@@ -15,7 +15,7 @@ class SoundEngine {
       this.ctx = new AudioCtx();
     }
     if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => {});
     }
   }
 
@@ -261,6 +261,61 @@ class SoundEngine {
     osc1.stop(t + 0.2);
     osc2.start(t + 0.08);
     osc2.stop(t + 0.45);
+  }
+
+  public playCashRegister() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // 1. Mechanical lever click / drawer thud
+    const clickOsc = this.ctx.createOscillator();
+    const clickGain = this.ctx.createGain();
+    clickOsc.type = 'square';
+    clickOsc.frequency.setValueAtTime(140, t);
+    clickOsc.frequency.exponentialRampToValueAtTime(40, t + 0.04);
+    clickGain.gain.setValueAtTime(0.15, t);
+    clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    clickOsc.connect(clickGain);
+    clickGain.connect(this.ctx.destination);
+    clickOsc.start(t);
+    clickOsc.stop(t + 0.05);
+
+    // 2. Clear brass bell ding (E6 / 1318 Hz + High B6 / 1975 Hz)
+    const bell1 = this.ctx.createOscillator();
+    const bell2 = this.ctx.createOscillator();
+    const bellGain = this.ctx.createGain();
+    bell1.type = 'sine';
+    bell2.type = 'sine';
+    bell1.frequency.setValueAtTime(1318.5, t + 0.04);
+    bell2.frequency.setValueAtTime(1975.5, t + 0.05);
+
+    bellGain.gain.setValueAtTime(0.22, t + 0.04);
+    bellGain.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+    bell1.connect(bellGain);
+    bell2.connect(bellGain);
+    bellGain.connect(this.ctx.destination);
+    bell1.start(t + 0.04);
+    bell1.stop(t + 0.65);
+    bell2.start(t + 0.05);
+    bell2.stop(t + 0.65);
+
+    // 3. Crisp cascade of gold/silver coin clinks
+    [0.10, 0.16, 0.22].forEach((offset, idx) => {
+      if (!this.ctx) return;
+      const coinTime = t + offset;
+      const coinOsc = this.ctx.createOscillator();
+      const coinGain = this.ctx.createGain();
+      coinOsc.type = 'triangle';
+      coinOsc.frequency.setValueAtTime(2400 + idx * 320, coinTime);
+      coinGain.gain.setValueAtTime(0.12, coinTime);
+      coinGain.gain.exponentialRampToValueAtTime(0.001, coinTime + 0.15);
+      coinOsc.connect(coinGain);
+      coinGain.connect(this.ctx.destination);
+      coinOsc.start(coinTime);
+      coinOsc.stop(coinTime + 0.15);
+    });
   }
 
   public playDiscovery() {
@@ -1222,6 +1277,202 @@ class SoundEngine {
       gain.connect(this.ctx!.destination);
       osc.start(strikeTime);
       osc.stop(strikeTime + 0.09);
+    });
+  }
+
+  // Water Splash Sound (swimming, wading or striking water table)
+  public playWaterSplash() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // 1. Initial liquid smack / plop
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(480 + Math.random() * 80, t);
+    osc.frequency.exponentialRampToValueAtTime(140, t + 0.12);
+    gain.gain.setValueAtTime(0.35, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.15);
+
+    // 2. Splashing froth noise
+    const bufferSize = this.ctx.sampleRate * 0.35;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1100, t);
+    filter.Q.value = 2.2;
+    const nGain = this.ctx.createGain();
+    nGain.gain.setValueAtTime(0.25, t);
+    nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+
+    noise.connect(filter);
+    filter.connect(nGain);
+    nGain.connect(this.ctx.destination);
+    noise.start(t + 0.02);
+    noise.stop(t + 0.38);
+  }
+
+  // Rushing Groundwater Flood Torrent Rumble
+  public playWaterFloodRumble() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // Sub-bass hydraulic roar
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    subOsc.type = 'triangle';
+    subOsc.frequency.setValueAtTime(55, t);
+    subOsc.frequency.exponentialRampToValueAtTime(32, t + 1.6);
+    subGain.gain.setValueAtTime(0.42, t);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
+    subOsc.connect(subGain);
+    subGain.connect(this.ctx.destination);
+    subOsc.start(t);
+    subOsc.stop(t + 1.85);
+
+    // Filtered rushing water white noise
+    const bufferSize = this.ctx.sampleRate * 1.5;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.sin((i / bufferSize) * Math.PI);
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(380, t);
+    filter.frequency.linearRampToValueAtTime(620, t + 0.8);
+    filter.frequency.linearRampToValueAtTime(240, t + 1.5);
+    const nGain = this.ctx.createGain();
+    nGain.gain.setValueAtTime(0.32, t);
+    nGain.gain.exponentialRampToValueAtTime(0.001, t + 1.5);
+
+    noise.connect(filter);
+    filter.connect(nGain);
+    nGain.connect(this.ctx.destination);
+    noise.start(t);
+    noise.stop(t + 1.55);
+  }
+
+  // Cornish Steam Dewatering Pump Piston Chug & Steam Hiss
+  public playPumpChug() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // Heavy iron cylinder stroke (thump)
+    const thud = this.ctx.createOscillator();
+    const thudGain = this.ctx.createGain();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(90, t);
+    thud.frequency.exponentialRampToValueAtTime(28, t + 0.22);
+    thudGain.gain.setValueAtTime(0.38, t);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+    thud.connect(thudGain);
+    thudGain.connect(this.ctx.destination);
+    thud.start(t);
+    thud.stop(t + 0.25);
+
+    // Steam exhaust release hiss
+    const bufferSize = this.ctx.sampleRate * 0.28;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(1400, t + 0.1);
+    const nGain = this.ctx.createGain();
+    nGain.gain.setValueAtTime(0.18, t + 0.1);
+    nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+
+    noise.connect(filter);
+    filter.connect(nGain);
+    nGain.connect(this.ctx.destination);
+    noise.start(t + 0.08);
+    noise.stop(t + 0.38);
+  }
+
+  // Cave Water Droplet Ping Echo
+  public playWaterDrip() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    const freq = 1200 + Math.random() * 600;
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(freq * 1.5, t + 0.06);
+
+    gain.gain.setValueAtTime(0.2, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.14);
+  }
+
+  // Room Excavated Breakthrough & Timber Creak
+  public playRoomExcavated() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // Deep rock fracture boom
+    const boom = this.ctx.createOscillator();
+    const boomGain = this.ctx.createGain();
+    boom.type = 'triangle';
+    boom.frequency.setValueAtTime(110, t);
+    boom.frequency.exponentialRampToValueAtTime(25, t + 0.5);
+    boomGain.gain.setValueAtTime(0.45, t);
+    boomGain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+    boom.connect(boomGain);
+    boomGain.connect(this.ctx.destination);
+    boom.start(t);
+    boom.stop(t + 0.6);
+
+    // Triumphant discovery harmonic chime
+    [261.63, 329.63, 392.0, 523.25].forEach((freq, idx) => {
+      const noteTime = t + 0.2 + idx * 0.09;
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, noteTime);
+      gain.gain.setValueAtTime(0.22, noteTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, noteTime + 0.4);
+      osc.connect(gain);
+      gain.connect(this.ctx!.destination);
+      osc.start(noteTime);
+      osc.stop(noteTime + 0.42);
     });
   }
 }

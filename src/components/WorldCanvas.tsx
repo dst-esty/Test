@@ -9,6 +9,9 @@ import {
   resetAllDugHoles,
   getGeologicalLayerAtDepth,
   DugHole,
+  activeDugHoles,
+  createTrenchShoringMesh,
+  syncRemoteDugHole,
 } from '../world/terrain';
 import { createDesertFoliage, GoldDeposit, DesertFoliageManager } from '../world/foliage';
 import { createLandmarkStructures } from '../world/landmarks';
@@ -28,9 +31,14 @@ import {
   WeatherType,
   MineLayerData,
   GameOverDetails,
+  RoomDirection,
+  WaterTableState,
 } from '../types';
 import { generateNoiseTexture, createGoldVeinVoxelMaterials, VoxelShaderUniforms } from '../world/voxelGoldShader';
 import { UndergroundLayersManager } from '../world/undergroundLayers';
+import { ShaftSinkingStats } from '../world/undergroundVoxels';
+import { RemoteProspector } from '../world/remoteProspector';
+import { multiplayer } from '../multiplayer/multiplayerService';
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -64,6 +72,11 @@ interface WorldCanvasProps {
   onRegisterShaftTraverseHandler?: (fn: (level: number) => void) => void;
   onRegisterShaftExitHandler?: (fn: () => void) => void;
   onRegisterShaftDigHandler?: (fn: () => void) => void;
+  onRegisterExcavateRoomHandler?: (fn: (dir: RoomDirection) => void) => void;
+  onRegisterTimberRoomHandler?: (fn: (dir: RoomDirection) => void) => void;
+  onRegisterTogglePumpHandler?: (fn: () => void) => void;
+  onUpdateWaterTable?: (waterTable: WaterTableState) => void;
+  onUpdateOxygen?: (oxygenPercent: number, isSubmerged: boolean) => void;
   onUpdateShaftLayers?: (layers: MineLayerData[]) => void;
   onUpdateShaftLevel?: (level: number, maxLevel: number) => void;
   onNearbyTrenchChange?: (
@@ -77,6 +90,10 @@ interface WorldCanvasProps {
     } | null
   ) => void;
   onRegisterShoreHandler?: (fn: () => void) => void;
+  trackedPlayerPos?: Vector3D | null;
+  onUpdateShaftSinkingStats?: (stats: ShaftSinkingStats | null) => void;
+  onRegisterStrikeVoxelHandler?: (fn: () => void) => void;
+  onRegisterPlaceTimberHandler?: (fn: () => void) => void;
 }
 
 export const WorldCanvas: React.FC<WorldCanvasProps> = ({
@@ -111,10 +128,19 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onRegisterShaftTraverseHandler,
   onRegisterShaftExitHandler,
   onRegisterShaftDigHandler,
+  onRegisterExcavateRoomHandler,
+  onRegisterTimberRoomHandler,
+  onRegisterTogglePumpHandler,
+  onUpdateWaterTable,
+  onUpdateOxygen,
   onUpdateShaftLayers,
   onUpdateShaftLevel,
   onNearbyTrenchChange,
   onRegisterShoreHandler,
+  trackedPlayerPos,
+  onUpdateShaftSinkingStats,
+  onRegisterStrikeVoxelHandler,
+  onRegisterPlaceTimberHandler,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const isUIOpenRef = useRef(isUIOpen);
@@ -231,6 +257,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const voxelUniformsRef = useRef<VoxelShaderUniforms[]>([]);
   const voxelTimeRef = useRef<{ value: number }>({ value: 0 });
   const noiseTextureRef = useRef<THREE.Texture | null>(null);
+  const remoteProspectorsRef = useRef<Map<string, RemoteProspector>>(new Map());
 
   // Synchronized player state reference for event callbacks
   const playerStateRef = useRef<PlayerState>(playerState);
@@ -267,6 +294,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const toolSwingProgress = useRef<number>(0);
   const ghostRotationY = useRef<number>(0);
   const groundHitPoint = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
+  const oxygenLevelRef = useRef<number>(100);
+  const drowningTimerRef = useRef<number>(0);
+  const lastWaterSyncTime = useRef<number>(0);
 
   // Sync external position changes (e.g. fast travel or mine teleport)
   useEffect(() => {
@@ -310,16 +340,29 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const camera = new THREE.PerspectiveCamera(65, width / height, 0.2, 800);
     cameraRef.current = camera;
 
-    // 3. Renderer Setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    // 3. Renderer Setup (Hardware Accelerated WebGL2 Pipeline)
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance',
+      precision: 'highp',
+      stencil: false,
+      depth: true,
+      alpha: false,
+    });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+
+    const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
     // 4. Lighting Setup
     const hemiLight = new THREE.HemisphereLight(0xffeedd, 0x553311, 0.8);
@@ -360,6 +403,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     // 6. Procedural Gold Vein GLSL Fragment Shader & Noise Texture Initialization
     // Generates a multi-scale seamless procedural noise texture for realistic hydrothermal gold veins across mine voxels
     const noiseTexture = generateNoiseTexture(256);
+    noiseTexture.anisotropy = maxAnisotropy;
+    noiseTexture.generateMipmaps = true;
+    noiseTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    noiseTexture.magFilter = THREE.LinearFilter;
     noiseTextureRef.current = noiseTexture;
     const sharedTimeUniform = { value: 0 };
     voxelTimeRef.current = sharedTimeUniform;
@@ -562,6 +609,120 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     scene.add(stars);
     starsRef.current = stars;
 
+    // 8b. Real-Time Multiplayer Event Bridge & Remote Prospectors
+    multiplayer.setHandlers({
+      onPlayerJoined: (player) => {
+        if (player.id === multiplayer.getSelfId()) return;
+        if (!remoteProspectorsRef.current.has(player.id)) {
+          const rp = new RemoteProspector(player);
+          scene.add(rp.group);
+          remoteProspectorsRef.current.set(player.id, rp);
+        }
+      },
+      onPlayersSync: (players) => {
+        const selfId = multiplayer.getSelfId();
+        players.forEach((p) => {
+          if (p.id === selfId) return;
+          if (!remoteProspectorsRef.current.has(p.id)) {
+            const rp = new RemoteProspector(p);
+            scene.add(rp.group);
+            remoteProspectorsRef.current.set(p.id, rp);
+          } else {
+            remoteProspectorsRef.current.get(p.id)!.updateData(p);
+          }
+        });
+      },
+      onPlayerMoved: (data) => {
+        if (data.id === multiplayer.getSelfId()) return;
+        let rp = remoteProspectorsRef.current.get(data.id);
+        if (!rp) {
+          rp = new RemoteProspector({
+            id: data.id,
+            name: 'Prospector',
+            outfitColor: '#8c5932',
+            x: data.x,
+            y: data.y,
+            z: data.z,
+            yaw: data.yaw,
+            pitch: data.pitch,
+            action: data.action,
+            activeTool: data.activeTool,
+            goldFound: data.goldFound,
+            rocksGathered: data.rocksGathered,
+            health: data.health,
+            ping: 0,
+            lastUpdate: Date.now(),
+          });
+          scene.add(rp.group);
+          remoteProspectorsRef.current.set(data.id, rp);
+        }
+        rp.updateData(data);
+      },
+      onPlayerProfileUpdated: (player) => {
+        const rp = remoteProspectorsRef.current.get(player.id);
+        if (rp) {
+          rp.setProfile(player.name, player.outfitColor);
+        }
+      },
+      onPlayerAction: (data) => {
+        const rp = remoteProspectorsRef.current.get(data.id);
+        if (rp) {
+          rp.triggerAction(data.action, data.tool);
+        }
+      },
+      onPlayerLeft: (id) => {
+        const rp = remoteProspectorsRef.current.get(id);
+        if (rp) {
+          scene.remove(rp.group);
+          rp.dispose();
+          remoteProspectorsRef.current.delete(id);
+        }
+      },
+      onTerrainDug: (data) => {
+        if (data.dugByPlayerId === multiplayer.getSelfId()) return;
+        if (data.hole) {
+          syncRemoteDugHole(data.hole, scene);
+          if (miningSystemRef.current) {
+            miningSystemRef.current.spawnDigDebris(
+              new THREE.Vector3(data.hole.x, getTerrainHeight(data.hole.x, data.hole.z), data.hole.z),
+              'sandstone',
+              1.0
+            );
+          }
+        }
+      },
+      onTerrainShored: (data) => {
+        const h = activeDugHoles.find((dh) => dh.id === data.holeId);
+        if (h) {
+          h.isShored = true;
+          h.stability = data.stability ?? 100;
+          h.shoredUntilDepth = data.shoredUntilDepth ?? h.depth;
+          if (h.shoringMesh && h.shoringMesh.parent) {
+            h.shoringMesh.parent.remove(h.shoringMesh);
+          }
+          const mesh = createTrenchShoringMesh(h);
+          scene.add(mesh);
+          h.shoringMesh = mesh;
+        }
+      },
+      onTerrainBlasted: (data) => {
+        if (miningSystemRef.current) {
+          miningSystemRef.current.spawnDigDebris(new THREE.Vector3(data.x, data.y, data.z), 'granite', 2.5);
+        }
+        soundEngine.playDynamiteExplosion();
+      },
+      onMineBuilt: (mine) => {
+        if (mineBuildingRef.current) {
+          mineBuildingRef.current.placeStructure(
+            mine.blueprintId as any,
+            new THREE.Vector3(mine.x, getTerrainHeight(mine.x, mine.z), mine.z),
+            0,
+            scene
+          );
+        }
+      },
+    });
+
     // 9. Universal Action Executors (Digging, Shooting, Dynamite)
     const executeDig = () => {
       const cam = cameraRef.current;
@@ -584,6 +745,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         dir.normalize();
       }
 
+      // 0. Subterranean Mini-Voxel Bedrock / Vein Strike Check
+      if (undergroundLayersRef.current) {
+        const uLayers = undergroundLayersRef.current;
+        const targetedVoxel = uLayers.voxelEngine.targetedVoxel;
+        const isNearShaft = uLayers.isNearShaft(playerPos.current, 5.5) || uLayers.currentLevel > 0;
+        if (targetedVoxel || uLayers.currentLevel > 0 || (isNearShaft && uLayers.isNearExcavationPit(playerPos.current))) {
+          executeSubterraneanVoxelMine(playerStateRef.current.equippedTool || 'pickaxe');
+          return;
+        }
+      }
+
       // A. Check if striking near the active Portal Excavation drift
       if (mineBuildingRef.current?.portalExcavation && !mineBuildingRef.current.portalExcavation.isReinforced) {
         const pe = mineBuildingRef.current.portalExcavation;
@@ -593,18 +765,30 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             new THREE.Vector3(pe.position.x, pe.position.y + 1.8, pe.position.z)
           );
           if (res.success) {
+            const goldAwarded = res.goldAwarded || 0;
+            const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
+            const cashEarned = isAutoRedeem && goldAwarded > 0 ? Number((goldAwarded * 20.67).toFixed(2)) : 0;
+            if (cashEarned > 0) {
+              soundEngine.playCashRegister();
+            }
             setPlayerState((prev) => {
               const currentGold = typeof prev.goldFound === 'number' && !isNaN(prev.goldFound) ? prev.goldFound : 0;
+              const currentCash = typeof prev.cashDollars === 'number' && !isNaN(prev.cashDollars) ? prev.cashDollars : 0;
               const currentRocks = typeof prev.blocksDug === 'number' && !isNaN(prev.blocksDug) ? prev.blocksDug : 0;
               return {
                 ...prev,
                 blocksDug: currentRocks + res.rocksDug,
-                goldFound: currentGold + res.goldAwarded,
+                goldFound: currentGold + goldAwarded,
+                cashDollars: currentCash + cashEarned,
                 portalExcavation: { ...pe },
               };
             });
             if (res.message && onShowBanner) {
-              onShowBanner(res.message);
+              onShowBanner(
+                cashEarned > 0
+                  ? `${res.message} ➔ 🪙 Auto-Redeemed +$${cashEarned.toFixed(2)} Cash!`
+                  : res.message
+              );
             }
             return;
           }
@@ -636,19 +820,34 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               );
             }
           }
+          const goldAwarded = fRes.goldAwarded || 0;
+          const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
+          const cashEarned = isAutoRedeem && goldAwarded > 0 ? Number((goldAwarded * 20.67).toFixed(2)) : 0;
+          if (cashEarned > 0) {
+            soundEngine.playCashRegister();
+          }
+
           setPlayerState((prev) => {
             const currentGold = typeof prev.goldFound === 'number' && !isNaN(prev.goldFound) ? prev.goldFound : 0;
+            const currentCash = typeof prev.cashDollars === 'number' && !isNaN(prev.cashDollars) ? prev.cashDollars : 0;
             const currentRocks = typeof prev.blocksDug === 'number' && !isNaN(prev.blocksDug) ? prev.blocksDug : 0;
+            const currentWood = typeof prev.woodPlanks === 'number' && !isNaN(prev.woodPlanks) ? prev.woodPlanks : 0;
             const currentHydration = typeof prev.hydration === 'number' && !isNaN(prev.hydration) ? prev.hydration : 100;
             return {
               ...prev,
               blocksDug: currentRocks + (fRes.blocksDug || 0),
-              goldFound: currentGold + (fRes.goldAwarded || 0),
+              woodPlanks: currentWood + (fRes.woodAwarded || 0),
+              goldFound: currentGold + goldAwarded,
+              cashDollars: currentCash + cashEarned,
               hydration: Math.min(100, currentHydration + (fRes.hydrationAwarded || 0)),
             };
           });
           if (fRes.message && onShowBanner) {
-            onShowBanner(fRes.message);
+            onShowBanner(
+              cashEarned > 0
+                ? `${fRes.message} ➔ 🪙 Auto-Redeemed +$${cashEarned.toFixed(2)} Cash ($20.67/oz)!`
+                : fRes.message
+            );
           }
           return;
         }
@@ -688,17 +887,48 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         }
 
+        const goldAwarded = typeof res.goldAwarded === 'number' && !isNaN(res.goldAwarded) ? res.goldAwarded : 0;
+        const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
+        const cashEarned = isAutoRedeem && goldAwarded > 0 ? Number((goldAwarded * 20.67).toFixed(2)) : 0;
+        if (cashEarned > 0) {
+          soundEngine.playCashRegister();
+        }
+
         setPlayerState((prev) => {
           const currentGold = typeof prev.goldFound === 'number' && !isNaN(prev.goldFound) ? prev.goldFound : 0;
+          const currentCash = typeof prev.cashDollars === 'number' && !isNaN(prev.cashDollars) ? prev.cashDollars : 0;
           const currentRocks = typeof prev.blocksDug === 'number' && !isNaN(prev.blocksDug) ? prev.blocksDug : 0;
           return {
             ...prev,
             blocksDug: currentRocks + 1,
-            goldFound: currentGold + (typeof res.goldAwarded === 'number' && !isNaN(res.goldAwarded) ? res.goldAwarded : 0),
+            goldFound: currentGold + goldAwarded,
+            cashDollars: currentCash + cashEarned,
           };
         });
         if (res.message && onShowBanner) {
-          onShowBanner(res.message);
+          onShowBanner(
+            cashEarned > 0
+              ? `${res.message} ➔ 🪙 Auto-Redeemed +$${cashEarned.toFixed(2)} Cash!`
+              : res.message
+          );
+        }
+      } else {
+        // Fallback: Pickaxe strikes ground terrain directly
+        const forwardXZ = new THREE.Vector2(lookDir.x, lookDir.z).normalize();
+        const digX = playerPos.current.x + (forwardXZ.x || 0) * 1.6;
+        const digZ = playerPos.current.z + (forwardXZ.y || 0) * 1.6;
+        const result = digHoleInTerrain(digX, digZ, 0.42, 1.85, 'pickaxe');
+        if (result.hole) {
+          multiplayer.broadcastDig(result.hole, 'pickaxe');
+        }
+        if (result.shaftCollarEstablished && undergroundLayersRef.current) {
+          const digY = getTerrainHeight(digX, digZ);
+          undergroundLayersRef.current.initAtPosition({ x: digX, y: digY, z: digZ }, digY);
+          if (onUpdateShaftLayers) onUpdateShaftLayers(undergroundLayersRef.current.layers);
+          if (onUpdateShaftLevel) onUpdateShaftLevel(0, undergroundLayersRef.current.maxUnlockedLevel);
+          if (onShowBanner) onShowBanner(`⚒️ Deep Bedrock Shaft Collar Established! Press [E] to Descend into Subterranean Mine Shaft!`);
+        } else if (result.strataMessage && onShowBanner) {
+          onShowBanner(result.strataMessage);
         }
       }
     };
@@ -713,6 +943,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (cam) cam.getWorldDirection(lookDir);
       else {
         lookDir.set(-Math.sin(playerYaw.current), 0, -Math.cos(playerYaw.current));
+      }
+
+      // Check if striking subterranean mini-voxels
+      if (undergroundLayersRef.current) {
+        const uLayers = undergroundLayersRef.current;
+        const targetedVoxel = uLayers.voxelEngine.targetedVoxel;
+        const isNearShaft = uLayers.isNearShaft(playerPos.current, 5.5) || uLayers.currentLevel > 0;
+        if (targetedVoxel || (isNearShaft && uLayers.isNearExcavationPit(playerPos.current))) {
+          executeSubterraneanVoxelMine('shovel');
+          return;
+        }
       }
 
       // First check if shovel blade directly strikes a desert boulder, cactus, or gold deposit
@@ -735,14 +976,26 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               );
             }
           }
+          const goldAwarded = fRes.goldAwarded || 0;
+          const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
+          const cashEarned = isAutoRedeem && goldAwarded > 0 ? Number((goldAwarded * 20.67).toFixed(2)) : 0;
+          if (cashEarned > 0) {
+            soundEngine.playCashRegister();
+          }
           setPlayerState((prev) => ({
             ...prev,
             blocksDug: (prev.blocksDug || 0) + (fRes.blocksDug || 0),
-            goldFound: (prev.goldFound || 0) + (fRes.goldAwarded || 0),
+            woodPlanks: (prev.woodPlanks || 0) + (fRes.woodAwarded || 0),
+            goldFound: (prev.goldFound || 0) + goldAwarded,
+            cashDollars: (prev.cashDollars || 0) + cashEarned,
             hydration: Math.min(100, (prev.hydration || 100) + (fRes.hydrationAwarded || 0)),
           }));
           if (fRes.message && onShowBanner) {
-            onShowBanner(fRes.message);
+            onShowBanner(
+              cashEarned > 0
+                ? `${fRes.message} ➔ 🪙 Auto-Redeemed +$${cashEarned.toFixed(2)} Cash ($20.67/oz)!`
+                : fRes.message
+            );
           }
           return;
         }
@@ -757,6 +1010,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // Physically deform terrain vertices and penetrate progressive geological rock strata!
       const result = digHoleInTerrain(digX, digZ, 0.48, 1.85, 'shovel');
+
+      // Broadcast shovel excavation to multiplayer peers
+      if (result.hole) {
+        multiplayer.broadcastDig(result.hole, 'shovel');
+      }
+      multiplayer.broadcastAction('dig', 'shovel', { x: digX, z: digZ });
 
       // Geotechnical pit wall collapse / slump audio & cascading gravel
       if (result.slumpOccurred) {
@@ -823,10 +1082,20 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         bannerText += ` (💡 Shovel struggles on hard bedrock! Switch to Pickaxe [4] or Dynamite [6])`;
       }
 
+      const woodGained = result.woodAwarded || 0;
+
       if (result.itemFound) {
         const item = result.itemFound;
+        const goldVal = item.type === 'gold' ? item.value : (result.goldAwarded || 0);
+        const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
+        const cashEarned = isAutoRedeem && goldVal > 0 ? Number((goldVal * 20.67).toFixed(2)) : 0;
+
         if (item.type === 'gold') {
-          soundEngine.playOreChime();
+          if (cashEarned > 0) {
+            soundEngine.playCashRegister();
+          } else {
+            soundEngine.playOreChime();
+          }
           if (miningSystemRef.current) {
             miningSystemRef.current.spawnOreDrop(
               new THREE.Vector3(digX, digY + 0.5, digZ),
@@ -843,14 +1112,32 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         setPlayerState((prev) => ({
           ...prev,
           blocksDug: (prev.blocksDug || 0) + result.rocksAwarded,
-          goldFound: (prev.goldFound || 0) + item.value,
+          woodPlanks: (prev.woodPlanks || 0) + woodGained,
+          goldFound: (prev.goldFound || 0) + goldVal,
+          cashDollars: (prev.cashDollars || 0) + cashEarned,
         }));
+
+        if (cashEarned > 0) {
+          bannerText += ` ➔ 🪙 Auto-Redeemed +$${cashEarned.toFixed(2)} ($20.67/oz)!`;
+        }
       } else {
         soundEngine.playVoxelDig();
         setPlayerState((prev) => ({
           ...prev,
           blocksDug: (prev.blocksDug || 0) + result.rocksAwarded,
+          woodPlanks: (prev.woodPlanks || 0) + woodGained,
         }));
+      }
+
+      if (result.shaftCollarEstablished && undergroundLayersRef.current) {
+        undergroundLayersRef.current.initAtPosition({ x: digX, y: digY, z: digZ }, digY);
+        if (onUpdateShaftLayers) {
+          onUpdateShaftLayers(undergroundLayersRef.current.layers);
+        }
+        if (onUpdateShaftLevel) {
+          onUpdateShaftLevel(0, undergroundLayersRef.current.maxUnlockedLevel);
+        }
+        bannerText = `⚒️ Deep Bedrock Shaft Collar Established! Press [E] to Descend into Subterranean Mine Shaft!`;
       }
 
       if (onShowBanner) {
@@ -861,11 +1148,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const handleActionDig = () => {
       if (
         undergroundLayersRef.current &&
-        undergroundLayersRef.current.currentLevel > 0 &&
-        undergroundLayersRef.current.isNearExcavationPit(playerPos.current)
+        undergroundLayersRef.current.currentLevel > 0
       ) {
-        executeShaftDig();
-        return;
+        const nearbyRoom = undergroundLayersRef.current.getNearbyRoomPortal(playerPos.current, 5.0);
+        if (nearbyRoom && !nearbyRoom.room.isComplete) {
+          executeExcavateRoom(nearbyRoom.direction);
+          return;
+        }
+
+        if (undergroundLayersRef.current.isNearExcavationPit(playerPos.current)) {
+          executeShaftDig();
+          return;
+        }
       }
       if (playerStateRef.current.equippedTool === 'shovel') {
         executeShovelDig();
@@ -949,6 +1243,91 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
     };
 
+    const executeSubterraneanVoxelMine = (tool: string = 'pickaxe') => {
+      const uLayers = undergroundLayersRef.current;
+      if (!uLayers) return;
+
+      const activeTool = playerStateRef.current.equippedTool || tool;
+
+      if (uLayers.voxelEngine.targetedVoxel) {
+        const res = uLayers.mineTargetedVoxel(activeTool);
+        if (res.newLayer && onUpdateShaftLevel) {
+          onUpdateShaftLevel(res.newLayer.level, uLayers.maxUnlockedLevel);
+        }
+        if (onUpdateShaftLayers) {
+          onUpdateShaftLayers([...uLayers.layers]);
+        }
+        if (res.rewardGold || res.oreYield) {
+          const goldGain = (res.rewardGold || 0) + (res.oreYield || 0);
+          setPlayerState((prev) => ({
+            ...prev,
+            goldFound: (prev.goldFound || 0) + goldGain,
+            blocksDug: (prev.blocksDug || 0) + 1,
+          }));
+        } else if (res.destroyed) {
+          setPlayerState((prev) => ({
+            ...prev,
+            blocksDug: (prev.blocksDug || 0) + 1,
+          }));
+        }
+        if (res.message && onShowBanner) {
+          onShowBanner(res.message);
+        }
+      } else if (uLayers.currentLevel > 0) {
+        // Continuous organic cavern wall strike!
+        const camDir = new THREE.Vector3();
+        camera.getWorldDirection(camDir);
+        const wallHit = new THREE.Vector3(
+          playerPos.current.x + camDir.x * 4.5,
+          playerPos.current.y + camDir.y * 4.5,
+          playerPos.current.z + camDir.z * 4.5
+        );
+        const wallRes = uLayers.strikeCavernWall(wallHit, activeTool);
+        if (wallRes.oreYield > 0) {
+          setPlayerState((prev) => ({
+            ...prev,
+            goldFound: (prev.goldFound || 0) + wallRes.oreYield,
+            blocksDug: (prev.blocksDug || 0) + 1,
+          }));
+        } else {
+          setPlayerState((prev) => ({
+            ...prev,
+            blocksDug: (prev.blocksDug || 0) + 1,
+          }));
+        }
+        if (wallRes.message && onShowBanner) {
+          onShowBanner(wallRes.message);
+        }
+      }
+    };
+
+    if (onRegisterStrikeVoxelHandler) {
+      onRegisterStrikeVoxelHandler(() => executeSubterraneanVoxelMine(playerStateRef.current.equippedTool));
+    }
+
+    const executePlaceUndergroundTimberBent = () => {
+      const uLayers = undergroundLayersRef.current;
+      if (!uLayers || uLayers.currentLevel === 0) return;
+      const wood = playerStateRef.current.woodPlanks || 0;
+      if (wood < 1) {
+        if (onShowBanner) onShowBanner('Need 1 Wood Plank to place a drift timber support bent.');
+        return;
+      }
+      uLayers.voxelEngine.placeTimberBent(playerPos.current, playerYaw.current);
+      setPlayerState((prev) => ({
+        ...prev,
+        woodPlanks: Math.max(0, (prev.woodPlanks || 0) - 1),
+      }));
+      soundEngine.playTrenchShoringConstruct();
+      if (onShowBanner) {
+        onShowBanner('🛡️ Square-Set Timber Bent Placed! Drift shored with pine posts and miner candle.');
+      }
+    };
+
+    if (onRegisterPlaceTimberHandler) {
+      onRegisterPlaceTimberHandler(executePlaceUndergroundTimberBent);
+    }
+
     const executeTraverseShaft = (level: number) => {
       const uLayers = undergroundLayersRef.current;
       if (!uLayers) return;
@@ -975,7 +1354,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       soundEngine.playLadderClimb();
       soundEngine.playDeepMineRumble();
-      uLayers.currentLevel = level;
+      uLayers.setSubterraneanLevel(level);
       const targetLayer = uLayers.layers.find((l) => l.level === level);
       const floorY = uLayers.surfaceY - (targetLayer ? targetLayer.depthMeters : 8.5);
       playerPos.current.set(uLayers.surfacePos.x + 1.2, floorY + 1.7, uLayers.surfacePos.z + 1.2);
@@ -1005,34 +1384,116 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       onRegisterShaftDigHandler(executeShaftDig);
     }
 
+    const executeExcavateRoom = (dir: RoomDirection) => {
+      const uLayers = undergroundLayersRef.current;
+      if (!uLayers || uLayers.currentLevel === 0) return;
+      const res = uLayers.strikeRoomFace(dir, playerStateRef.current.equippedTool, playerPos.current);
+      if (res.completed && res.oreAwarded) {
+        setPlayerState((prev) => ({
+          ...prev,
+          goldFound: (prev.goldFound || 0) + (res.oreAwarded || 0),
+          blocksDug: (prev.blocksDug || 0) + 1,
+        }));
+      }
+      if (onUpdateShaftLayers) {
+        onUpdateShaftLayers([...uLayers.layers]);
+      }
+      if (res.message && onShowBanner) {
+        onShowBanner(res.message);
+      }
+    };
+
+    const executeTimberRoom = (dir: RoomDirection) => {
+      const uLayers = undergroundLayersRef.current;
+      if (!uLayers || uLayers.currentLevel === 0) return;
+      const res = uLayers.timberRoom(dir, playerStateRef.current.woodPlanks || 0);
+      if (res.success) {
+        setPlayerState((prev) => ({
+          ...prev,
+          woodPlanks: Math.max(0, (prev.woodPlanks || 0) - (res.timberUsed || 0)),
+        }));
+        if (onUpdateShaftLayers) {
+          onUpdateShaftLayers([...uLayers.layers]);
+        }
+      }
+      if (res.message && onShowBanner) {
+        onShowBanner(res.message);
+      }
+    };
+
+    const executeToggleCornishPump = () => {
+      const uLayers = undergroundLayersRef.current;
+      if (!uLayers) return;
+      const res = uLayers.togglePump();
+      if (onUpdateWaterTable) {
+        onUpdateWaterTable({ ...uLayers.waterTable });
+      }
+      if (res.message && onShowBanner) {
+        onShowBanner(res.message);
+      }
+    };
+
+    if (onRegisterExcavateRoomHandler) {
+      onRegisterExcavateRoomHandler(executeExcavateRoom);
+    }
+    if (onRegisterTimberRoomHandler) {
+      onRegisterTimberRoomHandler(executeTimberRoom);
+    }
+    if (onRegisterTogglePumpHandler) {
+      onRegisterTogglePumpHandler(executeToggleCornishPump);
+    }
+
     const executeShoreNearbyTrench = () => {
       const px = playerPos.current.x;
       const pz = playerPos.current.z;
-      const nearbyHole = getNearbyDugHole(px, pz, 4.5);
+      const nearbyHole = getNearbyDugHole(px, pz, 4.8);
       if (!nearbyHole) {
-        if (onShowBanner) onShowBanner("No deep excavation trench nearby to shore. Dig a pit with Shovel [3] or Pickaxe [4]!");
+        if (onShowBanner) onShowBanner("No excavation trench nearby to shore. Dig a pit with Shovel [3] or Pickaxe [4]!");
         return;
       }
-      if (nearbyHole.depth < 0.9) {
-        if (onShowBanner) onShowBanner("Trench is too shallow to require timber shoring (depth < 1.0m). Dig deeper first!");
+
+      const currentLayer = getGeologicalLayerAtDepth(nearbyHole.depth);
+      const minRequiredDepth = currentLayer.id === 'strata_sand' ? 0.50 : 0.85;
+
+      if (nearbyHole.depth < minRequiredDepth) {
+        if (onShowBanner) onShowBanner(`Trench is too shallow to require timber shoring (depth < ${minRequiredDepth.toFixed(1)}m). Dig deeper first!`);
         return;
       }
       if (nearbyHole.isShored && nearbyHole.shoredUntilDepth && nearbyHole.shoredUntilDepth > nearbyHole.depth + 0.35) {
-        if (onShowBanner) onShowBanner(`Trench is already securely timbered down to ${nearbyHole.shoredUntilDepth.toFixed(1)}m. Dig deeper into the next depth before adding more shoring!`);
+        if (onShowBanner) onShowBanner(`Trench is already securely timbered down to ${nearbyHole.shoredUntilDepth.toFixed(1)}m. Dig deeper before adding more framing!`);
         return;
       }
-      const rocksOwned = playerStateRef.current.blocksDug || 0;
-      if (rocksOwned < 3) {
-        if (onShowBanner) onShowBanner(`Need 3 Quarry Stones to anchor timber shoring! (You have ${rocksOwned}). Mine stones with Pickaxe [4].`);
+
+      const woodOwned = playerStateRef.current.woodPlanks ?? 0;
+      const rocksOwned = playerStateRef.current.blocksDug ?? 0;
+
+      if (currentLayer.id === 'strata_sand' && woodOwned < 2) {
+        if (onShowBanner) onShowBanner(`Need 2 Timber Planks for Wooden Shoring in Sand! (You have ${woodOwned}). Salvage planks from sand washes or chop scrub.`);
+        return;
+      }
+      if (currentLayer.id === 'strata_caliche' && (woodOwned < 1 || rocksOwned < 1)) {
+        if (onShowBanner) onShowBanner(`Need 1 Timber Plank & 1 Quarry Stone for Caliche framing! (Wood: ${woodOwned}, Stones: ${rocksOwned}).`);
+        return;
+      }
+      if ((currentLayer.id === 'strata_tuff' || currentLayer.id === 'strata_gneiss') && woodOwned < 1) {
+        if (onShowBanner) onShowBanner(`Need 1 Timber Plank for subterranean rock shoring! (You have ${woodOwned}).`);
         return;
       }
 
       const res = shoreExcavationPit(nearbyHole.id, sceneRef.current || undefined);
       if (res.success) {
         soundEngine.playTrenchShoringConstruct();
+        multiplayer.broadcastShore(
+          nearbyHole.id,
+          nearbyHole.x,
+          nearbyHole.z,
+          nearbyHole.stability,
+          nearbyHole.shoredUntilDepth || nearbyHole.depth
+        );
         setPlayerState((prev) => ({
           ...prev,
-          blocksDug: Math.max(0, (prev.blocksDug || 0) - res.rocksUsed),
+          woodPlanks: Math.max(0, (prev.woodPlanks ?? 0) - res.woodUsed),
+          blocksDug: Math.max(0, (prev.blocksDug ?? 0) - res.rocksUsed),
         }));
         if (onShowBanner) onShowBanner(res.message);
       } else {
@@ -1218,7 +1679,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         if (onOpenBuilder) onOpenBuilder();
       }
       if (e.code === 'KeyT') {
-        executeShoreNearbyTrench();
+        if (undergroundLayersRef.current && undergroundLayersRef.current.currentLevel > 0) {
+          executePlaceUndergroundTimberBent();
+        } else {
+          executeShoreNearbyTrench();
+        }
       }
 
       // Hotkeys for tools
@@ -1302,12 +1767,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const tool = playerStateRef.current.equippedTool;
       if (
         undergroundLayersRef.current &&
-        undergroundLayersRef.current.currentLevel > 0 &&
-        undergroundLayersRef.current.isNearExcavationPit(playerPos.current) &&
-        (tool === 'pickaxe' || tool === 'shovel')
+        undergroundLayersRef.current.currentLevel > 0
       ) {
-        executeShaftDig();
-        return;
+        if (tool === 'pickaxe' || tool === 'shovel' || tool === 'dynamite') {
+          executeSubterraneanVoxelMine(tool);
+          return;
+        }
       }
       if (tool === 'shovel') {
         executeShovelDig();
@@ -1390,47 +1855,106 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const pz = playerPos.current.z;
 
       // Geotechnical Excavation Trench check
-      const nearbyTrench = getNearbyDugHole(px, pz, 4.2);
+      const nearbyTrench = getNearbyDugHole(px, pz, 4.8);
+      const currentLayer = nearbyTrench ? getGeologicalLayerAtDepth(nearbyTrench.depth) : null;
+      const minRequiredDepth = currentLayer?.id === 'strata_sand' ? 0.50 : 0.85;
       const shoredUntil = nearbyTrench?.shoredUntilDepth || 0;
       const needsNextShore = Boolean(
         nearbyTrench &&
-        nearbyTrench.depth >= 0.9 &&
-        (!nearbyTrench.isShored || nearbyTrench.depth >= shoredUntil - 0.2)
+        nearbyTrench.depth >= minRequiredDepth &&
+        (!nearbyTrench.isShored || nearbyTrench.depth >= shoredUntil - 0.25)
       );
 
+      let woodNeeded = 1;
+      let rocksNeeded = 0;
+      let materialType: 'wood' | 'stone' | 'timber_rock' | 'none' = 'wood';
+
+      if (currentLayer) {
+        if (currentLayer.id === 'strata_sand') {
+          woodNeeded = 2;
+          rocksNeeded = 0;
+          materialType = 'wood';
+        } else if (currentLayer.id === 'strata_caliche') {
+          woodNeeded = 1;
+          rocksNeeded = 1;
+          materialType = 'timber_rock';
+        } else if (currentLayer.id === 'strata_tuff' || currentLayer.id === 'strata_gneiss') {
+          woodNeeded = 1;
+          rocksNeeded = 0;
+          materialType = 'wood';
+        } else if (currentLayer.shoringRequirement === 'none') {
+          woodNeeded = 0;
+          rocksNeeded = 0;
+          materialType = 'none';
+        }
+      }
+
+      const playerWood = playerStateRef.current.woodPlanks ?? 0;
+      const playerRocks = playerStateRef.current.blocksDug ?? 0;
+      const hasMaterials = playerWood >= woodNeeded && playerRocks >= rocksNeeded;
+
       if (onNearbyTrenchChange) {
-        if (nearbyTrench && nearbyTrench.depth >= 0.9) {
+        if (nearbyTrench && nearbyTrench.depth >= minRequiredDepth) {
           onNearbyTrenchChange({
             depth: nearbyTrench.depth,
             stability: nearbyTrench.stability,
             isShored: nearbyTrench.isShored,
             shoredUntilDepth: nearbyTrench.shoredUntilDepth,
-            rocksNeeded: 3,
-            canShore: needsNextShore && (playerStateRef.current.blocksDug || 0) >= 3,
+            rocksNeeded,
+            woodNeeded,
+            strataName: currentLayer?.name || 'Stratum',
+            strataId: currentLayer?.id || 'strata_sand',
+            materialType,
+            strataAdvice: currentLayer?.shoringAdvice || '',
+            canShore: needsNextShore && hasMaterials,
           });
         } else {
           onNearbyTrenchChange(null);
         }
       }
 
-      if (needsNextShore && nearbyTrench) {
-        const rocks = playerStateRef.current.blocksDug || 0;
-        const isExtend = (nearbyTrench.shoredUntilDepth || 0) > 0;
-        const actionWord = isExtend ? 'Extend Shoring to Next Depth [T]' : 'Reinforce Trench with Timber Shoring [T]';
-        const msg = `${actionWord} (${rocks >= 3 ? '3 Stones' : 'Need 3 Stones'} | Depth: ${nearbyTrench.depth.toFixed(1)}m | Stability: ${Math.round(nearbyTrench.stability)}%)`;
-        if (executeAction) {
-          executeShoreNearbyTrench();
-          return;
-        } else {
-          onPromptInteract(msg, () => executeShoreNearbyTrench());
-          return;
-        }
-      }
-
       // 0. Subterranean Mine Shaft Layer Interactions
       if (undergroundLayersRef.current) {
         const uLayers = undergroundLayersRef.current;
+        if (onUpdateShaftSinkingStats) {
+          const isNearShaft = uLayers.isNearShaft(playerPos.current, 7.5) || uLayers.currentLevel > 0;
+          if (isNearShaft) {
+            onUpdateShaftSinkingStats(uLayers.voxelEngine.getShaftSinkingStats());
+          } else {
+            onUpdateShaftSinkingStats(null);
+          }
+        }
+
+        // Check if targeting a granular mini-voxel
+        const targetedVoxel = uLayers.voxelEngine.targetedVoxel;
+        if (targetedVoxel) {
+          let label = `Mine Voxel [Left Click / E]`;
+          if (targetedVoxel.isFloor) {
+            label = `⛏️ Sink Shaft Floor (-${targetedVoxel.strataDepth.toFixed(2)}m) [Left Click / E]`;
+          } else if (targetedVoxel.type === 'quartz_gold') {
+            label = `⛏️ Mine Bonanza Quartz-Gold Vein [Left Click / E]`;
+          } else if (targetedVoxel.type === 'silver_ore') {
+            label = `⛏️ Mine Silver-Galena Ore Pocket [Left Click / E]`;
+          } else if (targetedVoxel.type === 'amethyst') {
+            label = `⛏️ Mine Imperial Amethyst Geode [Left Click / E]`;
+          } else if (targetedVoxel.type === 'copper_lode') {
+            label = `⛏️ Mine Native Copper-Gold Lode [Left Click / E]`;
+          } else if (targetedVoxel.type === 'iron_ore') {
+            label = `⛏️ Mine Magnetite-Iron Band [Left Click / E]`;
+          } else {
+            label = `⛏️ Carve Drift into ${targetedVoxel.type.replace('_', ' ').toUpperCase()} [Left Click / E]`;
+          }
+
+          if (executeAction) {
+            executeSubterraneanVoxelMine(playerStateRef.current.equippedTool);
+          } else {
+            onPromptInteract(label, () => executeSubterraneanVoxelMine(playerStateRef.current.equippedTool));
+          }
+          return;
+        }
+
         if (uLayers.currentLevel > 0) {
+
           // Check proximity to excavation pit in center of chamber
           if (uLayers.isNearExcavationPit(playerPos.current)) {
             if (uLayers.currentLevel < 4) {
@@ -1451,7 +1975,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
 
           // Check proximity to shaft ladder / hoist
-          if (uLayers.isNearShaft(playerPos.current, 3.8)) {
+          if (uLayers.isNearShaft(playerPos.current, 4.5)) {
             if (uLayers.currentLevel === 1) {
               if (executeAction) {
                 executeTraverseShaft(0);
@@ -1469,15 +1993,70 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
         } else {
-          // On surface - check proximity to mine shaft collar
-          if (uLayers.isNearShaft(playerPos.current, 5.0)) {
+          // On surface - check proximity to ANY dug mine pit (depth >= 0.8m) OR shaft collar
+          const isNearAnyPit =
+            (nearbyTrench && nearbyTrench.depth >= 0.8) ||
+            uLayers.isNearShaft(playerPos.current, 5.5) ||
+            activeDugHoles.some((h) => h.depth >= 0.8 && Math.hypot(px - h.x, pz - h.z) <= 5.5);
+
+          if (isNearAnyPit) {
+            // Anchor subterranean system to this pit collar if not already anchored
+            const pitHole =
+              (nearbyTrench && nearbyTrench.depth >= 0.8 ? nearbyTrench : null) ||
+              activeDugHoles.find((h) => h.depth >= 0.8 && Math.hypot(px - h.x, pz - h.z) <= 5.5);
+
+            if (
+              pitHole &&
+              (Math.abs(uLayers.surfacePos.x - pitHole.x) > 0.5 || Math.abs(uLayers.surfacePos.z - pitHole.z) > 0.5)
+            ) {
+              const hBaseY = getTerrainHeight(pitHole.x, pitHole.z);
+              uLayers.initAtPosition({ x: pitHole.x, y: hBaseY, z: pitHole.z }, hBaseY);
+              if (onUpdateShaftLayers) onUpdateShaftLayers(uLayers.layers);
+              if (onUpdateShaftLevel) onUpdateShaftLevel(0, uLayers.maxUnlockedLevel);
+            }
+
             if (executeAction) {
               executeTraverseShaft(1);
             } else {
-              onPromptInteract('Descend into Subterranean Mine Shaft [E]', () => executeTraverseShaft(1));
+              const shoreHint = needsNextShore ? ' (Press [T] to Shore)' : '';
+              onPromptInteract(`Descend into Subterranean Mine Shaft (Layer 1) [E]${shoreHint}`, () =>
+                executeTraverseShaft(1)
+              );
             }
             return;
           }
+        }
+      }
+
+      if (needsNextShore && nearbyTrench && currentLayer) {
+        const isExtend = (nearbyTrench.shoredUntilDepth || 0) > 0;
+        const actionWord =
+          currentLayer.id === 'strata_sand'
+            ? isExtend
+              ? 'Extend Wooden Shoring in Sand [T]'
+              : 'Install Wooden Shoring in Sand [T]'
+            : currentLayer.shoringRequirement === 'none'
+            ? 'Secure Self-Supporting Chamber [T]'
+            : isExtend
+            ? 'Extend Mine Timbering [T]'
+            : 'Construct Underground Mine Shoring [T]';
+
+        const costDesc =
+          materialType === 'wood'
+            ? `${woodNeeded} Wood Planks`
+            : materialType === 'timber_rock'
+            ? '1 Wood Plank + 1 Stone'
+            : '0 Materials (Self-Supporting Bedrock)';
+
+        const msg = `${actionWord} (${costDesc} | ${currentLayer.name} | Stability: ${Math.round(
+          nearbyTrench.stability
+        )}%)`;
+        if (executeAction) {
+          executeShoreNearbyTrench();
+          return;
+        } else {
+          onPromptInteract(msg, () => executeShoreNearbyTrench());
+          return;
         }
       }
 
@@ -1707,17 +2286,19 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // 1. Player Physics & Locomotion (Crisp, Responsive, Ground-Snapped Controls)
       const keys = keysPressed.current;
-      const isSprinting = keys['ShiftLeft'] || keys['ShiftRight'];
+      const isSprinting = !isGameOverRef.current && (keys['ShiftLeft'] || keys['ShiftRight']);
       const moveSpeed = (isSprinting ? 12.0 : 6.5) * delta;
 
       const forward = new THREE.Vector3(-Math.sin(playerYaw.current), 0, -Math.cos(playerYaw.current));
       const right = new THREE.Vector3(Math.cos(playerYaw.current), 0, -Math.sin(playerYaw.current));
       const moveDir = new THREE.Vector3();
 
-      if (keys['KeyW'] || keys['ArrowUp']) moveDir.add(forward);
-      if (keys['KeyS'] || keys['ArrowDown']) moveDir.sub(forward);
-      if (keys['KeyD'] || keys['ArrowRight']) moveDir.add(right);
-      if (keys['KeyA'] || keys['ArrowLeft']) moveDir.sub(right);
+      if (!isGameOverRef.current) {
+        if (keys['KeyW'] || keys['ArrowUp']) moveDir.add(forward);
+        if (keys['KeyS'] || keys['ArrowDown']) moveDir.sub(forward);
+        if (keys['KeyD'] || keys['ArrowRight']) moveDir.add(right);
+        if (keys['KeyA'] || keys['ArrowLeft']) moveDir.sub(right);
+      }
 
       const isMoving = moveDir.lengthSq() > 0.001;
       if (isMoving) {
@@ -1752,12 +2333,36 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         }
 
-        // Hydration drain
+        // Hydration drain - balanced rate so the player does not become dehydrated too quickly
         setPlayerState((prev) => {
-          const drainRate = (isSprinting ? 0.75 : 0.25) * delta;
+          if (isGameOverRef.current) return prev;
+          const drainRate = (isSprinting ? 0.35 : 0.12) * delta;
+          const nextHydration = Math.max(0, prev.hydration - drainRate);
+          let nextHealth = prev.health;
+
+          // Gradual sunstroke damage if completely out of water
+          if (nextHydration <= 0) {
+            nextHealth = Math.max(0, prev.health - delta * 2.5);
+            if (nextHealth <= 0 && prev.health > 0) {
+              soundEngine.playPlayerDeath();
+              triggerDeath({
+                reason: 'dehydration',
+                title: 'Perished of Sunstroke',
+                subtitle: 'Exhausted Under the Scorching Arizona Sun',
+                cause: 'Blistering desert heat and an empty canteen brought fatal sunstroke in the Superstition wilderness. Always keep your canteen filled at mountain springs or the base camp water barrel!',
+                goldFound: prev.goldFound || 0,
+                blocksDug: prev.blocksDug || 0,
+                landmarksDiscovered: prev.discoveredLandmarks?.length || 1,
+                timeSurvivedSeconds: Math.floor((Date.now() - expeditionStartTime.current) / 1000),
+                coordinates: { x: playerPos.current.x, y: playerPos.current.y, z: playerPos.current.z },
+              });
+            }
+          }
+
           return {
             ...prev,
-            hydration: Math.max(0, prev.hydration - drainRate),
+            hydration: nextHydration,
+            health: nextHealth,
             isSprinting,
           };
         });
@@ -1794,6 +2399,77 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      // Subterranean Water Table Physics, Swimming & Oxygen Simulation
+      if (isUnderground && undergroundLayersRef.current) {
+        const waterStatus = undergroundLayersRef.current.getWaterStatusForPlayer(
+          playerPos.current,
+          undergroundLayersRef.current.currentLevel
+        );
+
+        if (waterStatus.isSwimming) {
+          const swimSurfaceY = waterStatus.waterSurfaceY + 0.5;
+          if (keys['Space']) {
+            playerPos.current.y = Math.min(swimSurfaceY + 0.4, playerPos.current.y + 4.0 * delta);
+            verticalVelocity.current = 0;
+            isGrounded.current = false;
+          } else if (playerPos.current.y < swimSurfaceY) {
+            // Natural buoyant lift in flooded stope
+            playerPos.current.y = Math.min(swimSurfaceY, playerPos.current.y + 2.4 * delta);
+            verticalVelocity.current = 0;
+            isGrounded.current = false;
+          }
+        }
+
+        if (waterStatus.isSubmerged) {
+          oxygenLevelRef.current = Math.max(0, oxygenLevelRef.current - delta * 15.0);
+          if (oxygenLevelRef.current <= 0 && !isGameOverRef.current) {
+            drowningTimerRef.current += delta;
+            if (drowningTimerRef.current >= 0.9) {
+              drowningTimerRef.current = 0;
+              if (onTriggerDamageFlash) onTriggerDamageFlash();
+              soundEngine.playWaterSplash();
+              setPlayerState((prev) => {
+                const nextHealth = Math.max(0, (prev.health || 100) - 18);
+                if (nextHealth <= 0) {
+                  soundEngine.playPlayerDeath();
+                  const uLayers = undergroundLayersRef.current;
+                  const activeL = uLayers?.layers.find((l) => l.level === uLayers.currentLevel);
+                  triggerDeath({
+                    reason: 'drowning',
+                    title: 'Drowned in Flooded Mine Shaft',
+                    subtitle: 'Submerged Beneath Regional Water Table',
+                    cause: `Groundwater filled the stopes of Layer ${uLayers?.currentLevel || 6}. Without running the Cornish Steam Dewatering Pump, oxygen depleted and your prospector drowned in the dark subterranean depths. Operate the Cornish Pump in the Mine Shaft HUD to dewater flooded stopes!`,
+                    goldFound: prev.goldFound || 0,
+                    blocksDug: prev.blocksDug || 0,
+                    depth: activeL?.depthMeters || 92.0,
+                    strata: activeL?.name || 'Flooded Aquifer Fault',
+                    landmarksDiscovered: prev.discoveredLandmarks?.length || 1,
+                    timeSurvivedSeconds: Math.floor((Date.now() - expeditionStartTime.current) / 1000),
+                    coordinates: { x: playerPos.current.x, y: playerPos.current.y, z: playerPos.current.z },
+                  });
+                }
+                return { ...prev, health: nextHealth };
+              });
+            }
+          }
+        } else {
+          oxygenLevelRef.current = Math.min(100, oxygenLevelRef.current + delta * 35.0);
+        }
+
+        if (onUpdateOxygen) {
+          onUpdateOxygen(oxygenLevelRef.current, waterStatus.isSubmerged);
+        }
+        if (onUpdateWaterTable && Math.floor(now / 400) !== Math.floor(lastWaterSyncTime.current / 400)) {
+          lastWaterSyncTime.current = now;
+          onUpdateWaterTable({ ...undergroundLayersRef.current.waterTable });
+        }
+      } else {
+        if (oxygenLevelRef.current < 100) {
+          oxygenLevelRef.current = 100;
+          if (onUpdateOxygen) onUpdateOxygen(100, false);
+        }
+      }
+
       // Sync character model position and rotation (Third Person)
       if (characterMeshRef.current) {
         characterMeshRef.current.position.set(
@@ -1814,8 +2490,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         );
       }
 
-      // 2. Camera Positioning (First-Person vs Third-Person) with Gentle Head Bobbing
-      if (viewMode === 'first') {
+      // 2. Camera Positioning (Panoramic Death Cam vs First-Person vs Third-Person)
+      if (isGameOverRef.current) {
+        // Slow cinematic panoramic orbit around the fallen prospector sweeping across desert vistas
+        panoramicAngle.current += delta * 0.16;
+        const orbitDist = 7.5;
+        const orbitY = deathPos.current.y + 3.2;
+        const camX = deathPos.current.x + Math.sin(panoramicAngle.current) * orbitDist;
+        const camZ = deathPos.current.z + Math.cos(panoramicAngle.current) * orbitDist;
+        camera.position.set(camX, orbitY, camZ);
+        camera.lookAt(deathPos.current.x, deathPos.current.y + 0.5, deathPos.current.z);
+      } else if (viewMode === 'first') {
         camera.position.copy(playerPos.current);
 
         // Subtle, natural head bobbing only when moving while grounded
@@ -1837,7 +2522,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const camYOffset = 1.8;
         const camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
         const camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
+        const camGroundY = isUnderground ? currentGroundY : getTerrainHeight(camX, camZ);
         const camY = Math.max(
+          camGroundY + 0.65,
           currentGroundY + 1.2,
           playerPos.current.y + camYOffset + Math.sin(playerPitch.current) * 2.0
         );
@@ -1899,16 +2586,49 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       // 3. Update Granular Mining System (Drops, Voxels & Debris)
       if (miningSystemRef.current) {
         miningSystemRef.current.update(delta, playerPos.current, (drop) => {
+          if (drop.type === 'dynamite') {
+            const count = typeof drop.value === 'number' && !isNaN(drop.value) ? Math.max(1, Math.round(drop.value)) : 1;
+            setPlayerState((prev) => ({
+              ...prev,
+              dynamiteCount: (prev.dynamiteCount || 0) + count,
+            }));
+            if (onShowBanner) {
+              onShowBanner(`+${count} Stick${count > 1 ? 's' : ''} of Mining Dynamite recovered!`);
+            }
+            return;
+          }
           const goldAmount = typeof drop.value === 'number' && !isNaN(drop.value) ? drop.value : 1;
+          const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
+          const cashEarned = isAutoRedeem && goldAmount > 0 ? Number((goldAmount * 20.67).toFixed(2)) : 0;
+
+          if (cashEarned > 0) {
+            soundEngine.playCashRegister();
+          } else {
+            soundEngine.playGoldPickup();
+          }
+
           setPlayerState((prev) => {
             const currentGold = typeof prev.goldFound === 'number' && !isNaN(prev.goldFound) ? prev.goldFound : 0;
+            const currentCash = typeof prev.cashDollars === 'number' && !isNaN(prev.cashDollars) ? prev.cashDollars : 0;
             return {
               ...prev,
               goldFound: currentGold + goldAmount,
+              cashDollars: currentCash + cashEarned,
             };
           });
+
           if (onShowBanner) {
-            onShowBanner(`+${goldAmount} oz Gold collected from ore deposit!`);
+            if (cashEarned > 0) {
+              onShowBanner(
+                `🪙 Auto-Redeemed +${goldAmount.toFixed(1)} oz ${drop.type === 'silver_chunk' ? 'Silver' : 'Gold'} ➔ +$${cashEarned.toFixed(2)} Cash!`
+              );
+            } else {
+              onShowBanner(
+                drop.type === 'silver_chunk'
+                  ? `+${goldAmount} oz Silver Ore collected!`
+                  : `+${goldAmount} oz Gold collected from ore deposit!`
+              );
+            }
           }
         });
       }
@@ -1928,15 +2648,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             if (onTriggerDamageFlash) onTriggerDamageFlash();
             setPlayerState((prev) => {
               const nextHealth = prev.health - dmg;
-              if (nextHealth <= 0) {
-                // Outlaw ambush defeat: respawn at Peralta Camp
-                playerPos.current.set(-115, getTerrainHeight(-115, -115) + 1.7, -115);
-                if (onShowBanner) onShowBanner('Ambushed by Claim Jumpers! Rescued at Peralta Base Camp.');
+              if (nextHealth <= 0 && prev.health > 0) {
+                soundEngine.playPlayerDeath();
+                triggerDeath({
+                  reason: 'bandit',
+                  title: 'Shot Down by Claim Jumpers',
+                  subtitle: 'Ambushed in Frontier Gunfight',
+                  cause: 'Ambushed by ruthless claim jumpers defending territory in the canyon. The outlaws shot you down and claimed your prospecting equipment.',
+                  goldFound: prev.goldFound || 0,
+                  blocksDug: prev.blocksDug || 0,
+                  landmarksDiscovered: prev.discoveredLandmarks?.length || 1,
+                  timeSurvivedSeconds: Math.floor((Date.now() - expeditionStartTime.current) / 1000),
+                  coordinates: { x: playerPos.current.x, y: playerPos.current.y, z: playerPos.current.z },
+                });
                 return {
                   ...prev,
-                  health: 100,
-                  hydration: 100,
-                  position: { x: -115, y: 5, z: -115 },
+                  health: 0,
                 };
               }
               return {
@@ -1952,11 +2679,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               goldBlasted += miningSystemRef.current.explodeDynamiteAt(blastPos, 3.4);
             }
             let extraRocks = 0;
+            let extraWood = 0;
             let extraHydration = 0;
             if (foliageManagerRef.current) {
               const fBlast = foliageManagerRef.current.explodeFoliageAt(blastPos, 5.0);
               goldBlasted += fBlast.goldBlasted;
               extraRocks = fBlast.rocksBlasted;
+              extraWood = fBlast.woodBlasted || 0;
               extraHydration = fBlast.hydrationBlasted;
 
               // Spawn exploding rock/cactus/quartz debris fragments for everything shattered
@@ -1965,15 +2694,49 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               });
             }
 
-            if (goldBlasted > 0 || extraRocks > 0 || extraHydration > 0) {
+            // Check if blast affects shaft mini-voxels
+            if (undergroundLayersRef.current) {
+              const uLayers = undergroundLayersRef.current;
+              const distToShaft = Math.hypot(blastPos.x - uLayers.surfacePos.x, blastPos.z - uLayers.surfacePos.z);
+              if (distToShaft < 4.5 || uLayers.currentLevel > 0) {
+                const sinkRes = uLayers.voxelEngine.sinkShaftDown('dynamite');
+                if (sinkRes.destroyed) {
+                  goldBlasted += sinkRes.oreYield || 0;
+                  extraRocks += sinkRes.voxelsClearedCount || 6;
+                  if (sinkRes.breakthroughReady) {
+                    const breachRes = uLayers.digDown('dynamite');
+                    if (breachRes.newLayer && onUpdateShaftLevel) {
+                      onUpdateShaftLevel(breachRes.newLayer.level, uLayers.maxUnlockedLevel);
+                    }
+                    if (onUpdateShaftLayers) {
+                      onUpdateShaftLayers([...uLayers.layers]);
+                    }
+                    if (breachRes.message && onShowBanner) {
+                      onShowBanner(breachRes.message);
+                    }
+                  }
+                }
+              }
+            }
+
+            const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
+            const cashEarned = isAutoRedeem && goldBlasted > 0 ? Number((goldBlasted * 20.67).toFixed(2)) : 0;
+            if (cashEarned > 0) {
+              soundEngine.playCashRegister();
+            }
+
+            if (goldBlasted > 0 || extraRocks > 0 || extraWood > 0 || extraHydration > 0) {
               setPlayerState((prev) => ({
                 ...prev,
                 goldFound: (prev.goldFound || 0) + goldBlasted,
+                cashDollars: (prev.cashDollars || 0) + cashEarned,
                 blocksDug: (prev.blocksDug || 0) + extraRocks,
+                woodPlanks: (prev.woodPlanks || 0) + extraWood,
                 hydration: Math.min(100, (prev.hydration || 100) + extraHydration),
               }));
               if (onShowBanner) {
-                onShowBanner(`💥 Blast Shattered Surrounding Rocks & Deposits! (+${goldBlasted} oz Gold, +${extraRocks} Quarry Rocks)`);
+                const autoMsg = cashEarned > 0 ? ` ➔ 🪙 Auto-Redeemed +$${cashEarned.toFixed(2)}!` : '';
+                onShowBanner(`💥 Blast Shattered Deposits! (+${goldBlasted} oz Gold${autoMsg}, +${extraRocks} Stones${extraWood > 0 ? `, +${extraWood} Timber Planks` : ''})`);
               }
             }
           }
@@ -1988,6 +2751,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           sunLightRef.current || undefined,
           hemiLightRef.current || undefined
         );
+      }
+
+      // 5c. Subterranean Mine Shaft & Granular Mini-Voxel Engine
+      if (undergroundLayersRef.current) {
+        undergroundLayersRef.current.update(delta, performance.now());
+        undergroundLayersRef.current.voxelEngine.updateReticle(camera, 6.5);
+        undergroundLayersRef.current.voxelEngine.update(delta);
       }
 
       // 6. Metal Detector Audio Radar
@@ -2029,12 +2799,36 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // Render scene
       renderer.render(scene, camera);
+
+      // Update remote prospectors smooth interpolation and animations
+      remoteProspectorsRef.current.forEach((rp) => {
+        rp.update(delta, playerPos.current);
+      });
+
+      // Transmit local position & action to multiplayer server
+      multiplayer.queuePositionUpdate({
+        x: playerPos.current.x,
+        y: playerPos.current.y,
+        z: playerPos.current.z,
+        yaw: playerYaw.current,
+        pitch: playerPitch.current,
+        action: isSprinting ? 'run' : (isMoving ? 'walk' : 'idle'),
+        activeTool: playerStateRef.current.equippedTool,
+        goldFound: playerStateRef.current.goldFound || 0,
+        rocksGathered: playerStateRef.current.blocksDug || 0,
+        health: playerStateRef.current.health || 100,
+      });
     };
 
     animationFrameId = requestAnimationFrame(animate);
 
     return () => {
       cancelAnimationFrame(animationFrameId);
+      remoteProspectorsRef.current.forEach((rp) => {
+        scene.remove(rp.group);
+        rp.dispose();
+      });
+      remoteProspectorsRef.current.clear();
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousemove', handleMouseMove);

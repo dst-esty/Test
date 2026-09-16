@@ -289,7 +289,7 @@ export class CombatManager {
         b.data.shootCooldown -= delta;
         if (b.data.shootCooldown <= 0) {
           // SHOOT AT PLAYER!
-          b.data.shootCooldown = 2.0 + Math.random() * 1.5;
+          b.data.shootCooldown = 3.2 + Math.random() * 2.0;
           soundEngine.playBanditShot();
 
           // Flash muzzle
@@ -306,17 +306,17 @@ export class CombatManager {
           );
 
           // Inaccuracy spread based on distance
-          const spread = (dist / 40) * 1.2;
+          const spread = (dist / 35) * 1.4;
           const target = playerPos.clone();
           target.x += (Math.random() - 0.5) * spread;
-          target.y += 1.0 + (Math.random() - 0.5) * spread;
+          target.y += 0.9 + (Math.random() - 0.5) * spread;
           target.z += (Math.random() - 0.5) * spread;
 
           this.spawnTracer(muzzlePos, target, true);
 
-          // If bullet was close enough to player, deal damage
-          if (target.distanceTo(playerPos) < 1.8) {
-            const dmg = 15 + Math.floor(Math.random() * 12);
+          // If bullet was close enough to player, deal fair combat damage (8-14 dmg)
+          if (target.distanceTo(playerPos) < 1.3) {
+            const dmg = 8 + Math.floor(Math.random() * 6);
             soundEngine.playPlayerHurt();
             onPlayerDamage(dmg);
           } else {
