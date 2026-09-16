@@ -5,7 +5,46 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      {
+        name: 'fetch-getter-fix',
+        transformIndexHtml() {
+          return [
+            {
+              tag: 'script',
+              attrs: {},
+              children: `(function() {
+  try {
+    var _origFetch = window.fetch;
+    Object.defineProperty(window, 'fetch', {
+      configurable: true,
+      enumerable: true,
+      get: function() { return _origFetch; },
+      set: function(val) { _origFetch = val; }
+    });
+  } catch(e) {
+    try {
+      var proto = Object.getPrototypeOf(window) || (typeof Window !== 'undefined' && Window.prototype);
+      if (proto) {
+        var _pFetch = proto.fetch || window.fetch;
+        Object.defineProperty(proto, 'fetch', {
+          configurable: true,
+          enumerable: true,
+          get: function() { return _pFetch; },
+          set: function(val) { _pFetch = val; }
+        });
+      }
+    } catch(e2) {}
+  }
+})();`,
+              injectTo: 'head-prepend',
+            },
+          ];
+        },
+      },
+      react(),
+      tailwindcss(),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

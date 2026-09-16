@@ -3,6 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        try {
+          var currentFetch = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            configurable: true,
+            enumerable: true,
+            get: function() {
+              return currentFetch;
+            },
+            set: function(fn) {
+              currentFetch = fn;
+            }
+          });
+        } catch (e) {
+          try {
+            var proto = Object.getPrototypeOf(window) || (typeof Window !== 'undefined' && Window.prototype);
+            if (proto) {
+              var protoFetch = proto.fetch || window.fetch;
+              Object.defineProperty(proto, 'fetch', {
+                configurable: true,
+                enumerable: true,
+                get: function() {
+                  return protoFetch;
+                },
+                set: function(fn) {
+                  protoFetch = fn;
+                }
+              });
+            }
+          } catch (err) {}
+        }
+      })();
+    </script>
     <title>Superstition Mountains: Lost Dutchman Expedition</title>
     <meta name="description" content="A 3D open-world desert exploration game set in Arizona's Superstition Wilderness to uncover clues and locate the legendary Lost Dutchman Mine." />
     <meta property="og:title" content="Superstition Mountains: Lost Dutchman Expedition" />
