@@ -11,20 +11,9 @@ import {
   Heart,
   Map as MapIcon,
   BookOpen,
-  Volume2,
-  VolumeX,
-  Eye,
   Droplets,
   Coins,
-  Sun,
-  Moon,
   Clock,
-  Cloud,
-  CloudLightning,
-  CloudSun,
-  Play,
-  Pause,
-  SlidersHorizontal,
   Hammer,
   RotateCw,
   Award,
@@ -32,17 +21,21 @@ import {
   ShieldAlert,
   Shovel,
   Music,
-  SkipForward,
   DollarSign,
   Layers,
   TreePine,
   ChevronDown,
   ChevronUp,
   ChevronRight,
+  ChevronLeft,
+  Sparkles,
+  X,
+  Backpack,
+  Scroll,
 } from 'lucide-react';
-import { MineStructureType, PlayerState, WeatherType } from '../types';
+import { MineStructureType, PlayerState } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
-import { westernMusic, WESTERN_TRACKS } from '../audio/westernMusic';
+import { westernMusic } from '../audio/westernMusic';
 import { InventoryModal } from './InventoryModal';
 
 interface ControlsOverlayProps {
@@ -50,16 +43,11 @@ interface ControlsOverlayProps {
   onSelectTool: (tool: PlayerState['equippedTool']) => void;
   onOpenMap: () => void;
   onOpenJournal: () => void;
+  onOpenGuidebook?: () => void;
   onToggleSound: () => void;
   soundEnabled: boolean;
   onToggleCamera: () => void;
   viewMode: 'first' | 'third';
-  timeOfDay: number;
-  onSetTimeOfDay: (hour: number) => void;
-  weather: WeatherType;
-  onSetWeather: (w: WeatherType) => void;
-  autoCycleTime: boolean;
-  onToggleAutoCycleTime: () => void;
   onDig?: () => void;
   interactionPrompt?: string;
   onInteract?: () => void;
@@ -93,6 +81,16 @@ interface ControlsOverlayProps {
     canShore: boolean;
   } | null;
   onShoreTrench?: () => void;
+  hudVisible?: boolean;
+  onToggleHud?: () => void;
+  isTelegraphOpen?: boolean;
+  onToggleTelegraph?: () => void;
+  unreadTelegraphCount?: number;
+  payDirtAlert?: { ounces: number } | null;
+  onDismissPayDirtAlert?: () => void;
+  onStakePayDirt?: () => void;
+  timeOfDay?: number;
+  nearestLandmark?: { name: string; dist: number } | null;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
@@ -100,16 +98,11 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onSelectTool,
   onOpenMap,
   onOpenJournal,
+  onOpenGuidebook,
   onToggleSound,
   soundEnabled,
   onToggleCamera,
   viewMode,
-  timeOfDay,
-  onSetTimeOfDay,
-  weather,
-  onSetWeather,
-  autoCycleTime,
-  onToggleAutoCycleTime,
   onDig,
   interactionPrompt,
   onInteract,
@@ -131,14 +124,42 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onRedeemAllGold,
   nearbyTrench,
   onShoreTrench,
+  payDirtAlert,
+  onDismissPayDirtAlert,
+  onStakePayDirt,
+  hudVisible: propHudVisible,
+  onToggleHud,
+  isTelegraphOpen = false,
+  onToggleTelegraph,
+  unreadTelegraphCount = 0,
+  timeOfDay = 12,
+  nearestLandmark,
 }) => {
-  const [showAtmospherePanel, setShowAtmospherePanel] = useState(false);
   const [musicPlaying, setMusicPlaying] = useState(westernMusic.getIsPlaying());
+  const [musicMuted, setMusicMuted] = useState(westernMusic.getIsMuted());
   const [currentTrack, setCurrentTrack] = useState(westernMusic.getCurrentTrack());
-  const [showMusicMenu, setShowMusicMenu] = useState(false);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const [isExcavationPanelCollapsed, setIsExcavationPanelCollapsed] = useState(true);
   const [isTrenchPanelCollapsed, setIsTrenchPanelCollapsed] = useState(true);
+  
+  // HUD Visibility (controlled or internal fallback)
+  const [internalHudVisible, setInternalHudVisible] = useState(true);
+  const hudVisible = typeof propHudVisible === 'boolean' ? propHudVisible : internalHudVisible;
+  const toggleHud = () => {
+    if (onToggleHud) {
+      onToggleHud();
+    } else {
+      setInternalHudVisible((prev) => !prev);
+    }
+  };
+
+  // Vitals, Supplies, Inventory, and Records collapse states for ultra-compact HUD (starts collapsed)
+  const [isVitalsCollapsed, setIsVitalsCollapsed] = useState(true);
+  const [isSupplyCollapsed, setIsSupplyCollapsed] = useState(true);
+  const [isInventoryCollapsed, setIsInventoryCollapsed] = useState(true);
+  const [isRecordsCollapsed, setIsRecordsCollapsed] = useState(true);
+
+  const isLanternLit = playerState.equippedTool === 'lantern';
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -148,20 +169,38 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       if (e.code === 'KeyI') {
         e.preventDefault();
         setIsInventoryOpen((prev) => !prev);
+      } else if (e.code === 'KeyH') {
+        e.preventDefault();
+        toggleHud();
       } else if (e.code === 'Escape' && isInventoryOpen) {
         setIsInventoryOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isInventoryOpen]);
+  }, [isInventoryOpen, toggleHud]);
 
   useEffect(() => {
     return westernMusic.subscribe(() => {
       setMusicPlaying(westernMusic.getIsPlaying());
+      setMusicMuted(westernMusic.getIsMuted());
       setCurrentTrack(westernMusic.getCurrentTrack());
     });
   }, []);
+
+  const isMusicActive = musicPlaying && !musicMuted;
+  const handleToggleMusic = () => {
+    if (isMusicActive) {
+      westernMusic.toggleMute();
+    } else {
+      if (musicMuted) {
+        westernMusic.toggleMute();
+      }
+      if (!musicPlaying) {
+        westernMusic.play();
+      }
+    }
+  };
 
   const tools: { id: PlayerState['equippedTool']; label: string; icon: React.ReactNode; key: string }[] = [
     { id: 'compass', label: 'Compass', icon: <Compass className="w-4 h-4" />, key: '1' },
@@ -175,23 +214,6 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
     { id: 'stake', label: 'Claim Stake', icon: <Flag className="w-4 h-4" />, key: '9' },
     { id: 'builder', label: 'Mine Builder', icon: <Hammer className="w-4 h-4" />, key: '0' },
   ];
-
-  const weatherOptions: { id: WeatherType; label: string; icon: React.ReactNode }[] = [
-    { id: 'clear', label: 'Clear Sky', icon: <Sun className="w-3.5 h-3.5" /> },
-    { id: 'clouds', label: 'Clouds', icon: <Cloud className="w-3.5 h-3.5" /> },
-    { id: 'sunset', label: 'Golden Hour', icon: <CloudSun className="w-3.5 h-3.5" /> },
-    { id: 'storm', label: 'Monsoon Storm', icon: <CloudLightning className="w-3.5 h-3.5" /> },
-    { id: 'night', label: 'Starry Night', icon: <Moon className="w-3.5 h-3.5" /> },
-  ];
-
-  const formatTime = (hour: number) => {
-    const h = Math.floor(hour);
-    const m = Math.floor((hour - h) * 60);
-    const mStr = m < 10 ? `0${m}` : `${m}`;
-    const period = h >= 12 ? 'PM' : 'AM';
-    const displayH = h % 12 === 0 ? 12 : h % 12;
-    return `${displayH}:${mStr} ${period}`;
-  };
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 sm:p-5 select-none z-20">
@@ -210,90 +232,363 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* Top Left: Player Survival & Mine Statistics */}
-      <div className="pointer-events-auto flex flex-col gap-2 max-w-sm">
-        {/* Sleek Compact Vitals & Inventory Pill Row */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Streamlined Health & Hydration Pill */}
-          <div className="flex items-center gap-2.5 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-stone-700/60 shadow-lg text-[10px] font-mono">
-            {/* Health */}
-            <div className="flex items-center gap-1.5" title={`Health: ${Math.round(playerState.health)}%`}>
-              <Heart
-                className={`w-3.5 h-3.5 ${
-                  playerState.health < 30 ? 'text-red-500 animate-ping' : 'text-red-400'
-                }`}
-              />
-              <div className="w-12 bg-stone-800 h-2 rounded-full overflow-hidden border border-stone-700/50">
-                <div
-                  className={`h-full transition-all duration-300 ${
-                    playerState.health < 30
-                      ? 'bg-red-600'
-                      : playerState.health < 60
-                      ? 'bg-amber-500'
-                      : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${playerState.health}%` }}
-                />
-              </div>
-              <span className="text-stone-300">{Math.round(playerState.health)}%</span>
-            </div>
+      {/* Pay Dirt Alert: Compact, centered, unobtrusive toast with quick fade and optional one-click stake */}
+      {payDirtAlert && !playerState.activeClaim?.isClaimed && (
+        <div className="absolute top-14 sm:top-16 left-1/2 -translate-x-1/2 z-40 pointer-events-auto animate-fade-in transition-all">
+          <div className="flex items-center gap-2.5 bg-stone-950/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-amber-500/70 shadow-[0_4px_20px_rgba(0,0,0,0.6)] text-stone-100 text-xs font-mono">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/50 shrink-0">
+              <Sparkles className="w-3 h-3 text-amber-300 animate-pulse" />
+            </span>
 
-            <div className="w-px h-3 bg-stone-700/60" />
+            <span className="font-bold text-amber-300 tracking-wide text-[11px] whitespace-nowrap">
+              Pay Dirt Struck!
+            </span>
 
-            {/* Hydration */}
-            <div className="flex items-center gap-1.5" title={`Hydration: ${Math.round(playerState.hydration)}%`}>
-              <Droplets
-                className={`w-3.5 h-3.5 ${
-                  playerState.hydration < 25 ? 'text-sky-400 animate-bounce' : 'text-sky-400'
-                }`}
-              />
-              <div className="w-12 bg-stone-800 h-2 rounded-full overflow-hidden border border-stone-700/50">
-                <div
-                  className={`h-full transition-all duration-300 ${
-                    playerState.hydration < 25
-                      ? 'bg-red-500'
-                      : playerState.hydration < 50
-                      ? 'bg-amber-400'
-                      : 'bg-sky-400'
-                  }`}
-                  style={{ width: `${playerState.hydration}%` }}
-                />
-              </div>
-              <span className="text-stone-300">{Math.round(playerState.hydration)}%</span>
-            </div>
-          </div>
+            <span className="text-[10px] bg-amber-500/25 text-amber-200 px-1.5 py-0.5 rounded font-bold border border-amber-500/40 whitespace-nowrap">
+              +{payDirtAlert.ounces.toFixed(1)} oz
+            </span>
 
-          {/* Minimizable Inventory & Supplies Trigger Tab */}
-          <div className="flex items-center gap-1.5">
             <button
-              onClick={() => setIsInventoryOpen(true)}
-              className="flex items-center gap-2 bg-stone-900/90 hover:bg-stone-850 backdrop-blur-md px-3 py-1.5 rounded-full border border-amber-600/50 hover:border-amber-400 text-stone-200 shadow-lg text-xs font-mono transition-all group cursor-pointer"
-              title="Open Expedition Saddlebag & Supplies [Press I or Tab]"
+              onClick={() => {
+                if (onStakePayDirt) {
+                  onStakePayDirt();
+                } else {
+                  onSelectTool('stake');
+                }
+              }}
+              className="flex items-center gap-1 px-2.5 py-0.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-sans font-bold text-[10px] rounded-full shadow transition-all cursor-pointer whitespace-nowrap"
+              title="Equip claim stake to secure ground [9]"
             >
-              <Box className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-12 transition-transform" />
-              <span className="font-bold text-amber-300">Inventory [I]</span>
-              <div className="w-px h-3 bg-stone-700/60" />
-              <span className="text-emerald-400 font-semibold">${(playerState.cashDollars || 0).toFixed(2)}</span>
-              <span className="text-amber-300 font-semibold">
-                {(typeof playerState.goldFound === 'number' && !isNaN(playerState.goldFound) ? playerState.goldFound : 0).toFixed(1)} oz
-              </span>
-              <span className="text-stone-400 text-[10px]">🪵 {playerState.woodPlanks || 0}</span>
-              <span className="text-stone-400 text-[10px]">🪨 {playerState.blocksDug || 0}</span>
-              <ChevronRight className="w-3.5 h-3.5 text-amber-400/80 group-hover:translate-x-0.5 transition-transform" />
+              <Flag className="w-2.5 h-2.5 fill-stone-950" />
+              <span>Stake [9]</span>
             </button>
 
-            {onRedeemAllGold && (playerState.goldFound || 0) > 0.05 && (
+            {onDismissPayDirtAlert && (
               <button
-                onClick={onRedeemAllGold}
-                className="px-2 py-1.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-full text-[10px] font-mono shadow transition-colors flex items-center gap-1 cursor-pointer"
-                title="Sell all raw gold ore to frontier assayer ($20.67/oz standard)"
+                onClick={onDismissPayDirtAlert}
+                className="text-stone-400 hover:text-stone-100 p-0.5 rounded-full hover:bg-stone-800 transition cursor-pointer shrink-0 ml-0.5"
+                title="Dismiss"
               >
-                <Coins className="w-3 h-3" />
-                <span>Cash Out</span>
+                <X className="w-3 h-3" />
               </button>
             )}
           </div>
         </div>
+      )}
+
+      {/* Top Left: Player Survival & Mine Statistics */}
+      {hudVisible && (
+        <div className="pointer-events-auto flex flex-col gap-2 max-w-sm items-start">
+          {/* Collapsible Vitals & Survival Pill - Collapsed to Just the Red Heart */}
+          {isVitalsCollapsed ? (
+            <button
+              onClick={() => setIsVitalsCollapsed(false)}
+              className="group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-stone-900/90 hover:bg-stone-850 backdrop-blur-md rounded-full border border-red-500/40 hover:border-red-400 shadow-lg shadow-red-950/50 transition-all transform hover:scale-110 active:scale-95 cursor-pointer"
+              title={`Health: ${Math.round(playerState.health)}% | Hydration: ${Math.round(playerState.hydration)}% (Click to view full health & hydration)`}
+            >
+              <Heart
+                className={`w-4 h-4 sm:w-4.5 sm:h-4.5 fill-red-500 text-red-500 transition-transform group-hover:scale-110 ${
+                  playerState.health < 30
+                    ? 'animate-ping'
+                    : playerState.health < 50
+                    ? 'animate-pulse'
+                    : ''
+                }`}
+              />
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 animate-fade-in">
+              {/* Streamlined Health & Hydration Pill */}
+              <div className="flex items-center gap-2.5 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-stone-700/60 shadow-lg text-[10px] font-mono">
+                {/* Health - Clicking heart collapses back down */}
+                <button
+                  onClick={() => setIsVitalsCollapsed(true)}
+                  className="flex items-center gap-1.5 cursor-pointer group"
+                  title={`Health: ${Math.round(playerState.health)}% (Click to collapse to heart)`}
+                >
+                  <Heart
+                    className={`w-3.5 h-3.5 fill-red-500 text-red-500 group-hover:scale-110 transition-transform ${
+                      playerState.health < 30 ? 'animate-ping' : ''
+                    }`}
+                  />
+                  <div className="w-12 bg-stone-800 h-2 rounded-full overflow-hidden border border-stone-700/50">
+                    <div
+                      className={`h-full transition-all duration-300 ${
+                        playerState.health < 30
+                          ? 'bg-red-600'
+                          : playerState.health < 60
+                          ? 'bg-amber-500'
+                          : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${playerState.health}%` }}
+                    />
+                  </div>
+                  <span className="text-stone-300">{Math.round(playerState.health)}%</span>
+                </button>
+
+                <div className="w-px h-3 bg-stone-700/60" />
+
+                {/* Hydration */}
+                <div className="flex items-center gap-1.5" title={`Hydration: ${Math.round(playerState.hydration)}%`}>
+                  <Droplets
+                    className={`w-3.5 h-3.5 text-sky-400 fill-sky-400/40 ${
+                      playerState.hydration < 25 ? 'text-sky-400 animate-bounce' : 'text-sky-400'
+                    }`}
+                  />
+                  <div className="w-12 bg-stone-800 h-2 rounded-full overflow-hidden border border-stone-700/50">
+                    <div
+                      className={`h-full transition-all duration-300 ${
+                        playerState.hydration < 25
+                          ? 'bg-red-500'
+                          : playerState.hydration < 50
+                          ? 'bg-amber-400'
+                          : 'bg-sky-400'
+                      }`}
+                      style={{ width: `${playerState.hydration}%` }}
+                    />
+                  </div>
+                  <span className="text-stone-300">{Math.round(playerState.hydration)}%</span>
+                </div>
+
+                {/* Collapse Button */}
+                <button
+                  onClick={() => setIsVitalsCollapsed(true)}
+                  className="p-1 hover:bg-stone-800 rounded-full text-stone-400 hover:text-white cursor-pointer ml-0.5 transition-colors"
+                  title="Collapse to red heart"
+                >
+                  <ChevronLeft className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Multiplayer Online Status Slot (Directly Under Red Heart) */}
+          <div id="multiplayer-status-slot" className="w-fit" />
+
+          {/* Collapsible Supply Icon & Panel (Field Supplies & Tools) */}
+          {isSupplyCollapsed ? (
+            <button
+              onClick={() => setIsSupplyCollapsed(false)}
+              className={`group flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-900/90 hover:bg-stone-850 text-stone-300 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+                isLanternLit
+                  ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)]'
+                  : 'border-amber-600/40 hover:border-amber-400/80 shadow-black/40'
+              }`}
+              title={`Field Supplies & Tools (Active: ${tools.find((t) => t.id === playerState.equippedTool)?.label || 'Tool'}) - Click to open tool rack`}
+            >
+              <Backpack className="w-3.5 h-3.5 text-amber-400 group-hover:text-amber-300 transition-colors" />
+              <Pickaxe className="w-3.5 h-3.5 text-stone-400 group-hover:text-amber-300 transition-colors" />
+              {isLanternLit && (
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(245,158,11,1)] animate-ping" />
+              )}
+            </button>
+          ) : (
+            <div className="flex flex-col gap-2 bg-stone-900/95 backdrop-blur-md p-3 rounded-2xl border border-amber-600/60 shadow-2xl text-stone-200 text-xs font-mono animate-fade-in w-72 select-none">
+              {/* Header with Title & Collapse */}
+              <div className="flex items-center justify-between border-b border-stone-800 pb-1.5">
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <Backpack className="w-4 h-4 text-amber-400" />
+                  <span className="text-[11px] uppercase tracking-wider">Field Supplies & Tools</span>
+                </div>
+                <button
+                  onClick={() => setIsSupplyCollapsed(true)}
+                  className="p-1 hover:bg-stone-800 rounded-full text-stone-400 hover:text-white cursor-pointer transition-colors"
+                  title="Collapse to supply icon"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Tools Selection Grid */}
+              <div className="grid grid-cols-2 gap-1.5">
+                {tools.map((t) => {
+                  const isSelected = playerState.equippedTool === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => onSelectTool(t.id)}
+                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl border text-[11px] transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-600/90 text-stone-950 font-bold border-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.5)] scale-[1.02]'
+                          : 'bg-stone-850 hover:bg-stone-800 text-stone-300 border-stone-700/60 hover:text-stone-100 hover:border-amber-500/40'
+                      }`}
+                      title={`Equip ${t.label} [${t.key}]`}
+                    >
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className={isSelected ? 'text-stone-950' : 'text-amber-400'}>{t.icon}</span>
+                        <span className="truncate">{t.label}</span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-mono shrink-0 ml-1 ${
+                          isSelected ? 'text-stone-950/80 font-bold' : 'text-stone-400'
+                        }`}
+                      >
+                        [{t.key}]
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Collapsible Inventory Tray - Just the square icon when collapsed, placed below supplies */}
+          {isInventoryCollapsed ? (
+            <button
+              onClick={() => setIsInventoryCollapsed(false)}
+              className="group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 text-stone-300 border border-amber-600/40 hover:border-amber-400/80 shadow-lg shadow-black/40 transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md"
+              title={`Expedition Inventory ($${(playerState.cashDollars || 0).toFixed(2)}, ${(playerState.goldFound || 0).toFixed(1)} oz) - Click to expand`}
+            >
+              <Box className="w-4 h-4 text-amber-400 group-hover:rotate-12 transition-transform" />
+            </button>
+          ) : (
+            <div className="flex flex-col gap-2 bg-stone-900/95 backdrop-blur-md p-3 rounded-2xl border border-amber-600/60 shadow-2xl text-stone-200 text-xs font-mono animate-fade-in w-72 select-none">
+              {/* Header with Title & Collapse */}
+              <div className="flex items-center justify-between border-b border-stone-800 pb-1.5">
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <Box className="w-4 h-4 text-amber-400" />
+                  <span className="text-[11px] uppercase tracking-wider">Expedition Inventory</span>
+                </div>
+                <button
+                  onClick={() => setIsInventoryCollapsed(true)}
+                  className="p-1 hover:bg-stone-800 rounded-full text-stone-400 hover:text-white cursor-pointer transition-colors"
+                  title="Collapse to square icon"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Inventory Resource Details */}
+              <div className="grid grid-cols-2 gap-1.5 bg-stone-950/70 p-2 rounded-xl border border-stone-800/80 text-[11px]">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-stone-400">Cash:</span>
+                  <span className="text-emerald-400 font-bold font-mono">
+                    ${(playerState.cashDollars || 0).toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-stone-400">Gold:</span>
+                  <span className="text-amber-300 font-bold font-mono">
+                    {(typeof playerState.goldFound === 'number' && !isNaN(playerState.goldFound) ? playerState.goldFound : 0).toFixed(1)} oz
+                  </span>
+                </div>
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-stone-400">Wood:</span>
+                  <span className="text-stone-200 font-mono">
+                    🪵 {playerState.woodPlanks || 0}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-stone-400">Rock:</span>
+                  <span className="text-stone-200 font-mono">
+                    🪨 {playerState.blocksDug || 0}
+                  </span>
+                </div>
+                {(playerState.dynamite || 0) > 0 && (
+                  <div className="col-span-2 flex items-center justify-between px-1 pt-1 border-t border-stone-800">
+                    <span className="text-stone-400">Dynamite:</span>
+                    <span className="text-red-400 font-bold font-mono">
+                      🧨 {playerState.dynamite} sticks
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Open Full Saddlebag Modal Button */}
+              <button
+                onClick={() => setIsInventoryOpen(true)}
+                className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl bg-amber-600/90 hover:bg-amber-500 text-stone-950 font-bold border border-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.3)] transition cursor-pointer text-[11px]"
+              >
+                <Box className="w-3.5 h-3.5" />
+                <span>Open Full Saddlebag [I]</span>
+              </button>
+            </div>
+          )}
+
+          {/* Collapsible Records / Field Log (Map, Journal & Guidebook) - Directly Under Expedition Inventory */}
+          {isRecordsCollapsed ? (
+            <button
+              onClick={() => setIsRecordsCollapsed(false)}
+              className="group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 text-stone-300 border border-amber-600/40 hover:border-amber-400/80 shadow-lg shadow-black/40 transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md"
+              title="Expedition Records: Map, Journal & Guidebook [M, J, G] - Click to expand"
+            >
+              <MapIcon className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+            </button>
+          ) : (
+            <div className="flex flex-col gap-2 bg-stone-900/95 backdrop-blur-md p-3 rounded-2xl border border-amber-600/60 shadow-2xl text-stone-200 text-xs font-mono animate-fade-in w-72 sm:w-80 select-none">
+              {/* Header with Title & Collapse */}
+              <div className="flex items-center justify-between border-b border-stone-800 pb-1.5">
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <BookOpen className="w-4 h-4 text-amber-400" />
+                  <span className="text-[11px] uppercase tracking-wider">Expedition Records</span>
+                </div>
+                <button
+                  onClick={() => setIsRecordsCollapsed(true)}
+                  className="p-1 hover:bg-stone-800 rounded-full text-stone-400 hover:text-white cursor-pointer transition-colors"
+                  title="Collapse records"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Combined Map, Journal & Guidebook Action Buttons */}
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  onClick={onOpenMap}
+                  className="flex items-center justify-center gap-1.5 bg-stone-850 hover:bg-amber-600/90 text-amber-200 hover:text-stone-950 border border-amber-700/60 hover:border-amber-300 px-2 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
+                  title="Open Frontier Survey Map [M]"
+                >
+                  <MapIcon className="w-3.5 h-3.5 text-amber-400 group-hover:text-stone-950 transition-colors" />
+                  <span>Map</span>
+                  <span className="text-[9px] text-amber-400/80 group-hover:text-stone-950/80 font-mono">[M]</span>
+                </button>
+
+                <button
+                  onClick={onOpenJournal}
+                  className="flex items-center justify-center gap-1.5 bg-stone-850 hover:bg-amber-600/90 text-amber-200 hover:text-stone-950 border border-amber-700/60 hover:border-amber-300 px-2 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
+                  title="Open Prospector's Field Journal [J]"
+                >
+                  <Scroll className="w-3.5 h-3.5 text-amber-400 group-hover:text-stone-950 transition-colors" />
+                  <span>Journal</span>
+                  <span className="text-[9px] text-amber-400/80 group-hover:text-stone-950/80 font-mono">[J]</span>
+                </button>
+
+                <button
+                  onClick={onOpenGuidebook}
+                  className="flex items-center justify-center gap-1.5 bg-stone-850 hover:bg-amber-600/90 text-amber-200 hover:text-stone-950 border border-amber-700/60 hover:border-amber-300 px-2 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
+                  title="Open Prospector's Field Guidebook [G]"
+                >
+                  <BookOpen className="w-3.5 h-3.5 text-amber-400 group-hover:text-stone-950 transition-colors" />
+                  <span>Guide</span>
+                  <span className="text-[9px] text-amber-400/80 group-hover:text-stone-950/80 font-mono">[G]</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Western Music Icon Button - Directly Below Expedition Records */}
+          <button
+            onClick={handleToggleMusic}
+            className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+              isMusicActive
+                ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
+                : 'border-amber-600/40 hover:border-amber-400/80 shadow-black/40 text-stone-500 hover:text-stone-300'
+            }`}
+            title={
+              isMusicActive
+                ? `Western Music: ${currentTrack.title} (Playing - Shuffling Behind the Scenes) - Click to silence`
+                : 'Western Music (Silenced) - Click to play'
+            }
+          >
+            {isMusicActive ? (
+              <Music className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform animate-pulse" />
+            ) : (
+              <div className="relative flex items-center justify-center">
+                <Music className="w-4 h-4 text-stone-500 group-hover:text-stone-300 transition-colors" />
+                <span className="absolute w-[18px] h-[1.5px] bg-red-500/80 rotate-45 pointer-events-none rounded-full" />
+              </div>
+            )}
+          </button>
 
         {/* Portal Excavation & Mountain Strain Warning Card (Collapsible) */}
         {playerState.portalExcavation && (
@@ -591,162 +886,57 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           </div>
         )}
 
-        {/* Claim Status Badge */}
-        <div className="flex items-center gap-2 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-amber-700/50 text-amber-200 text-xs font-mono shadow-md w-fit">
-          <Flag className="w-3.5 h-3.5 text-amber-400" />
-          <span>
-            {playerState.activeClaim?.isClaimed
-              ? `Claim: ${playerState.activeClaim.name}`
-              : 'Claim: Unstaked'}
-          </span>
-          {playerState.activeClaim?.isClaimed && onOpenClaimDeed ? (
-            <button
-              onClick={onOpenClaimDeed}
-              className="ml-1 px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-stone-950 font-sans font-bold text-[10px] rounded shadow transition-colors flex items-center gap-1"
-            >
-              <Award className="w-3 h-3" />
-              Deed
-            </button>
-          ) : (
-            <button
-              onClick={() => onSelectTool('stake')}
-              className="ml-1 px-1.5 py-0.5 bg-stone-800 hover:bg-amber-900/60 text-amber-300 font-sans text-[10px] rounded border border-amber-800/40"
-            >
-              Stake Now
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Top Right: Atmosphere / Weather Control Toggle & Weapons */}
-      <div className="pointer-events-auto absolute top-12 sm:top-4 right-3 sm:right-5 flex flex-col items-end gap-2 z-30">
-        {/* Toggle Atmosphere Bar */}
-        <button
-          onClick={() => setShowAtmospherePanel((prev) => !prev)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition shadow-lg backdrop-blur-md text-xs font-mono ${
-            showAtmospherePanel
-              ? 'bg-amber-600 text-stone-950 font-bold border-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.5)]'
-              : 'bg-stone-900/85 text-stone-300 hover:text-white border-stone-700/60'
-          }`}
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400" />
-          <span>Sky & Weather ({formatTime(timeOfDay)})</span>
-        </button>
-
-        {/* Expanded Atmosphere & Sun Dial Panel */}
-        {showAtmospherePanel && (
-          <div className="flex flex-col gap-2.5 bg-stone-950/95 backdrop-blur-xl p-3.5 rounded-2xl border border-amber-600/50 shadow-2xl w-72 text-stone-200 text-xs animate-in fade-in slide-in-from-top-2">
-            <div className="flex items-center justify-between border-b border-stone-800 pb-2">
-              <span className="font-bold text-amber-300 font-mono flex items-center gap-1.5">
-                <Sun className="w-4 h-4 text-amber-400" />
-                Time: {formatTime(timeOfDay)}
-              </span>
+        {/* Claim Status Badge (Shown only when an active claim is held) */}
+        {playerState.activeClaim?.isClaimed && (
+          <div className="flex items-center gap-2 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-amber-700/50 text-amber-200 text-xs font-mono shadow-md w-fit">
+            <Flag className="w-3.5 h-3.5 text-amber-400" />
+            <span className="font-bold text-amber-300">
+              Claim: {playerState.activeClaim.name}
+            </span>
+            {onOpenClaimDeed && (
               <button
-                onClick={onToggleAutoCycleTime}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono transition ${
-                  autoCycleTime
-                    ? 'bg-amber-500 text-stone-950 font-bold'
-                    : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
-                }`}
+                onClick={onOpenClaimDeed}
+                className="ml-1 px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-stone-950 font-sans font-bold text-[10px] rounded shadow transition-colors flex items-center gap-1 cursor-pointer"
+                title="View Claim Deed"
               >
-                {autoCycleTime ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                <span>{autoCycleTime ? 'Cycle Active' : 'Auto Cycle'}</span>
+                <Award className="w-3 h-3" />
+                Deed
               </button>
-            </div>
-
-            {/* Sun Time Slider */}
-            <div className="flex flex-col gap-1">
-              <div className="flex justify-between text-[10px] text-stone-400 font-mono">
-                <span>Dawn (6:00)</span>
-                <span className="text-amber-300 font-bold">4 PM Legend</span>
-                <span>Dusk (19:30)</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="24"
-                step="0.25"
-                value={timeOfDay}
-                onChange={(e) => onSetTimeOfDay(parseFloat(e.target.value))}
-                className="w-full accent-amber-500 cursor-pointer h-1.5 bg-stone-800 rounded-lg appearance-none"
-              />
-            </div>
-
-            {/* Weather Mode Buttons */}
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] text-stone-400 font-mono">ATMOSPHERIC WEATHER:</span>
-              <div className="grid grid-cols-2 gap-1.5">
-                {weatherOptions.map((w) => {
-                  const isActive = weather === w.id;
-                  return (
-                    <button
-                      key={w.id}
-                      onClick={() => onSetWeather(w.id)}
-                      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-xl border text-[11px] font-mono transition ${
-                        isActive
-                          ? 'bg-amber-600/80 text-white font-bold border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.4)]'
-                          : 'bg-stone-900/80 text-stone-300 hover:bg-stone-800 border-stone-800'
-                      }`}
-                    >
-                      {w.icon}
-                      <span className="truncate">{w.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Quick 4 PM needle legend preset */}
-            <button
-              onClick={() => {
-                onSetTimeOfDay(16.0);
-                onSetWeather('sunset');
-              }}
-              className="w-full py-1.5 bg-amber-950/60 hover:bg-amber-900/80 text-amber-200 border border-amber-600/50 rounded-xl text-[10px] font-mono tracking-wide transition text-center"
-            >
-              ⛰️ 4:00 PM Needle Shadow Alignment
-            </button>
-
-            {/* Browser Graphics Hardware Acceleration Status */}
-            <div className="pt-2 border-t border-stone-800 flex flex-col gap-1 text-[10px] font-mono text-stone-400">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1 text-emerald-400 font-bold">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block" />
-                  GPU Hardware Acceleration
-                </span>
-                <span className="text-stone-300">WebGL2 Active</span>
-              </div>
-              <div className="flex justify-between text-[9px] text-stone-500">
-                <span>Filtering: 16x Anisotropic</span>
-                <span>Tone: ACES Filmic</span>
-              </div>
-            </div>
+            )}
           </div>
         )}
+      </div>
+      )}
 
-        {/* Weapons Info */}
-        {playerState.equippedTool === 'rifle' && (
-          <div className="flex items-center gap-2.5 bg-stone-950/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-amber-600/70 text-amber-200 shadow-xl font-mono">
-            <Crosshair className="w-4 h-4 text-amber-400" />
-            <div className="flex flex-col text-right">
-              <span className="text-[10px] text-stone-400">WINCHESTER .44</span>
-              <span className="text-sm font-bold text-amber-300">
-                {playerState.ammo} <span className="text-[10px] font-normal text-stone-400">ROUNDS</span>
-              </span>
-            </div>
-          </div>
-        )}
+      {/* Top Right: Weapons & Equipment Status */}
+      <div className="pointer-events-auto absolute top-12 sm:top-4 right-3 sm:right-5 flex flex-col items-end gap-2 z-30">
+        {hudVisible && (
+          <>
+            {/* Weapons Info */}
+            {playerState.equippedTool === 'rifle' && (
+              <div className="flex items-center gap-2.5 bg-stone-950/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-amber-600/70 text-amber-200 shadow-xl font-mono">
+                <Crosshair className="w-4 h-4 text-amber-400" />
+                <div className="flex flex-col text-right">
+                  <span className="text-[10px] text-stone-400">WINCHESTER .44</span>
+                  <span className="text-sm font-bold text-amber-300">
+                    {playerState.ammo} <span className="text-[10px] font-normal text-stone-400">ROUNDS</span>
+                  </span>
+                </div>
+              </div>
+            )}
 
-        {playerState.equippedTool === 'dynamite' && (
-          <div className="flex items-center gap-2.5 bg-stone-950/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-red-600/70 text-red-200 shadow-xl font-mono">
-            <Flame className="w-4 h-4 text-red-400" />
-            <div className="flex flex-col text-right">
-              <span className="text-[10px] text-stone-400">NITRO DYNAMITE</span>
-              <span className="text-sm font-bold text-red-300">
-                {playerState.dynamite} <span className="text-[10px] font-normal text-stone-400">STICKS</span>
-              </span>
-            </div>
-          </div>
+            {playerState.equippedTool === 'dynamite' && (
+              <div className="flex items-center gap-2.5 bg-stone-950/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-red-600/70 text-red-200 shadow-xl font-mono">
+                <Flame className="w-4 h-4 text-red-400" />
+                <div className="flex flex-col text-right">
+                  <span className="text-[10px] text-stone-400">NITRO DYNAMITE</span>
+                  <span className="text-sm font-bold text-red-300">
+                    {playerState.dynamite} <span className="text-[10px] font-normal text-stone-400">STICKS</span>
+                  </span>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -797,39 +987,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       )}
 
       {/* Bottom Area: Tool Action Button + Bottom Bar */}
-      <div className="flex flex-col items-center gap-2.5 w-full">
-        {/* Prominent Action Button for Spade Shovel Hole Digging! */}
-        {playerState.equippedTool === 'shovel' && (
-          <div className="pointer-events-auto flex items-center gap-3">
-            <button
-              onClick={onDig}
-              className="flex items-center gap-2.5 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-stone-950 font-black px-6 py-3 rounded-full shadow-[0_0_28px_rgba(245,158,11,0.65)] border-2 border-amber-200 transition-all transform hover:scale-105 active:scale-95 text-xs sm:text-sm font-mono tracking-wider cursor-pointer"
-            >
-              <Shovel className="w-4 h-4 text-stone-950" />
-              <span>DIG HOLE IN GROUND</span>
-              <span className="text-[10px] bg-stone-950/70 text-amber-300 px-2 py-0.5 rounded-md font-mono">
-                LEFT CLICK
-              </span>
-            </button>
-          </div>
-        )}
-
-        {/* Prominent Action Button for Equipped Tool (Especially Pickaxe Digging!) */}
-        {playerState.equippedTool === 'pickaxe' && (
-          <div className="pointer-events-auto flex items-center gap-3">
-            <button
-              onClick={onDig}
-              className="flex items-center gap-2.5 bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-stone-950 font-black px-6 py-3 rounded-full shadow-[0_0_28px_rgba(245,158,11,0.65)] border-2 border-amber-300 transition-all transform hover:scale-105 active:scale-95 text-xs sm:text-sm font-mono tracking-wider cursor-pointer"
-            >
-              <Pickaxe className="w-4 h-4 text-stone-950 fill-stone-950" />
-              <span>⛏️ MINE ROCK / ORE VEIN</span>
-              <span className="text-[10px] bg-stone-950/70 text-amber-300 px-2 py-0.5 rounded-md font-mono">
-                LEFT CLICK
-              </span>
-            </button>
-          </div>
-        )}
-
+      {hudVisible && (
+        <div className="flex flex-col items-center gap-2.5 w-full">
         {/* Holographic Blueprint Builder Ribbon */}
         {playerState.equippedTool === 'builder' && (
           <div className="pointer-events-auto flex items-center gap-3 bg-stone-900/95 backdrop-blur-md px-4 py-2 rounded-2xl border-2 border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.4)] text-xs">
@@ -885,225 +1044,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             </span>
           </div>
         )}
-
-        {/* Bottom Bar: Quick settings and Tool Rack */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pointer-events-none w-full">
-          {/* Left Side: Time Presets & Camera toggle */}
-          <div className="pointer-events-auto flex items-center gap-1.5 bg-stone-900/85 backdrop-blur-md p-1.5 rounded-2xl border border-stone-700/60 shadow-lg">
-            <button
-              title="Sunrise (7:00)"
-              onClick={() => onSetTimeOfDay(7.0)}
-              className={`p-2 rounded-xl transition ${
-                timeOfDay >= 6 && timeOfDay < 11
-                  ? 'bg-amber-600/60 text-amber-200'
-                  : 'text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              <Sun className="w-4 h-4" />
-            </button>
-            <button
-              title="4:00 PM Needle Shadow Alignment"
-              onClick={() => {
-                onSetTimeOfDay(16.0);
-                onSetWeather('sunset');
-              }}
-              className={`p-2 rounded-xl transition ${
-                timeOfDay >= 15 && timeOfDay < 18
-                  ? 'bg-amber-600/60 text-amber-200'
-                  : 'text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              <Clock className="w-4 h-4" />
-            </button>
-            <button
-              title="Monsoon Storm (Cloud & Lightning)"
-              onClick={() => onSetWeather(weather === 'storm' ? 'clear' : 'storm')}
-              className={`p-2 rounded-xl transition ${
-                weather === 'storm'
-                  ? 'bg-amber-600/60 text-amber-200'
-                  : 'text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              <CloudLightning className="w-4 h-4" />
-            </button>
-            <button
-              title="Desert Night (22:00)"
-              onClick={() => onSetTimeOfDay(22.0)}
-              className={`p-2 rounded-xl transition ${
-                timeOfDay < 6 || timeOfDay >= 19
-                  ? 'bg-amber-600/60 text-amber-200'
-                  : 'text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              <Moon className="w-4 h-4" />
-            </button>
-            <div className="w-[1px] h-5 bg-stone-700 mx-0.5" />
-            <button
-              title={`Switch to ${viewMode === 'first' ? '3rd Person' : '1st Person'} View`}
-              onClick={onToggleCamera}
-              className="p-2 rounded-xl text-stone-300 hover:text-white transition flex items-center gap-1 text-xs"
-            >
-              <Eye className="w-4 h-4" />
-              <span className="hidden md:inline font-mono">{viewMode === 'first' ? '1P' : '3P'}</span>
-            </button>
-            <button
-              title={soundEnabled ? 'Mute Sound' : 'Enable Sound'}
-              onClick={onToggleSound}
-              className="p-2 rounded-xl text-stone-300 hover:text-white transition"
-            >
-              {soundEnabled ? (
-                <Volume2 className="w-4 h-4 text-amber-400" />
-              ) : (
-                <VolumeX className="w-4 h-4 text-stone-500" />
-              )}
-            </button>
-            <div className="relative">
-              <button
-                title={musicPlaying ? `Western Soundtrack: ${currentTrack.title} (Playing)` : 'Play Western Soundtrack'}
-                onClick={() => setShowMusicMenu((prev) => !prev)}
-                className={`p-2 rounded-xl transition flex items-center gap-1.5 ${
-                  musicPlaying
-                    ? 'text-amber-300 bg-amber-950/60 border border-amber-600/60 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
-                    : 'text-stone-400 hover:text-white hover:bg-stone-800/60'
-                }`}
-              >
-                <Music className={`w-4 h-4 ${musicPlaying ? 'animate-bounce text-amber-400' : ''}`} />
-                <span className="hidden lg:inline text-[11px] font-mono whitespace-nowrap">
-                  {musicPlaying ? currentTrack.title : 'Western Music'}
-                </span>
-              </button>
-
-              {/* Western Music Popover Menu */}
-              {showMusicMenu && (
-                <div className="absolute bottom-12 left-0 z-50 w-72 bg-stone-950/95 backdrop-blur-xl border-2 border-amber-800/80 rounded-2xl p-3.5 shadow-2xl text-stone-200 animate-in fade-in slide-in-from-bottom-2 duration-200">
-                  <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-stone-800">
-                    <div className="flex items-center gap-2">
-                      <Music className="w-4 h-4 text-amber-400" />
-                      <span className="text-xs font-mono font-bold uppercase tracking-wider text-amber-300">
-                        Old West Soundtrack
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => westernMusic.togglePlay()}
-                      className={`p-1.5 rounded-lg text-xs font-mono font-bold transition flex items-center gap-1 ${
-                        musicPlaying
-                          ? 'bg-amber-600 text-stone-950 hover:bg-amber-500'
-                          : 'bg-stone-800 text-stone-200 hover:bg-stone-700'
-                      }`}
-                    >
-                      {musicPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                      <span>{musicPlaying ? 'Pause' : 'Play'}</span>
-                    </button>
-                  </div>
-
-                  <div className="space-y-1.5 mb-3">
-                    {WESTERN_TRACKS.map((t) => {
-                      const isCurr = t.id === currentTrack.id;
-                      return (
-                        <button
-                          key={t.id}
-                          onClick={() => {
-                            westernMusic.switchTrack(t.id);
-                            if (!westernMusic.getIsPlaying()) westernMusic.play();
-                          }}
-                          className={`w-full text-left px-2.5 py-2 rounded-xl text-xs transition flex flex-col ${
-                            isCurr
-                              ? 'bg-amber-900/60 border border-amber-600/70 text-amber-100 shadow-md'
-                              : 'hover:bg-stone-800/80 text-stone-300'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between font-semibold">
-                            <span>{t.title}</span>
-                            {isCurr && musicPlaying && (
-                              <span className="text-[9px] font-mono text-amber-400 font-bold uppercase tracking-widest animate-pulse">
-                                Playing
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] text-stone-400 mt-0.5">{t.subtitle}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-stone-800 text-[11px] font-mono">
-                    <button
-                      onClick={() => westernMusic.nextTrack()}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-stone-900 hover:bg-stone-800 text-amber-300 transition"
-                    >
-                      <SkipForward className="w-3.5 h-3.5" />
-                      <span>Next Track</span>
-                    </button>
-                    <button
-                      onClick={() => setShowMusicMenu(false)}
-                      className="text-stone-400 hover:text-stone-200 px-2 py-1"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Center: Tool Rack (1-7) */}
-          <div className="pointer-events-auto flex items-center gap-1 sm:gap-1.5 bg-stone-900/90 backdrop-blur-md px-2.5 py-1.5 rounded-2xl border border-stone-700/80 shadow-2xl overflow-x-auto max-w-full">
-            {tools.map((t) => {
-              const isSelected = playerState.equippedTool === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => onSelectTool(t.id)}
-                  className={`flex flex-col items-center px-2 sm:px-2.5 py-1.5 rounded-xl transition-all ${
-                    isSelected
-                      ? 'bg-amber-600 text-stone-950 font-bold shadow-[0_0_12px_rgba(251,191,36,0.5)] scale-105'
-                      : 'text-stone-400 hover:text-stone-100 hover:bg-stone-800/60'
-                  }`}
-                >
-                  {t.icon}
-                  <span className="text-[9px] sm:text-[10px] mt-0.5 font-mono whitespace-nowrap">
-                    {t.label}
-                  </span>
-                  <span className="text-[8px] opacity-60 hidden sm:inline font-mono">[{t.key}]</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Right Side: Build Mine, Map [M] and Journal [J] buttons */}
-          <div className="pointer-events-auto flex items-center gap-2">
-            {onOpenBuilder && (
-              <button
-                onClick={onOpenBuilder}
-                className="flex items-center gap-1.5 bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-stone-950 px-3.5 py-2 rounded-xl shadow-lg border border-amber-300 transition backdrop-blur-md text-xs font-black tracking-wide transform hover:scale-105"
-                title="Open Mine Construction & Staking Depot [B]"
-              >
-                <Hammer className="w-4 h-4 text-stone-950 fill-stone-950" />
-                <span>Build Mine</span>
-                <span className="text-[10px] bg-stone-950/20 text-stone-950 px-1.5 py-0.2 rounded font-mono hidden sm:inline">[B]</span>
-              </button>
-            )}
-
-            <button
-              onClick={onOpenMap}
-              className="flex items-center gap-2 bg-stone-900/85 hover:bg-stone-800 text-amber-200 border border-amber-800/60 px-3.5 py-2 rounded-xl shadow-lg transition backdrop-blur-md text-xs font-bold"
-            >
-              <MapIcon className="w-4 h-4 text-amber-400" />
-              <span>Map</span>
-              <span className="text-[10px] text-amber-400/60 font-mono hidden sm:inline">[M]</span>
-            </button>
-
-            <button
-              onClick={onOpenJournal}
-              className="flex items-center gap-2 bg-stone-900/85 hover:bg-stone-800 text-amber-200 border border-amber-800/60 px-3.5 py-2 rounded-xl shadow-lg transition backdrop-blur-md text-xs font-bold"
-            >
-              <BookOpen className="w-4 h-4 text-amber-400" />
-              <span>Journal</span>
-              <span className="text-[10px] text-amber-400/60 font-mono hidden sm:inline">[J]</span>
-            </button>
-          </div>
-        </div>
       </div>
+      )}
 
       {/* Full Expedition Inventory Saddlebag & Frontier Assayer Modal */}
       <InventoryModal

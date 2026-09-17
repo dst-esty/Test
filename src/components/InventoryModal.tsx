@@ -28,6 +28,7 @@ interface InventoryModalProps {
   onToggleAutoRedeem?: () => void;
   onPurchaseWood?: (amount: number, goldCost: number) => void;
   onOpenRockDepot?: () => void;
+  onSelectTool?: (tool: PlayerState['equippedTool']) => void;
 }
 
 export const InventoryModal: React.FC<InventoryModalProps> = ({
@@ -38,6 +39,7 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
   onToggleAutoRedeem,
   onPurchaseWood,
   onOpenRockDepot,
+  onSelectTool,
 }) => {
   const [activeTab, setActiveTab] = useState<'supplies' | 'gear' | 'assayer'>('supplies');
 

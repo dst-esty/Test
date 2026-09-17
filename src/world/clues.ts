@@ -62,6 +62,16 @@ export const INITIAL_LANDMARKS: Landmark[] = [
     type: 'petroglyph',
   },
   {
+    id: 'tortilla_flat',
+    name: 'Historic Town of Tortilla Flat',
+    shortDesc: '1880s stagecoach settlement along the Apache Trail with the wooden Saloon, Mercantile Trading Post, Jail, and fresh mountain spring trough.',
+    position: { x: -15, y: 0, z: -150 },
+    radius: 35,
+    clueId: 'clue_tortilla_flat',
+    discovered: false,
+    type: 'town',
+  },
+  {
     id: 'lost_dutchman_mine',
     name: 'The Lost Dutchman Mine',
     shortDesc: 'The legendary hidden gold mine masked by ironwood brush and fallen boulders.',
@@ -133,6 +143,16 @@ export const INITIAL_CLUES: ClueItem[] = [
     landmarkId: 'eye_ridge',
     iconName: 'Eye',
     foundAt: 'Eye of the Needle Bluff',
+  },
+  {
+    id: 'clue_tortilla_flat',
+    title: 'Tortilla Flat Saloon Ledger & Stage Records',
+    lore: '"Stagecoach drivers along the Apache Trail recorded Jacob Waltz paying for salt pork, flour, and whiskey with coarse, wire-like gold nuggets that he claimed came from the three red peaks to the south."',
+    hint: 'Refill your canteen at the wooden trough, warm up at the town campfire, and trade with the frontier provisioner.',
+    discovered: false,
+    landmarkId: 'tortilla_flat',
+    iconName: 'Building2',
+    foundAt: 'Historic Town of Tortilla Flat',
   },
   {
     id: 'clue_mine',

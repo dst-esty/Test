@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Users,
   MessageSquare,
@@ -35,6 +36,9 @@ interface MultiplayerHUDProps {
   onUpdateProfile: (name: string, color: string) => void;
   onSendChat: (text: string, shout?: boolean) => void;
   onTrackPlayer?: (player: MultiplayerPlayer) => void;
+  visible?: boolean;
+  isOpen?: boolean;
+  onToggleOpen?: (open: boolean) => void;
 }
 
 const QUICK_SHOUTS = [
@@ -55,17 +59,30 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
   onUpdateProfile,
   onSendChat,
   onTrackPlayer,
+  visible = true,
+  isOpen,
+  onToggleOpen,
 }) => {
   const [showRosterModal, setShowRosterModal] = useState(false);
-  // Default to collapsed or remember user preference from localStorage
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('wt_telegraph_collapsed');
-      return saved !== null ? saved === 'true' : false;
-    } catch {
-      return false;
-    }
-  });
+  // Default internal state if not controlled externally
+  const [internalOpen, setInternalOpen] = useState<boolean>(false);
+  const isTelegraphOpen = typeof isOpen === 'boolean' ? isOpen : internalOpen;
+
+  const [isTopPillCollapsed, setIsTopPillCollapsed] = useState(true);
+  const [slotNode, setSlotNode] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const updateSlot = () => {
+      const el = document.getElementById('multiplayer-status-slot');
+      if (el) {
+        setSlotNode(el);
+      }
+    };
+    updateSlot();
+    const interval = setInterval(updateSlot, 300);
+    return () => clearInterval(interval);
+  }, [visible]);
+
   // Collapsible Quick Shouts drawer inside the Telegraph
   const [showQuickShouts, setShowQuickShouts] = useState<boolean>(() => {
     try {
@@ -77,8 +94,8 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
   // Auto-collapse after quiet period
   const [autoCollapseEnabled, setAutoCollapseEnabled] = useState<boolean>(false);
   const [clearedTimestamp, setClearedTimestamp] = useState<number>(0);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [toastMessage, setToastMessage] = useState<MultiplayerChatMessage | null>(null);
+  const [telegraphUpdates, setTelegraphUpdates] = useState<Array<{ id: string; message: MultiplayerChatMessage; isFading: boolean }>>([]);
+  const updateTimeoutsRef = useRef<Map<string, { fade: number; remove: number }>>(new Map());
 
   const [chatText, setChatText] = useState('');
   const [editName, setEditName] = useState(selfName);
@@ -87,7 +104,6 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const toastTimeoutRef = useRef<number | null>(null);
   const autoCollapseTimeoutRef = useRef<number | null>(null);
   const prevMessagesCountRef = useRef<number>(chatMessages.length);
 
@@ -104,17 +120,27 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
     setEditColor(selfColor);
   }, [selfName, selfColor]);
 
-  // Persist collapsed states
-  const toggleCollapse = (newVal?: boolean) => {
-    const target = typeof newVal === 'boolean' ? newVal : !isCollapsed;
-    setIsCollapsed(target);
-    if (!target) {
-      setUnreadCount(0);
-      setToastMessage(null);
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      updateTimeoutsRef.current.forEach((t) => {
+        clearTimeout(t.fade);
+        clearTimeout(t.remove);
+      });
+      updateTimeoutsRef.current.clear();
+    };
+  }, []);
+
+  const toggleTelegraph = (targetOpen?: boolean) => {
+    const nextVal = typeof targetOpen === 'boolean' ? targetOpen : !isTelegraphOpen;
+    if (onToggleOpen) {
+      onToggleOpen(nextVal);
+    } else {
+      setInternalOpen(nextVal);
     }
-    try {
-      localStorage.setItem('wt_telegraph_collapsed', String(target));
-    } catch {}
+    if (nextVal) {
+      setTelegraphUpdates([]);
+    }
   };
 
   const toggleQuickShouts = () => {
@@ -125,17 +151,28 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
     } catch {}
   };
 
-  // Track new messages for unread badge and transient toast when collapsed
+  // Track new messages for transient telegraph toast updates that fade out at bottom center
   useEffect(() => {
     if (chatMessages.length > prevMessagesCountRef.current) {
-      const latest = chatMessages[chatMessages.length - 1];
-      if (isCollapsed) {
-        setUnreadCount((prev) => prev + 1);
-        setToastMessage(latest);
-        if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-        toastTimeoutRef.current = window.setTimeout(() => {
-          setToastMessage(null);
-        }, 5000);
+      const newMessages = chatMessages.slice(prevMessagesCountRef.current);
+      if (!isTelegraphOpen) {
+        newMessages.forEach((msg) => {
+          const updateId = `${msg.id || Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+          setTelegraphUpdates((prev) => [...prev.slice(-2), { id: updateId, message: msg, isFading: false }]);
+
+          const fadeTimer = window.setTimeout(() => {
+            setTelegraphUpdates((prev) =>
+              prev.map((u) => (u.id === updateId ? { ...u, isFading: true } : u))
+            );
+          }, 4000);
+
+          const removeTimer = window.setTimeout(() => {
+            setTelegraphUpdates((prev) => prev.filter((u) => u.id !== updateId));
+            updateTimeoutsRef.current.delete(updateId);
+          }, 5200);
+
+          updateTimeoutsRef.current.set(updateId, { fade: fadeTimer, remove: removeTimer });
+        });
       } else {
         // Auto-scroll when open
         chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -144,15 +181,15 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
         if (autoCollapseEnabled) {
           if (autoCollapseTimeoutRef.current) clearTimeout(autoCollapseTimeoutRef.current);
           autoCollapseTimeoutRef.current = window.setTimeout(() => {
-            toggleCollapse(true);
+            toggleTelegraph(false);
           }, 12000);
         }
       }
     }
     prevMessagesCountRef.current = chatMessages.length;
-  }, [chatMessages, isCollapsed, autoCollapseEnabled]);
+  }, [chatMessages, isTelegraphOpen, autoCollapseEnabled]);
 
-  // Keyboard shortcut: Press Enter to open or focus chat
+  // Keyboard shortcut: Press Enter to open or focus chat, Escape to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
@@ -160,15 +197,17 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
         if (activeTag === 'input' || activeTag === 'textarea') {
           return;
         }
-        if (isCollapsed) {
-          toggleCollapse(false);
+        if (!isTelegraphOpen) {
+          toggleTelegraph(true);
         }
         setTimeout(() => inputRef.current?.focus(), 60);
+      } else if (e.key === 'Escape' && isTelegraphOpen) {
+        toggleTelegraph(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isCollapsed]);
+  }, [isTelegraphOpen]);
 
   const handleSend = (shout = false) => {
     if (!chatText.trim()) return;
@@ -182,8 +221,12 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
 
   const handleClearFeed = () => {
     setClearedTimestamp(Date.now());
-    setToastMessage(null);
-    setUnreadCount(0);
+    setTelegraphUpdates([]);
+    updateTimeoutsRef.current.forEach((t) => {
+      clearTimeout(t.fade);
+      clearTimeout(t.remove);
+    });
+    updateTimeoutsRef.current.clear();
   };
 
   const handleSaveProfile = () => {
@@ -192,111 +235,213 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
     setShowRosterModal(false);
   };
 
+  if (!visible) {
+    return null;
+  }
+
   return (
     <>
-      {/* Top Multiplayer Status Pill */}
-      <div className="fixed top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2">
-        <button
-          onClick={() => setShowRosterModal(true)}
-          className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-stone-900/85 hover:bg-stone-800/95 text-stone-200 border border-amber-500/30 backdrop-blur-md shadow-lg transition-all text-xs font-medium cursor-pointer"
-          title="Open Frontier Expedition Roster & Chat"
-        >
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-          <Users className="w-3.5 h-3.5 text-amber-400" />
-          <span>{onlineCount} {onlineCount === 1 ? 'Prospector' : 'Prospectors'} Online</span>
-          <span className="text-stone-500">|</span>
-          <span className="text-amber-300 font-mono text-[11px]">{ping}ms</span>
-        </button>
-
-        <button
-          onClick={() => {
-            toggleCollapse(false);
-            setTimeout(() => inputRef.current?.focus(), 60);
-          }}
-          className="flex items-center justify-center w-8 h-8 rounded-full bg-stone-900/85 hover:bg-stone-800/95 text-amber-300 border border-amber-500/30 backdrop-blur-md shadow-lg transition-all cursor-pointer"
-          title="Open Wilderness Telegraph (Press Enter)"
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* Wilderness Telegraph Collapsible Floating HUD (Bottom Left)               */}
-      {/* ========================================================================= */}
-      <div className="fixed bottom-20 left-4 z-30 pointer-events-auto flex flex-col gap-1.5 max-w-sm w-[92vw] sm:w-96 select-none font-sans">
-        
-        {/* State A: Collapsed Mini Bar */}
-        {isCollapsed ? (
-          <div className="flex flex-col gap-1.5 items-start">
-            {/* Transient Toast Notification when collapsed */}
-            {toastMessage && (
-              <div
-                onClick={() => toggleCollapse(false)}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-950/95 border border-amber-500/60 shadow-xl backdrop-blur-md text-xs text-amber-200 cursor-pointer animate-fade-in hover:bg-amber-900 transition-all max-w-sm"
+      {/* Top Multiplayer Status Pill - Placed Directly Under the Heart Icon */}
+      {slotNode ? (
+        createPortal(
+          <div className="flex items-center gap-1.5 pointer-events-auto w-fit">
+            {isTopPillCollapsed ? (
+              <button
+                onClick={() => setIsTopPillCollapsed(false)}
+                className="group flex items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-stone-900/90 hover:bg-stone-850 text-stone-300 border border-emerald-500/40 hover:border-emerald-400/80 backdrop-blur-md shadow-lg shadow-black/40 transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none"
+                title={`Online: ${onlineCount} ${onlineCount === 1 ? 'Prospector' : 'Prospectors'} (${ping}ms) - Click to expand`}
               >
-                <Radio className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
-                <div className="flex-1 truncate">
-                  <span className="font-bold text-amber-300 mr-1.5">
-                    {toastMessage.senderName}:
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <Users className="w-3.5 h-3.5 text-stone-300 group-hover:text-amber-300 transition-colors" />
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-amber-500/40 shadow-lg text-xs font-medium text-stone-200 animate-fade-in">
+                <button
+                  onClick={() => setShowRosterModal(true)}
+                  className="flex items-center gap-2 hover:text-amber-300 transition-colors cursor-pointer"
+                  title="Open Frontier Expedition Roster & Chat Log"
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  <span className="text-stone-200">{toastMessage.text}</span>
+                  <Users className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{onlineCount} {onlineCount === 1 ? 'Prospector' : 'Prospectors'}</span>
+                  <span className="text-stone-500">|</span>
+                  <span className="text-amber-300 font-mono text-[11px]">{ping}ms</span>
+                </button>
+                <button
+                  onClick={() => {
+                    toggleTelegraph(true);
+                    setTimeout(() => inputRef.current?.focus(), 60);
+                  }}
+                  className="p-1 hover:bg-stone-800 rounded-full text-amber-400 hover:text-amber-200 transition cursor-pointer"
+                  title="Open Wilderness Telegraph [Enter]"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setIsTopPillCollapsed(true)}
+                  className="p-1 hover:bg-stone-800 rounded-full text-stone-400 hover:text-stone-200 transition cursor-pointer ml-0.5"
+                  title="Collapse to green dot & human icon"
+                >
+                  <ChevronUp className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+          </div>,
+          slotNode
+        )
+      ) : (
+        <div className="fixed top-[52px] sm:top-[66px] left-3 sm:left-5 z-40 flex items-center gap-1.5 pointer-events-auto">
+          {isTopPillCollapsed ? (
+            <button
+              onClick={() => setIsTopPillCollapsed(false)}
+              className="group flex items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-stone-900/90 hover:bg-stone-850 text-stone-300 border border-emerald-500/40 hover:border-emerald-400/80 backdrop-blur-md shadow-lg shadow-black/40 transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none"
+              title={`Online: ${onlineCount} ${onlineCount === 1 ? 'Prospector' : 'Prospectors'} (${ping}ms) - Click to expand`}
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <Users className="w-3.5 h-3.5 text-stone-300 group-hover:text-amber-300 transition-colors" />
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-amber-500/40 shadow-lg text-xs font-medium text-stone-200 animate-fade-in">
+              <button
+                onClick={() => setShowRosterModal(true)}
+                className="flex items-center gap-2 hover:text-amber-300 transition-colors cursor-pointer"
+                title="Open Frontier Expedition Roster & Chat Log"
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <Users className="w-3.5 h-3.5 text-amber-400" />
+                <span>{onlineCount} {onlineCount === 1 ? 'Prospector' : 'Prospectors'}</span>
+                <span className="text-stone-500">|</span>
+                <span className="text-amber-300 font-mono text-[11px]">{ping}ms</span>
+              </button>
+              <button
+                onClick={() => {
+                  toggleTelegraph(true);
+                  setTimeout(() => inputRef.current?.focus(), 60);
+                }}
+                className="p-1 hover:bg-stone-800 rounded-full text-amber-400 hover:text-amber-200 transition cursor-pointer"
+                title="Open Wilderness Telegraph [Enter]"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setIsTopPillCollapsed(true)}
+                className="p-1 hover:bg-stone-800 rounded-full text-stone-400 hover:text-stone-200 transition cursor-pointer ml-0.5"
+                title="Collapse to green dot & human icon"
+              >
+                <ChevronUp className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* Wilderness Telegraph Updates (Bottom Center with Smooth Fade-Out)          */}
+      {/* ========================================================================= */}
+      {!isTelegraphOpen && telegraphUpdates.length > 0 && (
+        <div className="fixed bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-auto flex flex-col items-center gap-2 max-w-md sm:max-w-xl w-[92vw] sm:w-auto select-none font-sans">
+          {telegraphUpdates.map((update) => {
+            const msg = update.message;
+            const isShout = msg.type === 'shout';
+            const isDiscovery = msg.type === 'discovery';
+            const isSystem = msg.type === 'system';
+
+            return (
+              <div
+                key={update.id}
+                onClick={() => toggleTelegraph(true)}
+                onMouseEnter={() => {
+                  const t = updateTimeoutsRef.current.get(update.id);
+                  if (t) {
+                    clearTimeout(t.fade);
+                    clearTimeout(t.remove);
+                  }
+                  setTelegraphUpdates((prev) =>
+                    prev.map((u) => (u.id === update.id ? { ...u, isFading: false } : u))
+                  );
+                }}
+                onMouseLeave={() => {
+                  const fadeTimer = window.setTimeout(() => {
+                    setTelegraphUpdates((prev) =>
+                      prev.map((u) => (u.id === update.id ? { ...u, isFading: true } : u))
+                    );
+                  }, 2500);
+                  const removeTimer = window.setTimeout(() => {
+                    setTelegraphUpdates((prev) => prev.filter((u) => u.id !== update.id));
+                    updateTimeoutsRef.current.delete(update.id);
+                  }, 3700);
+                  updateTimeoutsRef.current.set(update.id, { fade: fadeTimer, remove: removeTimer });
+                }}
+                className={`group flex items-center gap-3 px-4 py-2.5 rounded-2xl border shadow-2xl backdrop-blur-md text-xs cursor-pointer transition-all duration-1000 ease-in-out ${
+                  update.isFading
+                    ? 'opacity-0 translate-y-3 scale-95 pointer-events-none'
+                    : 'opacity-100 translate-y-0 scale-100 animate-fade-in hover:scale-[1.02]'
+                } ${
+                  isShout
+                    ? 'bg-red-950/95 border-red-500/80 text-red-100 shadow-[0_0_25px_rgba(239,68,68,0.4)]'
+                    : isDiscovery
+                    ? 'bg-emerald-950/95 border-emerald-500/80 text-emerald-100 shadow-[0_0_25px_rgba(16,185,129,0.4)]'
+                    : isSystem
+                    ? 'bg-amber-950/95 border-amber-500/80 text-amber-100 shadow-[0_0_25px_rgba(245,158,11,0.4)]'
+                    : 'bg-stone-900/95 border-amber-600/60 text-stone-200 shadow-2xl hover:border-amber-400'
+                }`}
+                title="Click to open Wilderness Telegraph [Enter]"
+              >
+                <Radio className={`w-4 h-4 shrink-0 ${isShout ? 'text-red-400 animate-bounce' : 'text-amber-400 animate-pulse'}`} />
+                <div className="flex items-center gap-2 truncate">
+                  <span
+                    className="inline-block w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                    style={{ backgroundColor: msg.senderColor || '#eab308' }}
+                  />
+                  <span className="font-bold text-amber-300 font-mono text-[11px] whitespace-nowrap">
+                    {msg.senderName}:
+                  </span>
+                  <span className="text-stone-100 truncate max-w-[190px] sm:max-w-xs font-medium">
+                    {msg.text}
+                  </span>
+                  {isShout && (
+                    <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-900/80 text-red-200 font-mono font-bold shrink-0">
+                      SHOUT
+                    </span>
+                  )}
+                  {isDiscovery && (
+                    <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-900/80 text-emerald-200 font-mono font-bold shrink-0">
+                      DISCOVERY
+                    </span>
+                  )}
                 </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setToastMessage(null);
+                    setTelegraphUpdates((prev) => prev.filter((u) => u.id !== update.id));
                   }}
-                  className="text-amber-400/80 hover:text-amber-200 p-0.5 rounded"
-                  title="Dismiss alert"
+                  className="text-stone-400 hover:text-white p-1 rounded-full hover:bg-stone-800/80 transition-colors cursor-pointer shrink-0 ml-1"
+                  title="Dismiss update"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
-            )}
+            );
+          })}
+        </div>
+      )}
 
-            {/* Collapsed Pill Button */}
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => toggleCollapse(false)}
-                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-stone-900/90 hover:bg-stone-800/95 text-stone-200 border border-amber-600/40 backdrop-blur-md shadow-lg transition-all text-xs font-mono font-medium group cursor-pointer"
-                title="Expand Wilderness Telegraph (Press Enter)"
-              >
-                <Radio className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
-                <span className="font-bold text-amber-300">Wilderness Telegraph</span>
-                {unreadCount > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-stone-950 font-bold text-[10px] animate-pulse">
-                    {unreadCount}
-                  </span>
-                )}
-                <ChevronUp className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-200 transition-transform" />
-              </button>
-
-              <button
-                onClick={() => {
-                  toggleCollapse(false);
-                  setTimeout(() => inputRef.current?.focus(), 60);
-                }}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-stone-900/90 hover:bg-stone-800/95 text-amber-300 border border-amber-600/40 backdrop-blur-md shadow-lg text-xs font-mono cursor-pointer transition-colors"
-                title="Compose telegram (Press Enter)"
-              >
-                <Send className="w-3 h-3" />
-                <span className="text-[11px] font-sans font-semibold">Shout [Enter]</span>
-              </button>
-
-              <button
-                onClick={() => setShowRosterModal(true)}
-                className="flex items-center justify-center w-8 h-8 rounded-xl bg-stone-900/90 hover:bg-stone-800/95 text-stone-400 hover:text-amber-300 border border-stone-700/60 backdrop-blur-md shadow-lg transition-colors cursor-pointer"
-                title="Open Expedition Roster & Full Telegraph Log"
-              >
-                <Users className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        ) : (
-          /* State B: Expanded Full Console with Collapsible Sub-Menus */
+      {/* Wilderness Telegraph Expanded Console (Bottom Center) */}
+      {isTelegraphOpen && (
+        <div className="fixed bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-auto flex flex-col gap-1.5 max-w-sm sm:max-w-md w-[92vw] sm:w-[420px] select-none font-sans">
+          {/* Expanded Full Console with Collapsible Sub-Menus */}
           <div className="flex flex-col rounded-2xl bg-stone-900/95 border border-amber-500/40 backdrop-blur-md shadow-2xl overflow-hidden animate-fade-in text-xs">
             {/* 1. Header Bar with Collapse & Utility Buttons */}
             <div className="flex items-center justify-between px-3 py-2 bg-stone-950/70 border-b border-stone-800 text-stone-300">
@@ -367,9 +512,9 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
 
                 {/* Main Collapse Button */}
                 <button
-                  onClick={() => toggleCollapse(true)}
+                  onClick={() => toggleTelegraph(false)}
                   className="p-1 rounded-lg hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition-colors cursor-pointer ml-1"
-                  title="Collapse Wilderness Telegraph to Mini Bar"
+                  title="Collapse Wilderness Telegraph to HUD [Esc]"
                 >
                   <ChevronDown className="w-4 h-4" />
                 </button>
@@ -454,7 +599,7 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                 onChange={(e) => setChatText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleSend(false);
-                  if (e.key === 'Escape') toggleCollapse(true);
+                  if (e.key === 'Escape') toggleTelegraph(false);
                 }}
                 placeholder="Telegraph message... [Enter]"
                 className="flex-1 px-2.5 py-1.5 rounded-lg bg-stone-900 border border-stone-700/80 text-stone-100 text-xs focus:outline-none focus:border-amber-500"
@@ -477,8 +622,8 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
               </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Roster & Customizer Modal */}
       {showRosterModal && (

@@ -150,7 +150,18 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     mineRidge = Math.sin(Math.atan2(z - 110, x - 160) * 2) * 5 + 6;
   }
 
-  const rawHeight = (rawElev + canyonCarve + arroyo + needleBase + springDepression + mineRidge) * trailheadFlatten + perimeterMountains;
+  // 5. Historic Town of Tortilla Flat level canyon terrace
+  const distToTortilla = Math.hypot(x - (-15), z - (-150));
+  let tortillaFlatten = 1.0;
+  if (distToTortilla < 45) {
+    tortillaFlatten = Math.min(1.0, Math.pow(distToTortilla / 45, 1.4));
+  }
+
+  const rawHeight =
+    (rawElev + canyonCarve + arroyo + needleBase + springDepression + mineRidge) *
+      trailheadFlatten *
+      (0.35 + 0.65 * tortillaFlatten) +
+    perimeterMountains;
 
   return Math.max(0.4, rawHeight);
 }
@@ -672,7 +683,7 @@ export function digHoleInTerrain(
   if (shaftCollarEstablished) {
     strataMessage = `⛏️ BEDROCK REACHED (-${hole.depth.toFixed(1)}m)! Penetrated through desert crust & established Subterranean Mine Shaft Collar! Press [E] to Descend into Endless Mine Drifts!`;
   } else if (slumpOccurred) {
-    strataMessage = `⚠️ PIT WALL SLUMP! ${slumpAmount.toFixed(2)}m of unsupported gravel collapsed into the pit! Depth reduced to ${hole.depth.toFixed(1)}m. Press [T] to Shore Trench!`;
+    strataMessage = `⚠️ Loose sand slumped into pit (${slumpAmount.toFixed(2)}m). Current depth: ${hole.depth.toFixed(1)}m.`;
   } else if (layerChanged && hole.depth >= 1.0) {
     strataMessage = `⚡ PENETRATED NEW STRATA: [${newLayer.name.toUpperCase()}] at ${hole.depth.toFixed(1)}m deep!`;
   } else if (itemFound && itemFound.type === 'gold') {
@@ -680,7 +691,7 @@ export function digHoleInTerrain(
   } else if (itemFound) {
     strataMessage = `⛏️ Depth ${hole.depth.toFixed(1)}m (${newLayer.name}): Excavated ${itemFound.name}!`;
   } else if (needsShoring) {
-    strataMessage = `⛏️ Depth ${hole.depth.toFixed(1)}m | ${newLayer.name} (⚠️ Pit unstable: ${Math.round(hole.stability)}%! Overburden slumping—Press [T] to Shore)`;
+    strataMessage = `⛏️ Depth ${hole.depth.toFixed(1)}m | ${newLayer.name} (${Math.round(hole.stability)}% stability)`;
   } else {
     strataMessage = `⛏️ Depth ${hole.depth.toFixed(1)}m | ${newLayer.name} (+${rocksAwarded} Quarry Stones)`;
   }

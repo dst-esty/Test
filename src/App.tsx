@@ -5,15 +5,17 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { WorldCanvas } from './components/WorldCanvas';
-import { CompassHUD } from './components/CompassHUD';
 import { ControlsOverlay } from './components/ControlsOverlay';
 import { MapModal } from './components/MapModal';
 import { JournalModal } from './components/JournalModal';
+import { GuidebookModal } from './components/GuidebookModal';
 import { ClueDialog } from './components/ClueDialog';
 import { VictoryModal } from './components/VictoryModal';
 import { MineBuilderModal } from './components/MineBuilderModal';
 import { ClaimDeedModal } from './components/ClaimDeedModal';
+import { ClaimStakedModal } from './components/ClaimStakedModal';
 import { RockDepotModal } from './components/RockDepotModal';
+import { TortillaFlatModal } from './components/TortillaFlatModal';
 import { MineShaftHUD } from './components/MineShaftHUD';
 import { GameOverModal } from './components/GameOverModal';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
@@ -68,7 +70,24 @@ export default function App() {
       setSelfId(multiplayer.getSelfId());
       setSelfName(multiplayer.getSelfName());
       setSelfColor(multiplayer.getSelfColor());
+      if (state.universalWeather) {
+        setWeather(state.universalWeather);
+      }
+      if (typeof state.universalTimeOfDay === 'number') {
+        setTimeOfDay(state.universalTimeOfDay);
+      }
     };
+
+    multiplayer.setHandlers({
+      onWeatherSync: (data) => {
+        if (data.weather) {
+          setWeather(data.weather);
+        }
+        if (typeof data.timeOfDay === 'number') {
+          setTimeOfDay(data.timeOfDay);
+        }
+      },
+    });
 
     multiplayer.subscribe(handleUpdate);
     return () => {
@@ -84,13 +103,23 @@ export default function App() {
   // Modals & UI States
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [isJournalOpen, setIsJournalOpen] = useState(false);
+  const [isGuidebookOpen, setIsGuidebookOpen] = useState(false);
   const [isVictoryOpen, setIsVictoryOpen] = useState(false);
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [isClaimDeedOpen, setIsClaimDeedOpen] = useState(false);
   const [isDepotOpen, setIsDepotOpen] = useState(false);
+  const [isTortillaFlatOpen, setIsTortillaFlatOpen] = useState(false);
   const [activeBuildingType, setActiveBuildingType] = useState<MineStructureType>('timber_portal');
   const [gameOverDetails, setGameOverDetails] = useState<GameOverDetails | null>(null);
+  const [claimPrompt, setClaimPrompt] = useState<{ name: string; position: Vector3D } | null>(null);
+  const [payDirtAlert, setPayDirtAlert] = useState<{ ounces: number } | null>(null);
+  const payDirtTimerRef = useRef<NodeJS.Timeout | null>(null);
   const restartHandlerRef = useRef<(() => void) | null>(null);
+  const playerStateRef = useRef<PlayerState>(playerState);
+
+  useEffect(() => {
+    playerStateRef.current = playerState;
+  }, [playerState]);
 
   const [activeClueDialog, setActiveClueDialog] = useState<{
     clue?: ClueItem;
@@ -101,10 +130,13 @@ export default function App() {
   const isAnyModalOpen =
     isMapOpen ||
     isJournalOpen ||
+    isGuidebookOpen ||
     isVictoryOpen ||
     isBuilderOpen ||
     isClaimDeedOpen ||
     isDepotOpen ||
+    isTortillaFlatOpen ||
+    Boolean(claimPrompt) ||
     Boolean(activeClueDialog) ||
     Boolean(gameOverDetails);
 
@@ -128,10 +160,9 @@ export default function App() {
     setTimeout(() => setBannerMessage(null), 4500);
   }, []);
 
-  // Atmosphere, Time & Weather Settings
-  const [timeOfDay, setTimeOfDay] = useState<number>(16.0); // 4:00 PM needle shadow alignment
-  const [weather, setWeather] = useState<WeatherType>('sunset');
-  const [autoCycleTime, setAutoCycleTime] = useState<boolean>(false);
+  // Universal Synchronized Sky & Weather Instance
+  const [timeOfDay, setTimeOfDay] = useState<number>(() => multiplayer.getUniversalTimeOfDay());
+  const [weather, setWeather] = useState<WeatherType>(() => multiplayer.getUniversalWeather());
   const digHandlerRef = useRef<(() => void) | null>(null);
   const reinforceHandlerRef = useRef<(() => void) | null>(null);
   const excavateHandlerRef = useRef<(() => void) | null>(null);
@@ -154,13 +185,14 @@ export default function App() {
 
   // Subterranean Hydrology & Water Table State
   const [waterTable, setWaterTable] = useState<WaterTableState>({
-    active: true,
-    regionalWaterTableDepth: 55.0,
-    aquiferPressure: 15,
-    floodingActive: false,
-    cornishPumpRunning: false,
+    waterTableDepth: 92.0,
     waterLevelInLevel: {},
-    gallonsPumpedTotal: 0,
+    isFlooding: false,
+    floodRate: 0.08,
+    pumpActive: false,
+    pumpRate: 0.28,
+    aquiferBreached: false,
+    seepageWarning: false,
   });
   const [oxygenPercent, setOxygenPercent] = useState<number>(100);
   const [isSubmerged, setIsSubmerged] = useState<boolean>(false);
@@ -263,20 +295,55 @@ export default function App() {
     }
   }, []);
 
-  // Auto Day/Night & Sun Arc Movement
+  // Universal continuous sun & celestial progression (shared instance)
   useEffect(() => {
-    if (!autoCycleTime) return;
     const interval = setInterval(() => {
-      setTimeOfDay((prev) => (prev + 0.05) % 24);
-    }, 100);
+      setTimeOfDay((prev) => (prev + 0.04) % 24);
+    }, 1000);
     return () => clearInterval(interval);
-  }, [autoCycleTime]);
+  }, []);
 
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [viewMode, setViewMode] = useState<'first' | 'third'>('first');
   const [interactionPrompt, setInteractionPrompt] = useState<string | undefined>(undefined);
   const [activeInteractAction, setActiveInteractAction] = useState<(() => void) | null>(null);
   const [hasShownWelcome, setHasShownWelcome] = useState(false);
+
+  // Global HUD Visibility and Wilderness Telegraph State
+  const [isHudVisible, setIsHudVisible] = useState(true);
+  const [isTelegraphOpen, setIsTelegraphOpen] = useState(false);
+  const [unreadTelegraphCount, setUnreadTelegraphCount] = useState(0);
+
+  // Track unread messages when telegraph is closed
+  const prevChatCountRef = useRef<number>(chatMessages.length);
+  useEffect(() => {
+    if (chatMessages.length > prevChatCountRef.current) {
+      if (!isTelegraphOpen) {
+        setUnreadTelegraphCount((prev) => prev + (chatMessages.length - prevChatCountRef.current));
+      }
+    }
+    prevChatCountRef.current = chatMessages.length;
+  }, [chatMessages, isTelegraphOpen]);
+
+  useEffect(() => {
+    if (isTelegraphOpen) {
+      setUnreadTelegraphCount(0);
+    }
+  }, [isTelegraphOpen]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.code === 'KeyH') {
+        e.preventDefault();
+        setIsHudVisible((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   // Calculate nearest landmark for Compass HUD
   const nearestLandmark = React.useMemo(() => {
@@ -438,17 +505,25 @@ export default function App() {
         setIsMapOpen((prev) => !prev);
       } else if (e.code === 'KeyJ') {
         setIsJournalOpen((prev) => !prev);
+      } else if (e.code === 'KeyG') {
+        setIsGuidebookOpen((prev) => !prev);
       } else if (e.code === 'KeyB') {
-        setIsBuilderOpen((prev) => !prev);
+        if (!playerStateRef.current.activeClaim?.isClaimed) {
+          showBanner("⚠️ A mine can only be built on a staked claim! Equip Claim Stake [9] to stake territory first.");
+        } else {
+          setIsBuilderOpen((prev) => !prev);
+        }
       } else if (e.code === 'KeyV') {
         setViewMode((prev) => (prev === 'first' ? 'third' : 'first'));
       } else if (e.code === 'Escape') {
         setIsMapOpen(false);
         setIsJournalOpen(false);
+        setIsGuidebookOpen(false);
         setIsVictoryOpen(false);
         setIsBuilderOpen(false);
         setIsClaimDeedOpen(false);
         setIsDepotOpen(false);
+        setClaimPrompt(null);
         setActiveClueDialog(null);
       } else if (e.code === 'Digit1') {
         setPlayerState((p) => ({ ...p, equippedTool: 'compass' }));
@@ -469,7 +544,11 @@ export default function App() {
       } else if (e.code === 'Digit9') {
         setPlayerState((p) => ({ ...p, equippedTool: 'stake' }));
       } else if (e.code === 'Digit0') {
-        setPlayerState((p) => ({ ...p, equippedTool: 'builder' }));
+        if (!playerStateRef.current.activeClaim?.isClaimed) {
+          showBanner("⚠️ Staked claim required for Mine Builder! Equip Claim Stake [9] to stake territory first.");
+        } else {
+          setPlayerState((p) => ({ ...p, equippedTool: 'builder' }));
+        }
       }
     };
 
@@ -507,8 +586,23 @@ export default function App() {
         onTriggerDamageFlash={triggerDamageFlash}
         onShowBanner={showBanner}
         isUIOpen={isAnyModalOpen}
+        onPayDirtHit={(ounces) => {
+          if (!playerStateRef.current.activeClaim?.isClaimed) {
+            setPayDirtAlert({ ounces });
+            soundEngine.playOreChime();
+            if (payDirtTimerRef.current) {
+              clearTimeout(payDirtTimerRef.current);
+            }
+            // Auto fade-out after 3.2 seconds so it's quick and unobtrusive
+            payDirtTimerRef.current = setTimeout(() => {
+              setPayDirtAlert(null);
+              payDirtTimerRef.current = null;
+            }, 3200);
+          }
+        }}
         onStakeClaim={(name, pos) => {
           soundEngine.playHammerStake();
+          setPayDirtAlert(null);
           setPlayerState((prev) => ({
             ...prev,
             activeClaim: {
@@ -519,9 +613,9 @@ export default function App() {
               extractedGold: prev.activeClaim?.extractedGold || 0,
               blocksDug: prev.activeClaim?.blocksDug || 0,
             },
-            equippedTool: 'builder',
           }));
-          showBanner(`Claim "${name}" Staked! Equipped Construction Blueprint [B].`);
+          showBanner(`Claim "${name}" Legally Staked!`);
+          setClaimPrompt({ name, position: pos });
         }}
         onBuildStructure={(_type, _pos, _rot) => {
           soundEngine.playConstruct();
@@ -590,19 +684,22 @@ export default function App() {
         onRegisterPlaceTimberHandler={(fn) => {
           placeTimberHandlerRef.current = fn;
         }}
+        onOpenTortillaFlat={() => setIsTortillaFlatOpen(true)}
       />
 
       {/* Mini-Voxel Shaft Sinking & Bedrock Strata Gauge */}
-      <ShaftSinkingGauge
-        stats={shaftSinkingStats}
-        onStrikeVoxel={() => {
-          if (strikeVoxelHandlerRef.current) strikeVoxelHandlerRef.current();
-        }}
-        onPlaceTimber={() => {
-          if (placeTimberHandlerRef.current) placeTimberHandlerRef.current();
-        }}
-        equippedTool={playerState.equippedTool}
-      />
+      {isHudVisible && (
+        <ShaftSinkingGauge
+          stats={shaftSinkingStats}
+          onStrikeVoxel={() => {
+            if (strikeVoxelHandlerRef.current) strikeVoxelHandlerRef.current();
+          }}
+          onPlaceTimber={() => {
+            if (placeTimberHandlerRef.current) placeTimberHandlerRef.current();
+          }}
+          equippedTool={playerState.equippedTool}
+        />
+      )}
 
       {/* Real-time Frontier Multiplayer HUD & Roster Modal */}
       <MultiplayerHUD
@@ -615,6 +712,11 @@ export default function App() {
         onUpdateProfile={handleUpdateProfile}
         onSendChat={handleSendChat}
         onTrackPlayer={handleTrackPlayer}
+        visible={isHudVisible}
+        isOpen={isTelegraphOpen}
+        onToggleOpen={(open) => {
+          setIsTelegraphOpen(open);
+        }}
       />
 
       {/* Subterranean Mine Shaft & Strata HUD */}
@@ -668,24 +770,28 @@ export default function App() {
         }}
       />
 
-      {/* Top Floating Compass HUD */}
-      <CompassHUD
-        yaw={playerState.rotation.yaw}
-        timeOfDay={timeOfDay}
-        nearestLandmarkName={nearestLandmark?.name}
-        nearestLandmarkDist={nearestLandmark?.dist}
-        hydration={playerState.hydration}
-        goldFound={playerState.goldFound}
-        isInsideMine={playerState.isInsideMine}
-      />
-
       {/* Main Controls & Inventory Overlay */}
       <ControlsOverlay
         playerState={playerState}
-        onSelectTool={(tool) => setPlayerState((p) => ({ ...p, equippedTool: tool }))}
+        timeOfDay={timeOfDay}
+        nearestLandmark={nearestLandmark}
+        onSelectTool={(tool) => {
+          if (tool === 'builder' && !playerState.activeClaim?.isClaimed) {
+            showBanner("⚠️ A mine can only be built on a staked claim! Equip Claim Stake [9] to claim territory first.");
+            return;
+          }
+          setPlayerState((p) => ({ ...p, equippedTool: tool }));
+        }}
         onOpenMap={() => setIsMapOpen(true)}
         onOpenJournal={() => setIsJournalOpen(true)}
-        onOpenBuilder={() => setIsBuilderOpen(true)}
+        onOpenGuidebook={() => setIsGuidebookOpen(true)}
+        onOpenBuilder={() => {
+          if (!playerState.activeClaim?.isClaimed) {
+            showBanner("⚠️ A mine can only be built on a staked claim! Equip Claim Stake [9] to claim territory first.");
+            return;
+          }
+          setIsBuilderOpen(true);
+        }}
         onOpenClaimDeed={() => setIsClaimDeedOpen(true)}
         activeBuildingType={activeBuildingType}
         onRotateBlueprint={() => {
@@ -698,6 +804,34 @@ export default function App() {
         onPurchaseWood={handlePurchaseWood}
         onToggleAutoRedeem={handleToggleAutoRedeem}
         onRedeemAllGold={handleRedeemAllGold}
+        payDirtAlert={payDirtAlert}
+        onDismissPayDirtAlert={() => {
+          if (payDirtTimerRef.current) {
+            clearTimeout(payDirtTimerRef.current);
+            payDirtTimerRef.current = null;
+          }
+          setPayDirtAlert(null);
+        }}
+        onStakePayDirt={() => {
+          if (payDirtTimerRef.current) {
+            clearTimeout(payDirtTimerRef.current);
+            payDirtTimerRef.current = null;
+          }
+          setPlayerState((p) => ({ ...p, equippedTool: 'stake' }));
+          showBanner("Equipped Survey Claim Stake [9]! Aim at this pay dirt ground and Left-Click to secure your 40-acre claim perimeter.");
+          setPayDirtAlert(null);
+        }}
+        hudVisible={isHudVisible}
+        onToggleHud={() => setIsHudVisible((prev) => !prev)}
+        isTelegraphOpen={isTelegraphOpen}
+        onToggleTelegraph={() => {
+          setIsTelegraphOpen((prev) => {
+            const next = !prev;
+            if (next) setUnreadTelegraphCount(0);
+            return next;
+          });
+        }}
+        unreadTelegraphCount={unreadTelegraphCount}
         onToggleSound={() => {
           const next = !soundEnabled;
           setSoundEnabled(next);
@@ -711,12 +845,6 @@ export default function App() {
         soundEnabled={soundEnabled}
         onToggleCamera={() => setViewMode((prev) => (prev === 'first' ? 'third' : 'first'))}
         viewMode={viewMode}
-        timeOfDay={timeOfDay}
-        onSetTimeOfDay={(hour) => setTimeOfDay(hour)}
-        weather={weather}
-        onSetWeather={setWeather}
-        autoCycleTime={autoCycleTime}
-        onToggleAutoCycleTime={() => setAutoCycleTime((prev) => !prev)}
         onDig={() => {
           if (digHandlerRef.current) digHandlerRef.current();
         }}
@@ -811,6 +939,24 @@ export default function App() {
         onClose={() => setIsJournalOpen(false)}
         clues={clues}
         goldFound={playerState.goldFound}
+        onOpenGuidebook={() => {
+          setIsJournalOpen(false);
+          setIsGuidebookOpen(true);
+        }}
+      />
+
+      {/* Prospector's Field Guidebook & Shoring Lore */}
+      <GuidebookModal
+        isOpen={isGuidebookOpen}
+        onClose={() => setIsGuidebookOpen(false)}
+        onOpenJournal={() => {
+          setIsGuidebookOpen(false);
+          setIsJournalOpen(true);
+        }}
+        onOpenMap={() => {
+          setIsGuidebookOpen(false);
+          setIsMapOpen(true);
+        }}
       />
 
       {/* Single Clue / Landmark Inspection Dialog */}
@@ -875,6 +1021,16 @@ export default function App() {
         onStartExcavation={handleStartExcavation}
       />
 
+      {/* Historic Town of Tortilla Flat Saloon & Mercantile Modal */}
+      <TortillaFlatModal
+        isOpen={isTortillaFlatOpen}
+        onClose={() => setIsTortillaFlatOpen(false)}
+        playerState={playerState}
+        onUpdatePlayerState={setPlayerState}
+        onFastTravel={handleFastTravel}
+        onShowBanner={showBanner}
+      />
+
       {/* Mining Claim Deed & Certificate Modal */}
       <ClaimDeedModal
         isOpen={isClaimDeedOpen}
@@ -894,6 +1050,20 @@ export default function App() {
           setIsBuilderOpen(true);
         }}
       />
+
+      {/* Pop-up Dialog when a Claim is Staked: Prompt to build a mine */}
+      {claimPrompt && (
+        <ClaimStakedModal
+          isOpen={Boolean(claimPrompt)}
+          claimName={claimPrompt.name}
+          position={claimPrompt.position}
+          onClose={() => setClaimPrompt(null)}
+          onOpenBuilder={() => {
+            setClaimPrompt(null);
+            setIsBuilderOpen(true);
+          }}
+        />
+      )}
 
       {/* 0 Health Fatal Defeat / Coroner's Inquest & Panoramic Flight Modal */}
       {gameOverDetails && (

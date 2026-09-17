@@ -63,6 +63,7 @@ interface WorldCanvasProps {
   onPlayerDeath?: (details: GameOverDetails) => void;
   onRegisterRestartHandler?: (fn: () => void) => void;
   onStakeClaim?: (name: string, pos: Vector3D) => void;
+  onPayDirtHit?: (ounces: number) => void;
   onBuildStructure?: (type: MineStructureType, pos: Vector3D, rotationY: number) => void;
   onOpenDeedModal?: (claim: ClaimInfo) => void;
   onOpenBuilder?: () => void;
@@ -86,6 +87,11 @@ interface WorldCanvasProps {
       isShored: boolean;
       shoredUntilDepth?: number;
       rocksNeeded: number;
+      woodNeeded?: number;
+      strataName?: string;
+      strataId?: string;
+      materialType?: 'wood' | 'stone' | 'timber_rock' | 'none';
+      strataAdvice?: string;
       canShore: boolean;
     } | null
   ) => void;
@@ -94,6 +100,7 @@ interface WorldCanvasProps {
   onUpdateShaftSinkingStats?: (stats: ShaftSinkingStats | null) => void;
   onRegisterStrikeVoxelHandler?: (fn: () => void) => void;
   onRegisterPlaceTimberHandler?: (fn: () => void) => void;
+  onOpenTortillaFlat?: () => void;
 }
 
 export const WorldCanvas: React.FC<WorldCanvasProps> = ({
@@ -119,6 +126,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onPlayerDeath,
   onRegisterRestartHandler,
   onStakeClaim,
+  onPayDirtHit,
   onBuildStructure,
   onOpenDeedModal,
   onOpenBuilder,
@@ -141,6 +149,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onUpdateShaftSinkingStats,
   onRegisterStrikeVoxelHandler,
   onRegisterPlaceTimberHandler,
+  onOpenTortillaFlat,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const isUIOpenRef = useRef(isUIOpen);
@@ -713,11 +722,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       },
       onMineBuilt: (mine) => {
         if (mineBuildingRef.current) {
-          mineBuildingRef.current.placeStructure(
+          mineBuildingRef.current.buildStructure(
             mine.blueprintId as any,
-            new THREE.Vector3(mine.x, getTerrainHeight(mine.x, mine.z), mine.z),
-            0,
-            scene
+            { x: mine.x, y: getTerrainHeight(mine.x, mine.z), z: mine.z },
+            0
           );
         }
       },
@@ -766,6 +774,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           );
           if (res.success) {
             const goldAwarded = res.goldAwarded || 0;
+            if (goldAwarded > 0 && onPayDirtHit) {
+              onPayDirtHit(goldAwarded);
+            }
             const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
             const cashEarned = isAutoRedeem && goldAwarded > 0 ? Number((goldAwarded * 20.67).toFixed(2)) : 0;
             if (cashEarned > 0) {
@@ -821,6 +832,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
           const goldAwarded = fRes.goldAwarded || 0;
+          if (goldAwarded > 0 && onPayDirtHit) {
+            onPayDirtHit(goldAwarded);
+          }
           const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
           const cashEarned = isAutoRedeem && goldAwarded > 0 ? Number((goldAwarded * 20.67).toFixed(2)) : 0;
           if (cashEarned > 0) {
@@ -888,6 +902,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
 
         const goldAwarded = typeof res.goldAwarded === 'number' && !isNaN(res.goldAwarded) ? res.goldAwarded : 0;
+        if (goldAwarded > 0 && onPayDirtHit) {
+          onPayDirtHit(goldAwarded);
+        }
         const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
         const cashEarned = isAutoRedeem && goldAwarded > 0 ? Number((goldAwarded * 20.67).toFixed(2)) : 0;
         if (cashEarned > 0) {
@@ -977,6 +994,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
           const goldAwarded = fRes.goldAwarded || 0;
+          if (goldAwarded > 0 && onPayDirtHit) {
+            onPayDirtHit(goldAwarded);
+          }
           const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
           const cashEarned = isAutoRedeem && goldAwarded > 0 ? Number((goldAwarded * 20.67).toFixed(2)) : 0;
           if (cashEarned > 0) {
@@ -1087,6 +1107,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (result.itemFound) {
         const item = result.itemFound;
         const goldVal = item.type === 'gold' ? item.value : (result.goldAwarded || 0);
+        if (goldVal > 0 && onPayDirtHit) {
+          onPayDirtHit(goldVal);
+        }
         const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
         const cashEarned = isAutoRedeem && goldVal > 0 ? Number((goldVal * 20.67).toFixed(2)) : 0;
 
@@ -1259,6 +1282,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
         if (res.rewardGold || res.oreYield) {
           const goldGain = (res.rewardGold || 0) + (res.oreYield || 0);
+          if (goldGain > 0 && onPayDirtHit) {
+            onPayDirtHit(goldGain);
+          }
           setPlayerState((prev) => ({
             ...prev,
             goldFound: (prev.goldFound || 0) + goldGain,
@@ -1406,12 +1432,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const executeTimberRoom = (dir: RoomDirection) => {
       const uLayers = undergroundLayersRef.current;
       if (!uLayers || uLayers.currentLevel === 0) return;
-      const res = uLayers.timberRoom(dir, playerStateRef.current.woodPlanks || 0);
+      const res = uLayers.timberRoom(dir);
       if (res.success) {
-        setPlayerState((prev) => ({
-          ...prev,
-          woodPlanks: Math.max(0, (prev.woodPlanks || 0) - (res.timberUsed || 0)),
-        }));
         if (onUpdateShaftLayers) {
           onUpdateShaftLayers([...uLayers.layers]);
         }
@@ -1424,12 +1446,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const executeToggleCornishPump = () => {
       const uLayers = undergroundLayersRef.current;
       if (!uLayers) return;
-      const res = uLayers.togglePump();
+      const running = uLayers.toggleCornishPump();
       if (onUpdateWaterTable) {
         onUpdateWaterTable({ ...uLayers.waterTable });
       }
-      if (res.message && onShowBanner) {
-        onShowBanner(res.message);
+      if (onShowBanner) {
+        onShowBanner(running ? '⚙️ Cornish Steam Dewatering Pump started.' : '⚙️ Cornish Steam Dewatering Pump halted.');
       }
     };
 
@@ -1937,10 +1959,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             label = `⛏️ Mine Silver-Galena Ore Pocket [Left Click / E]`;
           } else if (targetedVoxel.type === 'amethyst') {
             label = `⛏️ Mine Imperial Amethyst Geode [Left Click / E]`;
-          } else if (targetedVoxel.type === 'copper_lode') {
+          } else if (targetedVoxel.type === 'copper') {
             label = `⛏️ Mine Native Copper-Gold Lode [Left Click / E]`;
-          } else if (targetedVoxel.type === 'iron_ore') {
-            label = `⛏️ Mine Magnetite-Iron Band [Left Click / E]`;
+          } else if (targetedVoxel.type === 'basalt') {
+            label = `⛏️ Mine Dense Basalt Stratum [Left Click / E]`;
           } else {
             label = `⛏️ Carve Drift into ${targetedVoxel.type.replace('_', ' ').toUpperCase()} [Left Click / E]`;
           }
@@ -2018,45 +2040,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             if (executeAction) {
               executeTraverseShaft(1);
             } else {
-              const shoreHint = needsNextShore ? ' (Press [T] to Shore)' : '';
-              onPromptInteract(`Descend into Subterranean Mine Shaft (Layer 1) [E]${shoreHint}`, () =>
+              onPromptInteract('Descend into Subterranean Mine Shaft (Layer 1) [E]', () =>
                 executeTraverseShaft(1)
               );
             }
             return;
           }
-        }
-      }
-
-      if (needsNextShore && nearbyTrench && currentLayer) {
-        const isExtend = (nearbyTrench.shoredUntilDepth || 0) > 0;
-        const actionWord =
-          currentLayer.id === 'strata_sand'
-            ? isExtend
-              ? 'Extend Wooden Shoring in Sand [T]'
-              : 'Install Wooden Shoring in Sand [T]'
-            : currentLayer.shoringRequirement === 'none'
-            ? 'Secure Self-Supporting Chamber [T]'
-            : isExtend
-            ? 'Extend Mine Timbering [T]'
-            : 'Construct Underground Mine Shoring [T]';
-
-        const costDesc =
-          materialType === 'wood'
-            ? `${woodNeeded} Wood Planks`
-            : materialType === 'timber_rock'
-            ? '1 Wood Plank + 1 Stone'
-            : '0 Materials (Self-Supporting Bedrock)';
-
-        const msg = `${actionWord} (${costDesc} | ${currentLayer.name} | Stability: ${Math.round(
-          nearbyTrench.stability
-        )}%)`;
-        if (executeAction) {
-          executeShoreNearbyTrench();
-          return;
-        } else {
-          onPromptInteract(msg, () => executeShoreNearbyTrench());
-          return;
         }
       }
 
@@ -2078,7 +2067,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (distToClaim < 8.0) {
         const isClaimed = miningSystemRef.current?.claim.isClaimed;
         if (!isClaimed) {
-          if (executeAction) {
+          const handleClaimDutchman = () => {
             const ok = miningSystemRef.current?.claimMine();
             if (ok) {
               if (onShowBanner) onShowBanner("Claim Staked! Dutchman's Mine is yours to excavate.");
@@ -2086,18 +2075,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                 ...prev,
                 activeClaim: { ...miningSystemRef.current!.claim },
               }));
-            }
-          } else {
-            onPromptInteract('Stake Mining Claim [E]', () => {
-              const ok = miningSystemRef.current?.claimMine();
-              if (ok) {
-                if (onShowBanner) onShowBanner("Claim Staked! Dutchman's Mine is yours to excavate.");
-                setPlayerState((prev) => ({
-                  ...prev,
-                  activeClaim: { ...miningSystemRef.current!.claim },
-                }));
+              if (onStakeClaim) {
+                onStakeClaim(miningSystemRef.current!.claim.name, miningSystemRef.current!.claim.position);
               }
-            });
+            }
+          };
+
+          if (executeAction) {
+            handleClaimDutchman();
+          } else {
+            onPromptInteract('Stake Mining Claim [E]', handleClaimDutchman);
           }
           return;
         } else {
@@ -2203,6 +2190,61 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           onPromptInteract('Enter Lost Dutchman Mine [E]', () => onEnterMine());
         }
         return;
+      }
+
+      // 3b. Historic Town of Tortilla Flat (Saloon, Mercantile & Campfire)
+      const distToTownFire = Math.hypot(px - (-12.5), pz - (-136.5));
+      if (distToTownFire < 3.8) {
+        const handleRestFire = () => {
+          soundEngine.playCampfire();
+          setPlayerState((prev) => ({
+            ...prev,
+            health: Math.min(100, (prev.health || 0) + 25),
+          }));
+          if (onShowBanner) onShowBanner('Rested by the Tortilla Flat campfire (+25 Health)!');
+        };
+        if (executeAction) {
+          handleRestFire();
+        } else {
+          onPromptInteract('Rest & Warm Up by Town Campfire [E]', handleRestFire);
+        }
+        return;
+      }
+
+      const distToSaloon = Math.hypot(px - (-15), pz - (-150));
+      if (distToSaloon < 24 && onOpenTortillaFlat) {
+        if (executeAction) {
+          onOpenTortillaFlat();
+        } else {
+          onPromptInteract('Enter Tortilla Flat Saloon & Mercantile [E]', () => onOpenTortillaFlat());
+        }
+        return;
+      }
+
+      // 3c. Player-Built Campfires & Prospector Camps
+      if (playerStateRef.current.builtStructures?.length) {
+        for (const s of playerStateRef.current.builtStructures) {
+          if (s.type === 'campfire' || s.type === 'prospector_camp') {
+            const dist = Math.hypot(px - s.position.x, pz - s.position.z);
+            if (dist < 3.4) {
+              const handleRest = () => {
+                soundEngine.playCampfire();
+                setPlayerState((prev) => ({
+                  ...prev,
+                  health: Math.min(100, (prev.health || 0) + 30),
+                  hydration: Math.min(100, (prev.hydration || 0) + 20),
+                }));
+                if (onShowBanner) onShowBanner(`Rested by ${s.name} (+30 Health, refreshed)!`);
+              };
+              if (executeAction) {
+                handleRest();
+              } else {
+                onPromptInteract(`Rest & Warm Up at ${s.name} [E]`, handleRest);
+              }
+              return;
+            }
+          }
+        }
       }
 
       // 4. Landmarks & Clues
@@ -2590,7 +2632,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             const count = typeof drop.value === 'number' && !isNaN(drop.value) ? Math.max(1, Math.round(drop.value)) : 1;
             setPlayerState((prev) => ({
               ...prev,
-              dynamiteCount: (prev.dynamiteCount || 0) + count,
+              dynamite: (prev.dynamite || 0) + count,
             }));
             if (onShowBanner) {
               onShowBanner(`+${count} Stick${count > 1 ? 's' : ''} of Mining Dynamite recovered!`);
@@ -2598,6 +2640,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             return;
           }
           const goldAmount = typeof drop.value === 'number' && !isNaN(drop.value) ? drop.value : 1;
+          if (goldAmount > 0 && onPayDirtHit) {
+            onPayDirtHit(goldAmount);
+          }
           const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
           const cashEarned = isAutoRedeem && goldAmount > 0 ? Number((goldAmount * 20.67).toFixed(2)) : 0;
 
@@ -2725,6 +2770,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               soundEngine.playCashRegister();
             }
 
+            if (goldBlasted > 0 && onPayDirtHit) {
+              onPayDirtHit(goldBlasted);
+            }
             if (goldBlasted > 0 || extraRocks > 0 || extraWood > 0 || extraHydration > 0) {
               setPlayerState((prev) => ({
                 ...prev,
@@ -2907,11 +2955,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           </div>
         </div>
       )}
-
-      {/* Click-to-look hint when not locked */}
-      <div className="absolute top-20 left-1/2 -translate-x-1/2 pointer-events-none bg-stone-950/60 backdrop-blur-sm text-stone-300 px-4 py-1.5 rounded-full text-xs font-mono border border-stone-700/40 select-none shadow">
-        Click world to look freely with mouse • WASD or Arrows to walk
-      </div>
     </div>
   );
 };

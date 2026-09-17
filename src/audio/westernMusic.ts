@@ -96,7 +96,11 @@ class WesternMusicEngine {
   private listeners: Array<() => void> = [];
 
   constructor() {
-    // Lazy init on first user gesture
+    // Pick a random track on startup for continuous playlist shuffle
+    const randomTrack = WESTERN_TRACKS[Math.floor(Math.random() * WESTERN_TRACKS.length)];
+    if (randomTrack) {
+      this.currentTrackId = randomTrack.id;
+    }
   }
 
   private initContext() {
@@ -180,10 +184,16 @@ class WesternMusicEngine {
     }
   }
 
+  public shuffleNextTrack() {
+    const others = WESTERN_TRACKS.filter((t) => t.id !== this.currentTrackId);
+    const next = others[Math.floor(Math.random() * others.length)] || WESTERN_TRACKS[0];
+    this.currentTrackId = next.id;
+    this.currentStep = 0;
+    this.notify();
+  }
+
   public nextTrack() {
-    const idx = WESTERN_TRACKS.findIndex((t) => t.id === this.currentTrackId);
-    const nextIdx = (idx + 1) % WESTERN_TRACKS.length;
-    this.switchTrack(WESTERN_TRACKS[nextIdx].id);
+    this.shuffleNextTrack();
   }
 
   public play() {
@@ -582,6 +592,13 @@ class WesternMusicEngine {
 
     // Advance step and schedule next bar slightly before completion
     this.currentStep++;
+
+    // When the track finishes its progression, shuffle seamlessly to another track behind the scenes
+    const requiredCycles = track.id === 'prospector_waltz' ? 2 : 1;
+    if (this.currentStep >= chords.length * requiredCycles) {
+      this.shuffleNextTrack();
+    }
+
     const scheduleDelayMs = Math.max(200, (barDuration - 0.15) * 1000);
     this.loopTimer = window.setTimeout(() => {
       if (this.isPlaying) {

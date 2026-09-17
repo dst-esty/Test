@@ -57,6 +57,24 @@ export const STRUCTURE_BLUEPRINTS: Record<MineStructureType, StructureBlueprint>
     dimensions: { width: 5.5, height: 4.0, depth: 5.5 },
     benefit: 'Uncovers subterranean high-yield quartz gold clusters ready to dig.',
   },
+  campfire: {
+    type: 'campfire',
+    name: 'Frontier Campfire',
+    description: 'Stone ring campfire with glowing charcoal embers, mesquite logs, and an iron coffee pot.',
+    goldCost: 0,
+    rockCost: 4,
+    dimensions: { width: 2.2, height: 1.2, depth: 2.2 },
+    benefit: 'Provides wilderness night warmth, light, and restores player health.',
+  },
+  prospector_camp: {
+    type: 'prospector_camp',
+    name: 'Prospector Outpost Camp',
+    description: 'Expedition canvas wall tent, bedroll, supply crates, lantern pole, and campfire.',
+    goldCost: 2,
+    rockCost: 8,
+    dimensions: { width: 4.8, height: 2.8, depth: 4.8 },
+    benefit: 'Wilderness forward operations base providing shelter, resting post, and supply cache.',
+  },
 };
 
 export class MineBuildingSystem {
@@ -725,6 +743,12 @@ export class MineBuildingSystem {
       case 'deep_shaft':
         mesh = this.createDeepShaftMesh(structure);
         break;
+      case 'campfire':
+        mesh = this.createCampfireMesh(structure);
+        break;
+      case 'prospector_camp':
+        mesh = this.createProspectorCampMesh(structure);
+        break;
     }
 
     mesh.position.set(structure.position.x, structure.position.y, structure.position.z);
@@ -1254,6 +1278,144 @@ export class MineBuildingSystem {
     );
     sign.position.set(0, 1.9, collarSize / 2 + 0.1);
     group.add(sign);
+
+    return group;
+  }
+
+  // Structure 7: Frontier Campfire
+  private createCampfireMesh(_structure: BuiltStructure): THREE.Group {
+    const group = new THREE.Group();
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6e6155, roughness: 0.95 });
+    const logMat = new THREE.MeshStandardMaterial({ color: 0x3d2716, roughness: 0.92 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.8, roughness: 0.4 });
+
+    // River stone fire ring
+    for (let i = 0; i < 9; i++) {
+      const angle = (i / 9) * Math.PI * 2;
+      const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.24, 0), stoneMat);
+      stone.position.set(Math.cos(angle) * 0.95, 0.14, Math.sin(angle) * 0.95);
+      group.add(stone);
+    }
+
+    // Glowing charcoal ash bed
+    const ashBed = new THREE.Mesh(
+      new THREE.CircleGeometry(0.85, 12),
+      new THREE.MeshStandardMaterial({
+        color: 0x1a0904,
+        emissive: 0xcc3300,
+        emissiveIntensity: 0.85,
+        roughness: 0.9,
+      })
+    );
+    ashBed.position.set(0, 0.05, 0);
+    ashBed.rotation.x = -Math.PI / 2;
+    group.add(ashBed);
+
+    // Crossed mesquite logs
+    for (let l = 0; l < 4; l++) {
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.1, 7), logMat);
+      log.position.set(0, 0.22, 0);
+      log.rotation.x = 0.35;
+      log.rotation.y = (l * Math.PI) / 2;
+      group.add(log);
+    }
+
+    // Cast iron coffee kettle on iron tripod
+    for (let t = 0; t < 3; t++) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.9), ironMat);
+      const legAngle = (t / 3) * Math.PI * 2;
+      leg.position.set(Math.cos(legAngle) * 0.35, 0.45, Math.sin(legAngle) * 0.35);
+      leg.rotation.z = Math.cos(legAngle) * 0.35;
+      leg.rotation.x = Math.sin(legAngle) * 0.35;
+      group.add(leg);
+    }
+
+    const kettle = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.32, 8), ironMat);
+    kettle.position.set(0, 0.42, 0);
+    group.add(kettle);
+
+    // Warm glowing campfire light
+    const fireLight = new THREE.PointLight(0xff6611, 2.6, 14);
+    fireLight.position.set(0, 0.8, 0);
+    group.add(fireLight);
+
+    return group;
+  }
+
+  // Structure 8: Prospector Outpost Camp
+  private createProspectorCampMesh(_structure: BuiltStructure): THREE.Group {
+    const group = new THREE.Group();
+    const canvasMat = new THREE.MeshStandardMaterial({ color: 0xded2b8, roughness: 0.94 });
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0x4d321d, roughness: 0.9 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x242424, metalness: 0.85, roughness: 0.35 });
+    const blanketMat = new THREE.MeshStandardMaterial({ color: 0x822f28, roughness: 0.95 });
+
+    // A-Frame Canvas Wall Tent
+    const tentRidge = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.8), woodMat);
+    tentRidge.position.set(0, 2.2, 0);
+    tentRidge.rotation.x = Math.PI / 2;
+    group.add(tentRidge);
+
+    for (const z of [-1.8, 1.8]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 2.2), woodMat);
+      pole.position.set(0, 1.1, z);
+      group.add(pole);
+    }
+
+    // Pitched tent roof planes
+    for (const side of [-1, 1]) {
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.04, 3.6), canvasMat);
+      roof.position.set(side * 0.9, 1.15, 0);
+      roof.rotation.z = side * 0.65;
+      group.add(roof);
+    }
+
+    // Tent back triangular wall
+    const backWall = new THREE.Mesh(new THREE.ConeGeometry(1.7, 2.2, 3), canvasMat);
+    backWall.position.set(0, 1.1, -1.8);
+    backWall.rotation.y = Math.PI;
+    group.add(backWall);
+
+    // Wool bedroll inside tent
+    const bedroll = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.18, 2.2), blanketMat);
+    bedroll.position.set(0, 0.09, 0);
+    group.add(bedroll);
+
+    // Stacked supply crates & mining tools outside
+    for (let c = 0; c < 3; c++) {
+      const crate = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 0.75), woodMat);
+      crate.position.set(1.9 + (c % 2) * 0.3, 0.3 + Math.floor(c / 2) * 0.55, -0.6 + c * 0.5);
+      group.add(crate);
+    }
+
+    // Pickaxe leaning on crate
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 1.1), woodMat);
+    handle.position.set(1.6, 0.5, 0.4);
+    handle.rotation.z = 0.35;
+    group.add(handle);
+
+    // Campfire in front of tent
+    const campfire = this.createCampfireMesh(_structure);
+    campfire.position.set(0, 0, 2.6);
+    group.add(campfire);
+
+    // Lantern pole with hanging brass lantern
+    const lPole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 2.6), woodMat);
+    lPole.position.set(-1.8, 1.3, 1.8);
+    group.add(lPole);
+
+    const lArm = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6), woodMat);
+    lArm.position.set(-1.55, 2.4, 1.8);
+    lArm.rotation.z = Math.PI / 2;
+    group.add(lArm);
+
+    const campLantern = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.28, 6), ironMat);
+    campLantern.position.set(-1.3, 2.2, 1.8);
+    group.add(campLantern);
+
+    const lanternLight = new THREE.PointLight(0xffb040, 1.8, 10);
+    lanternLight.position.copy(campLantern.position);
+    group.add(lanternLight);
 
     return group;
   }

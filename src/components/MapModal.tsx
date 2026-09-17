@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Navigation, Compass, Sparkles, MapPin, Award } from 'lucide-react';
+import { X, Navigation, Compass, Sparkles, MapPin, Award, Store } from 'lucide-react';
 import { Landmark, Vector3D } from '../types';
 
 interface MapModalProps {
@@ -102,12 +102,16 @@ export const MapModal: React.FC<MapModalProps> = ({
                       isDiscovered
                         ? lm.type === 'mine'
                           ? 'bg-amber-600 text-amber-100 ring-2 ring-amber-300 animate-bounce'
+                          : lm.type === 'town'
+                          ? 'bg-amber-800 text-amber-200 ring-2 ring-amber-400'
                           : 'bg-[#5c3e21] text-amber-100 ring-1 ring-amber-200'
                         : 'bg-stone-500/70 text-stone-300 ring-1 ring-stone-400'
                     }`}
                   >
                     {lm.type === 'mine' ? (
                       <Award className="w-4 h-4" />
+                    ) : lm.type === 'town' ? (
+                      <Store className="w-4 h-4" />
                     ) : lm.type === 'spring' ? (
                       <Sparkles className="w-4 h-4" />
                     ) : (

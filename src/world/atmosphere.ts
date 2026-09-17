@@ -133,6 +133,35 @@ function createMoonGlowTexture(): THREE.CanvasTexture {
   return texture;
 }
 
+/**
+ * Creates an organic radial dust/sand grain texture for particle systems.
+ */
+function createDustPuffTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, 64, 64);
+  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 30);
+  grad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+  grad.addColorStop(0.2, 'rgba(255, 235, 190, 0.85)');
+  grad.addColorStop(0.55, 'rgba(230, 165, 95, 0.35)');
+  grad.addColorStop(0.85, 'rgba(190, 115, 55, 0.08)');
+  grad.addColorStop(1.0, 'rgba(160, 90, 40, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(32, 32, 30, 0, Math.PI * 2);
+  ctx.fill();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export class AtmosphereManager {
   private scene: THREE.Scene;
   private skyDome: THREE.Mesh;
@@ -154,6 +183,7 @@ export class AtmosphereManager {
   private cloudTexture: THREE.CanvasTexture;
   private sunTexture: THREE.CanvasTexture;
   private moonTexture: THREE.CanvasTexture;
+  private dustTexture: THREE.CanvasTexture;
 
   // Rain and storm lightning
   private rainGroup: THREE.Group = new THREE.Group();
@@ -162,12 +192,24 @@ export class AtmosphereManager {
   private lightningLight: THREE.PointLight;
   private lightningMesh: THREE.Line | null = null;
 
+  // Dynamic sandstorm dust particles
+  private sandstormGroup: THREE.Group = new THREE.Group();
+  private sandstormParticles: THREE.Points | null = null;
+  private sandstormPositions: Float32Array | null = null;
+  private sandstormVelocities: Float32Array | null = null;
+
+  // Ambient desert floating dust motes
+  private ambientDustGroup: THREE.Group = new THREE.Group();
+  private ambientDustParticles: THREE.Points | null = null;
+  private ambientDustPositions: Float32Array | null = null;
+
   private weather: WeatherType = 'clear';
   private timeOfDay: number = 16.0; // default 4 PM Weaver's Needle Shadow Legend
   private stormTimer: number = 0;
   private lightningActiveTimer: number = 0;
   private nextLightningTime: number = 4.0;
   private elapsedTime: number = 0;
+  public onLightningFlash?: (intensity: number) => void;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -176,6 +218,7 @@ export class AtmosphereManager {
     this.cloudTexture = createCloudPuffTexture();
     this.sunTexture = createSunCoronaTexture();
     this.moonTexture = createMoonGlowTexture();
+    this.dustTexture = createDustPuffTexture();
 
     // 1. Physically Accurate Atmospheric Scattering Sky Dome
     // Uses camera-relative ray directions so the sky dome is 100% immune to camera position distortion
@@ -195,7 +238,7 @@ export class AtmosphereManager {
         uniform vec3 uSunPosition; // Normalized sun direction vector
         uniform float uTime;
         uniform float uTimeOfDay;
-        uniform float uWeather; // 0=clear/clouds, 1=sunset/golden hour, 2=night, 3=storm
+        uniform float uWeather; // 0=clear/clouds, 1=sunset/golden hour, 2=night, 3=storm, 4=sandstorm, 5=light_rain
         varying vec3 vDirection;
 
         float starHash(vec3 p) {
@@ -226,10 +269,18 @@ export class AtmosphereManager {
             horizonCol = vec3(0.032, 0.042, 0.088);
           }
 
-          if (uWeather > 2.5) {
+          if (uWeather > 2.5 && uWeather < 3.5) {
             // Monsoonal thunderstorm sky
             zenith = vec3(0.13, 0.15, 0.19);
             horizonCol = vec3(0.20, 0.22, 0.26);
+          } else if (uWeather >= 3.5 && uWeather < 4.5) {
+            // Dramatic Haboob desert sandstorm sky
+            zenith = vec3(0.56, 0.34, 0.18);
+            horizonCol = vec3(0.74, 0.49, 0.26);
+          } else if (uWeather >= 4.5) {
+            // Gentle overcast light rain sky
+            zenith = vec3(0.28, 0.34, 0.44);
+            horizonCol = vec3(0.48, 0.54, 0.62);
           }
 
           vec3 sky = mix(horizonCol, zenith, pow(horizon, 0.52));
@@ -250,6 +301,11 @@ export class AtmosphereManager {
 
             sky += sunHue * (innerCorona + outerCorona + wideGlare);
             sky += vec3(1.0, 1.0, 0.95) * sunDisc * 2.5;
+          } else if (sunDir.y > -0.08 && uWeather >= 3.5 && uWeather < 4.5) {
+            // Obscured reddish solar disc struggling through the thick Haboob dust
+            float sunDisc = smoothstep(0.9988, 0.9998, sunDot);
+            sky += vec3(1.0, 0.55, 0.25) * sunDisc * 0.9;
+            sky += vec3(0.9, 0.45, 0.2) * pow(sunDot, 14.0) * 0.32;
           }
 
           // Celestial Night Stars and Procedural Milky Way
@@ -351,7 +407,15 @@ export class AtmosphereManager {
     this.scene.add(this.rainGroup);
     this.initRainSystem();
 
-    // 6. Lightning Light
+    // 6. Dynamic Sandstorm Dust Particles
+    this.scene.add(this.sandstormGroup);
+    this.initSandstormSystem();
+
+    // 7. Ambient Desert Dust Motes
+    this.scene.add(this.ambientDustGroup);
+    this.initAmbientDustSystem();
+
+    // 8. Lightning Light
     this.lightningLight = new THREE.PointLight(0xdbeafe, 0, 450);
     this.lightningLight.position.set(60, 95, 20);
     this.scene.add(this.lightningLight);
@@ -457,10 +521,77 @@ export class AtmosphereManager {
     this.rainGroup.add(this.rainParticles);
   }
 
+  // --- DYNAMIC SANDSTORM DUST PARTICLE SYSTEM ---
+  private initSandstormSystem() {
+    const count = 3600;
+    const geometry = new THREE.BufferGeometry();
+    this.sandstormPositions = new Float32Array(count * 3);
+    this.sandstormVelocities = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i++) {
+      this.sandstormPositions[i * 3] = (Math.random() - 0.5) * 160;
+      this.sandstormPositions[i * 3 + 1] = Math.random() * 35;
+      this.sandstormPositions[i * 3 + 2] = (Math.random() - 0.5) * 160;
+
+      // Base velocity with variation
+      this.sandstormVelocities[i * 3] = 42 + Math.random() * 26; // Windward speed along +X
+      this.sandstormVelocities[i * 3 + 1] = (Math.random() - 0.5) * 3.5; // Vertical oscillation
+      this.sandstormVelocities[i * 3 + 2] = (Math.random() - 0.5) * 12; // Crosswind
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(this.sandstormPositions, 3));
+
+    const material = new THREE.PointsMaterial({
+      map: this.dustTexture,
+      color: 0xe09b55,
+      size: 1.35,
+      transparent: true,
+      opacity: 0.82,
+      fog: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+    });
+
+    this.sandstormParticles = new THREE.Points(geometry, material);
+    this.sandstormParticles.visible = false;
+    this.sandstormGroup.add(this.sandstormParticles);
+  }
+
+  // --- AMBIENT DESERT DUST MOTES SYSTEM ---
+  private initAmbientDustSystem() {
+    const count = 500;
+    const geometry = new THREE.BufferGeometry();
+    this.ambientDustPositions = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i++) {
+      this.ambientDustPositions[i * 3] = (Math.random() - 0.5) * 55;
+      this.ambientDustPositions[i * 3 + 1] = Math.random() * 15 + 0.5;
+      this.ambientDustPositions[i * 3 + 2] = (Math.random() - 0.5) * 55;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(this.ambientDustPositions, 3));
+
+    const material = new THREE.PointsMaterial({
+      map: this.dustTexture,
+      color: 0xfde68a,
+      size: 0.55,
+      transparent: true,
+      opacity: 0.40,
+      fog: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+
+    this.ambientDustParticles = new THREE.Points(geometry, material);
+    this.ambientDustParticles.visible = true;
+    this.ambientDustGroup.add(this.ambientDustParticles);
+  }
+
   // --- LIGHTNING BOLT PROCEDURAL MESH ---
   private triggerLightningFlash() {
     this.lightningActiveTimer = 0.12;
     this.lightningLight.intensity = 5.5;
+    this.onLightningFlash?.(1.0);
 
     const startX = (Math.random() - 0.5) * 120 + 40;
     const startZ = (Math.random() - 0.5) * 120;
@@ -534,10 +665,62 @@ export class AtmosphereManager {
     if (weather === 'sunset' || (time >= 15.0 && time <= 19.5)) weatherCode = 1;
     if (weather === 'night' || time < 5.5 || time > 19.5) weatherCode = 2;
     if (weather === 'storm') weatherCode = 3;
+    if (weather === 'sandstorm') weatherCode = 4;
+    if (weather === 'light_rain') weatherCode = 5;
     this.skyMaterial.uniforms.uWeather.value = weatherCode;
 
+    // Synchronize audio synthesizer ambiance
+    soundEngine.updateWeatherAmbiance(weather, false);
+
     // 2. Weather Lighting & Realistic Cloud Colors
-    if (weather === 'storm') {
+    if (weather === 'sandstorm') {
+      // Violent Arizona Haboob Dust Storm
+      if (this.scene.fog && 'color' in this.scene.fog) {
+        this.scene.fog.color.setHex(0xa66336); // Thick suspended terracotta dust
+        if ('density' in this.scene.fog) (this.scene.fog as THREE.FogExp2).density = 0.0095;
+      }
+      if (sunLight) {
+        sunLight.color.setHex(0xdf8445);
+        sunLight.intensity = 0.65;
+      }
+      if (hemiLight) {
+        hemiLight.color.setHex(0xca7740);
+        hemiLight.groundColor.setHex(0x603418);
+      }
+      if (this.rainParticles) this.rainParticles.visible = false;
+      if (this.sandstormParticles) this.sandstormParticles.visible = true;
+      if (this.ambientDustParticles) this.ambientDustParticles.visible = false;
+
+      // Haboob dust clouds: Thick, dark churning ochre/sand billows
+      this.updateCloudColors(0xa66336, 0x6e3b1c, 0.98);
+
+    } else if (weather === 'light_rain') {
+      // Gentle Overcast Desert Shower
+      if (this.scene.fog && 'color' in this.scene.fog) {
+        this.scene.fog.color.setHex(0x5d6e82); // Soft blue-gray rain haze
+        if ('density' in this.scene.fog) (this.scene.fog as THREE.FogExp2).density = 0.0038;
+      }
+      if (sunLight) {
+        sunLight.color.setHex(0x9fb5ce);
+        sunLight.intensity = 1.3;
+      }
+      if (hemiLight) {
+        hemiLight.color.setHex(0x8aa1bd);
+        hemiLight.groundColor.setHex(0x384758);
+      }
+      if (this.rainParticles) {
+        this.rainParticles.visible = true;
+        (this.rainParticles.material as THREE.PointsMaterial).size = 0.38;
+        (this.rainParticles.material as THREE.PointsMaterial).opacity = 0.45;
+        (this.rainParticles.material as THREE.PointsMaterial).color.setHex(0xbfdbfe);
+      }
+      if (this.sandstormParticles) this.sandstormParticles.visible = false;
+      if (this.ambientDustParticles) this.ambientDustParticles.visible = false;
+
+      // Rainy overcast clouds: Soft silver-grey
+      this.updateCloudColors(0xb8c8da, 0x6b7c91, 0.88);
+
+    } else if (weather === 'storm') {
       // Monsoonal Desert Thunderstorm
       if (this.scene.fog && 'color' in this.scene.fog) {
         this.scene.fog.color.setHex(0x1a202c);
@@ -551,7 +734,14 @@ export class AtmosphereManager {
         hemiLight.color.setHex(0x334155);
         hemiLight.groundColor.setHex(0x1e293b);
       }
-      if (this.rainParticles) this.rainParticles.visible = true;
+      if (this.rainParticles) {
+        this.rainParticles.visible = true;
+        (this.rainParticles.material as THREE.PointsMaterial).size = 0.55;
+        (this.rainParticles.material as THREE.PointsMaterial).opacity = 0.82;
+        (this.rainParticles.material as THREE.PointsMaterial).color.setHex(0x93c5fd);
+      }
+      if (this.sandstormParticles) this.sandstormParticles.visible = false;
+      if (this.ambientDustParticles) this.ambientDustParticles.visible = false;
 
       // Storm clouds: dramatic slate blue-gray with dark turbulent undersides
       this.updateCloudColors(0x64748b, 0x334155, 0.94);
@@ -572,6 +762,8 @@ export class AtmosphereManager {
         hemiLight.groundColor.setHex(0x995830); // Warm terracotta ground bounce
       }
       if (this.rainParticles) this.rainParticles.visible = false;
+      if (this.sandstormParticles) this.sandstormParticles.visible = false;
+      if (this.ambientDustParticles) this.ambientDustParticles.visible = true;
 
       // Realistic Golden Hour Clouds:
       // Tops: Radiant golden-ivory rim lighting from the low western sun
@@ -593,6 +785,8 @@ export class AtmosphereManager {
         hemiLight.groundColor.setHex(0x0b0f19);
       }
       if (this.rainParticles) this.rainParticles.visible = false;
+      if (this.sandstormParticles) this.sandstormParticles.visible = false;
+      if (this.ambientDustParticles) this.ambientDustParticles.visible = true;
 
       // Night clouds: Translucent silvery-indigo silhouettes under starlight
       this.updateCloudColors(0x334155, 0x182030, 0.45);
@@ -612,6 +806,8 @@ export class AtmosphereManager {
         hemiLight.groundColor.setHex(0x94653d);
       }
       if (this.rainParticles) this.rainParticles.visible = false;
+      if (this.sandstormParticles) this.sandstormParticles.visible = false;
+      if (this.ambientDustParticles) this.ambientDustParticles.visible = true;
 
       // Daylight clouds: Crisp radiant pure white tops with soft ambient azure shadows
       this.updateCloudColors(0xffffff, 0xdbeafe, weather === 'clouds' ? 0.94 : 0.82);
@@ -647,7 +843,8 @@ export class AtmosphereManager {
     delta: number,
     playerPos: THREE.Vector3,
     sunLight?: THREE.DirectionalLight,
-    hemiLight?: THREE.HemisphereLight
+    hemiLight?: THREE.HemisphereLight,
+    isUnderground: boolean = false
   ) {
     this.elapsedTime += delta;
     this.skyMaterial.uniforms.uTime.value = this.elapsedTime;
@@ -691,42 +888,113 @@ export class AtmosphereManager {
       }
     });
 
-    // 2. Storm Rain & Lightning
-    if (this.weather === 'storm') {
-      this.stormTimer += delta;
+    // 2. Underground attenuation
+    if (isUnderground) {
+      if (this.sandstormParticles) this.sandstormParticles.visible = false;
+      if (this.rainParticles) this.rainParticles.visible = false;
+    } else {
+      // 3. Dynamic Sandstorm Dust Particle System
+      if (this.weather === 'sandstorm' && this.sandstormParticles && this.sandstormPositions && this.sandstormVelocities) {
+        this.sandstormParticles.visible = true;
+        const count = this.sandstormPositions.length / 3;
+        const windGust = Math.sin(this.elapsedTime * 2.2) * 12.0;
 
-      if (this.rainParticles && this.rainPositions) {
-        const count = this.rainPositions.length / 3;
         for (let i = 0; i < count; i++) {
-          this.rainPositions[i * 3 + 1] -= 42 * delta; // Falling velocity
-          this.rainPositions[i * 3] += 6 * delta; // Wind angle
+          const idx = i * 3;
+          this.sandstormPositions[idx] += (this.sandstormVelocities[idx] + windGust) * delta;
+          this.sandstormPositions[idx + 1] += (this.sandstormVelocities[idx + 1] + Math.sin(this.elapsedTime * 3.2 + i) * 1.8) * delta;
+          this.sandstormPositions[idx + 2] += (this.sandstormVelocities[idx + 2] + Math.cos(this.elapsedTime * 1.5 + i) * 3.5) * delta;
 
-          if (this.rainPositions[i * 3 + 1] < 0) {
-            this.rainPositions[i * 3 + 1] = 65;
-            this.rainPositions[i * 3] = playerPos.x + (Math.random() - 0.5) * 160;
-            this.rainPositions[i * 3 + 2] = playerPos.z + (Math.random() - 0.5) * 160;
+          // Wrap around player position
+          if (this.sandstormPositions[idx] > playerPos.x + 85) {
+            this.sandstormPositions[idx] = playerPos.x - 85;
+          } else if (this.sandstormPositions[idx] < playerPos.x - 85) {
+            this.sandstormPositions[idx] = playerPos.x + 85;
+          }
+
+          if (this.sandstormPositions[idx + 2] > playerPos.z + 85) {
+            this.sandstormPositions[idx + 2] = playerPos.z - 85;
+          } else if (this.sandstormPositions[idx + 2] < playerPos.z - 85) {
+            this.sandstormPositions[idx + 2] = playerPos.z + 85;
+          }
+
+          if (this.sandstormPositions[idx + 1] < playerPos.y - 3) {
+            this.sandstormPositions[idx + 1] = playerPos.y + 32;
+          } else if (this.sandstormPositions[idx + 1] > playerPos.y + 36) {
+            this.sandstormPositions[idx + 1] = playerPos.y - 1;
+          }
+        }
+        this.sandstormParticles.geometry.attributes.position.needsUpdate = true;
+      }
+
+      // 4. Rain Particles (Supports both gentle light_rain and intense storm)
+      if ((this.weather === 'storm' || this.weather === 'light_rain') && this.rainParticles && this.rainPositions) {
+        this.rainParticles.visible = true;
+        const count = this.rainPositions.length / 3;
+        const fallSpeed = this.weather === 'storm' ? 48 : 24;
+        const windDrift = this.weather === 'storm' ? 12 : 3.5;
+
+        for (let i = 0; i < count; i++) {
+          const idx = i * 3;
+          this.rainPositions[idx + 1] -= fallSpeed * delta;
+          this.rainPositions[idx] += windDrift * delta;
+
+          if (this.rainPositions[idx + 1] < playerPos.y - 2) {
+            this.rainPositions[idx + 1] = playerPos.y + 55;
+            this.rainPositions[idx] = playerPos.x + (Math.random() - 0.5) * 140;
+            this.rainPositions[idx + 2] = playerPos.z + (Math.random() - 0.5) * 140;
           }
         }
         this.rainParticles.geometry.attributes.position.needsUpdate = true;
       }
 
-      if (this.stormTimer >= this.nextLightningTime) {
-        this.triggerLightningFlash();
-        this.stormTimer = 0;
-        this.nextLightningTime = 3.5 + Math.random() * 5.5;
-      }
+      // 5. Storm Lightning Flashes
+      if (this.weather === 'storm') {
+        this.stormTimer += delta;
 
-      if (this.lightningActiveTimer > 0) {
-        this.lightningActiveTimer -= delta;
-        if (this.lightningActiveTimer <= 0) {
-          this.lightningLight.intensity = 0;
-          if (this.lightningMesh) {
-            this.scene.remove(this.lightningMesh);
-            this.lightningMesh.geometry.dispose();
-            this.lightningMesh = null;
+        if (this.stormTimer >= this.nextLightningTime) {
+          this.triggerLightningFlash();
+          this.stormTimer = 0;
+          this.nextLightningTime = 3.5 + Math.random() * 5.5;
+        }
+
+        if (this.lightningActiveTimer > 0) {
+          this.lightningActiveTimer -= delta;
+          if (this.lightningActiveTimer <= 0) {
+            this.lightningLight.intensity = 0;
+            this.onLightningFlash?.(0);
+            if (this.lightningMesh) {
+              this.scene.remove(this.lightningMesh);
+              this.lightningMesh.geometry.dispose();
+              this.lightningMesh = null;
+            }
           }
         }
       }
+    }
+
+    // 6. Ambient Floating Desert Dust Motes (bobbing Brownian motion)
+    if (this.ambientDustParticles && this.ambientDustParticles.visible && this.ambientDustPositions) {
+      const count = this.ambientDustPositions.length / 3;
+      for (let i = 0; i < count; i++) {
+        const idx = i * 3;
+        this.ambientDustPositions[idx] += (1.1 + Math.sin(this.elapsedTime * 0.4 + i) * 0.5) * delta;
+        this.ambientDustPositions[idx + 1] += Math.sin(this.elapsedTime * 0.7 + i * 2) * 0.35 * delta;
+        this.ambientDustPositions[idx + 2] += Math.cos(this.elapsedTime * 0.5 + i) * 0.5 * delta;
+
+        if (Math.abs(this.ambientDustPositions[idx] - playerPos.x) > 35) {
+          this.ambientDustPositions[idx] = playerPos.x - Math.sign(this.ambientDustPositions[idx] - playerPos.x) * 33;
+        }
+        if (Math.abs(this.ambientDustPositions[idx + 2] - playerPos.z) > 35) {
+          this.ambientDustPositions[idx + 2] = playerPos.z - Math.sign(this.ambientDustPositions[idx + 2] - playerPos.z) * 33;
+        }
+        if (this.ambientDustPositions[idx + 1] < playerPos.y - 1) {
+          this.ambientDustPositions[idx + 1] = playerPos.y + 12;
+        } else if (this.ambientDustPositions[idx + 1] > playerPos.y + 15) {
+          this.ambientDustPositions[idx + 1] = playerPos.y + 0.5;
+        }
+      }
+      this.ambientDustParticles.geometry.attributes.position.needsUpdate = true;
     }
   }
 
@@ -759,11 +1027,24 @@ export class AtmosphereManager {
     this.cloudTexture.dispose();
     this.sunTexture.dispose();
     this.moonTexture.dispose();
+    this.dustTexture.dispose();
 
     this.scene.remove(this.rainGroup);
     if (this.rainParticles) {
       this.rainParticles.geometry.dispose();
       (this.rainParticles.material as THREE.Material).dispose();
+    }
+
+    this.scene.remove(this.sandstormGroup);
+    if (this.sandstormParticles) {
+      this.sandstormParticles.geometry.dispose();
+      (this.sandstormParticles.material as THREE.Material).dispose();
+    }
+
+    this.scene.remove(this.ambientDustGroup);
+    if (this.ambientDustParticles) {
+      this.ambientDustParticles.geometry.dispose();
+      (this.ambientDustParticles.material as THREE.Material).dispose();
     }
 
     this.scene.remove(this.lightningLight);

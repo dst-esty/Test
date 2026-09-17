@@ -7,6 +7,7 @@ interface JournalModalProps {
   onClose: () => void;
   clues: ClueItem[];
   goldFound: number;
+  onOpenGuidebook?: () => void;
 }
 
 export const JournalModal: React.FC<JournalModalProps> = ({
@@ -14,6 +15,7 @@ export const JournalModal: React.FC<JournalModalProps> = ({
   onClose,
   clues,
   goldFound,
+  onOpenGuidebook,
 }) => {
   if (!isOpen) return null;
 
@@ -29,20 +31,40 @@ export const JournalModal: React.FC<JournalModalProps> = ({
               <BookOpen className="w-7 h-7" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold tracking-wide text-[#3d2411]">
-                Jacob Waltz&apos;s Field Journal
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-2xl font-bold tracking-wide text-[#3d2411]">
+                  Jacob Waltz&apos;s Field Journal
+                </h2>
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[#ebdcc2] text-[#6b4724] font-bold border border-[#c5ad88]">
+                  Records
+                </span>
+              </div>
               <p className="text-xs text-stone-600 italic">
                 Deathbed Transcriptions & Peralta Stone Cipher Entries
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-stone-800/10 text-stone-700 transition"
-          >
-            <X className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenGuidebook && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenGuidebook();
+                }}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#ebdcc2] hover:bg-[#ded0b3] text-[#4a2e14] text-xs font-sans font-bold transition cursor-pointer border border-[#cbb793]"
+                title="Open Prospector's Field Guidebook"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-amber-800" />
+                <span>Guidebook</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-full hover:bg-stone-800/10 text-stone-700 transition cursor-pointer"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
         </div>
 
         {/* Status Bar */}

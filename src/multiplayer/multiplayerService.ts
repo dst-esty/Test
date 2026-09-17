@@ -1,4 +1,4 @@
-import { MultiplayerChatMessage, MultiplayerColorPreset, MultiplayerPlayer } from '../types';
+import { MultiplayerChatMessage, MultiplayerColorPreset, MultiplayerPlayer, WeatherType } from '../types';
 
 export type MultiplayerEventHandler = {
   onConnected?: (selfId: string, selfData: any) => void;
@@ -27,6 +27,7 @@ export type MultiplayerEventHandler = {
   onMineBuilt?: (mine: any) => void;
   onChatMessage?: (msg: MultiplayerChatMessage) => void;
   onPingUpdated?: (ping: number) => void;
+  onWeatherSync?: (data: { weather: WeatherType; timeOfDay: number; label?: string }) => void;
 };
 
 class MultiplayerService {
@@ -45,10 +46,14 @@ class MultiplayerService {
     players: Record<string, MultiplayerPlayer>;
     chatMessages: MultiplayerChatMessage[];
     ping: number;
+    universalWeather: WeatherType;
+    universalTimeOfDay: number;
   } = {
     players: {},
     chatMessages: [],
     ping: 35,
+    universalWeather: 'sunset',
+    universalTimeOfDay: 16.0,
   };
   private subscribers = new Set<() => void>();
 
@@ -80,6 +85,14 @@ class MultiplayerService {
 
   public getSelfColor(): string {
     return localStorage.getItem('prospector_color') || '#8c5932';
+  }
+
+  public getUniversalWeather(): WeatherType {
+    return this.state.universalWeather;
+  }
+
+  public getUniversalTimeOfDay(): number {
+    return this.state.universalTimeOfDay;
   }
 
   public colorPresets: MultiplayerColorPreset[] = [
@@ -211,6 +224,18 @@ class MultiplayerService {
             this.handlers.onTerrainDug({ hole: h, dugByPlayerId: 'server_init' });
           }
         }
+        if (msg.universalWeather) {
+          this.state.universalWeather = msg.universalWeather;
+        }
+        if (typeof msg.universalTimeOfDay === 'number') {
+          this.state.universalTimeOfDay = msg.universalTimeOfDay;
+        }
+        if (this.handlers.onWeatherSync && msg.universalWeather) {
+          this.handlers.onWeatherSync({
+            weather: msg.universalWeather,
+            timeOfDay: typeof msg.universalTimeOfDay === 'number' ? msg.universalTimeOfDay : 16.0,
+          });
+        }
         break;
       }
 
@@ -311,6 +336,24 @@ class MultiplayerService {
         }
         if (this.handlers.onChatMessage) {
           this.handlers.onChatMessage(msg.message);
+        }
+        break;
+      }
+
+      case 'weather:sync': {
+        if (msg.weather) {
+          this.state.universalWeather = msg.weather;
+        }
+        if (typeof msg.timeOfDay === 'number') {
+          this.state.universalTimeOfDay = msg.timeOfDay;
+        }
+        this.notify();
+        if (this.handlers.onWeatherSync) {
+          this.handlers.onWeatherSync({
+            weather: msg.weather,
+            timeOfDay: msg.timeOfDay,
+            label: msg.label,
+          });
         }
         break;
       }

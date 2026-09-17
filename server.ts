@@ -125,8 +125,102 @@ async function startServer() {
       onlineProspectors: players.size,
       excavations: dugHoles.size,
       minesBuilt: builtMines.size,
+      universalWeather,
+      universalTimeOfDay,
     });
   });
+
+  // Authoritative Universal Weather & Celestial Sky Simulation
+  type WeatherType = 'clear' | 'clouds' | 'sunset' | 'storm' | 'sandstorm' | 'light_rain' | 'night';
+
+  const WEATHER_CYCLE: { weather: WeatherType; durationSec: number; label: string; broadcastMsg: string }[] = [
+    {
+      weather: 'sunset',
+      durationSec: 180,
+      label: 'Golden Hour (4:00 PM)',
+      broadcastMsg: "⛰️ Golden Hour in Superstition Mountains: The shadow of Weaver's Needle points the way.",
+    },
+    {
+      weather: 'clear',
+      durationSec: 160,
+      label: 'Clear Desert Sky',
+      broadcastMsg: '☀️ Brilliant desert sunlight warms the canyon rock formations.',
+    },
+    {
+      weather: 'sandstorm',
+      durationSec: 150,
+      label: 'Haboob Dust Storm',
+      broadcastMsg: '🌪️ Haboob Alert: A violent desert sandstorm is sweeping across the canyon! Keep your claims secured.',
+    },
+    {
+      weather: 'clouds',
+      durationSec: 140,
+      label: 'Desert Cumulus Clouds',
+      broadcastMsg: '☁️ Desert cumulus clouds roll over the spires, providing brief respite from the sun.',
+    },
+    {
+      weather: 'light_rain',
+      durationSec: 130,
+      label: 'Canyon Mist & Rain',
+      broadcastMsg: '🌧️ Refreshing rain begins falling across the Superstitions, moistening the dry dirt.',
+    },
+    {
+      weather: 'storm',
+      durationSec: 150,
+      label: 'Monsoon Thunderstorm',
+      broadcastMsg: '⚡ Desert Monsoon: Lightning flashes illuminate Weaver\'s Needle with roaring thunder!',
+    },
+    {
+      weather: 'night',
+      durationSec: 160,
+      label: 'Starry Desert Night',
+      broadcastMsg: '🌌 Deep desert night settles in. The Milky Way stretches from horizon to horizon.',
+    },
+  ];
+
+  let weatherCycleIndex = 0;
+  let weatherElapsed = 0;
+  let universalTimeOfDay = 16.0; // 4:00 PM iconic alignment
+  let universalWeather: WeatherType = WEATHER_CYCLE[0].weather;
+
+  // Run authoritative universal clock & meteorological cycle
+  setInterval(() => {
+    // Universal time advances: 1 real second = ~0.04 game hours (1 day = 10 minutes)
+    universalTimeOfDay = (universalTimeOfDay + 0.04) % 24;
+    weatherElapsed += 1;
+
+    const currentPhase = WEATHER_CYCLE[weatherCycleIndex];
+    if (weatherElapsed >= currentPhase.durationSec) {
+      weatherElapsed = 0;
+      weatherCycleIndex = (weatherCycleIndex + 1) % WEATHER_CYCLE.length;
+      const nextPhase = WEATHER_CYCLE[weatherCycleIndex];
+      universalWeather = nextPhase.weather;
+
+      // Broadcast system weather announcement in chat
+      addChatMessage({
+        senderId: 'system_weather',
+        senderName: 'Desert Weather Station',
+        senderColor: '#38bdf8',
+        text: nextPhase.broadcastMsg,
+        type: 'system',
+      });
+
+      broadcast({
+        type: 'weather:sync',
+        weather: universalWeather,
+        timeOfDay: universalTimeOfDay,
+        label: nextPhase.label,
+      });
+    } else if (weatherElapsed % 4 === 0) {
+      // Periodic synchronization of celestial time every 4 seconds
+      broadcast({
+        type: 'weather:sync',
+        weather: universalWeather,
+        timeOfDay: universalTimeOfDay,
+        label: currentPhase.label,
+      });
+    }
+  }, 1000);
 
   // WebSocket connection handling
   wss.on("connection", (ws: WebSocket) => {
@@ -165,6 +259,8 @@ async function startServer() {
       mines: Array.from(builtMines.values()),
       recentChat: chatMessages.slice(-25),
       colorPresets: COLOR_PRESETS,
+      universalWeather,
+      universalTimeOfDay,
     }));
 
     // 2. Announce join to everyone else

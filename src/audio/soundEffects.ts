@@ -1,3 +1,5 @@
+import { WeatherType } from '../types';
+
 /**
  * Procedural Web Audio synthesizer for desert ambiance, footsteps, and discovery sounds.
  * No external asset loading required, 100% self-contained and instant.
@@ -6,6 +8,7 @@
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private windGain: GainNode | null = null;
+  private windFilter: BiquadFilterNode | null = null;
   private ambientGain: GainNode | null = null;
   private isMuted: boolean = false;
 
@@ -61,6 +64,7 @@ class SoundEngine {
       lfo.connect(lfoGain);
       lfoGain.connect(filter.frequency);
 
+      this.windFilter = filter;
       this.windGain = this.ctx.createGain();
       this.windGain.gain.setValueAtTime(0.06, this.ctx.currentTime);
 
@@ -72,6 +76,40 @@ class SoundEngine {
       lfo.start();
     } catch (e) {
       console.warn('Audio ambiance init warning:', e);
+    }
+  }
+
+  public updateWeatherAmbiance(weather: WeatherType, isUnderground: boolean = false) {
+    if (!this.ctx || this.isMuted) return;
+    const t = this.ctx.currentTime;
+    let targetGain = 0.06;
+    let targetFreq = 400;
+
+    if (isUnderground) {
+      targetGain = 0.02;
+      targetFreq = 220;
+    } else if (weather === 'sandstorm') {
+      targetGain = 0.16; // Howling desert dust storm
+      targetFreq = 780;
+    } else if (weather === 'storm') {
+      targetGain = 0.13; // Monsoon rain and storm winds
+      targetFreq = 560;
+    } else if (weather === 'light_rain') {
+      targetGain = 0.08; // Gentle desert shower
+      targetFreq = 480;
+    } else if (weather === 'sunset') {
+      targetGain = 0.05; // Calm evening breeze
+      targetFreq = 360;
+    } else {
+      targetGain = 0.06;
+      targetFreq = 400;
+    }
+
+    if (this.windGain) {
+      this.windGain.gain.setTargetAtTime(targetGain, t, 0.6);
+    }
+    if (this.windFilter) {
+      this.windFilter.frequency.setTargetAtTime(targetFreq, t, 0.6);
     }
   }
 
@@ -315,6 +353,64 @@ class SoundEngine {
       coinGain.connect(this.ctx.destination);
       coinOsc.start(coinTime);
       coinOsc.stop(coinTime + 0.15);
+    });
+  }
+
+  public playCoins() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    [0, 0.06, 0.13, 0.19].forEach((offset, idx) => {
+      if (!this.ctx) return;
+      const coinTime = t + offset;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(2600 + idx * 280, coinTime);
+      gain.gain.setValueAtTime(0.14, coinTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, coinTime + 0.14);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(coinTime);
+      osc.stop(coinTime + 0.14);
+    });
+  }
+
+  public playCampfire() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Low flame whoosh and crackle pops
+    const flameOsc = this.ctx.createOscillator();
+    const flameGain = this.ctx.createGain();
+    flameOsc.type = 'triangle';
+    flameOsc.frequency.setValueAtTime(120, t);
+    flameOsc.frequency.exponentialRampToValueAtTime(80, t + 0.6);
+    flameGain.gain.setValueAtTime(0.1, t);
+    flameGain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    flameOsc.connect(flameGain);
+    flameGain.connect(this.ctx.destination);
+    flameOsc.start(t);
+    flameOsc.stop(t + 0.6);
+
+    // Crackle sparks
+    [0.05, 0.18, 0.29, 0.42].forEach((offset) => {
+      if (!this.ctx) return;
+      const crackleTime = t + offset;
+      const crackleOsc = this.ctx.createOscillator();
+      const crackleGain = this.ctx.createGain();
+      crackleOsc.type = 'square';
+      crackleOsc.frequency.setValueAtTime(800 + Math.random() * 800, crackleTime);
+      crackleGain.gain.setValueAtTime(0.08, crackleTime);
+      crackleGain.gain.exponentialRampToValueAtTime(0.001, crackleTime + 0.04);
+      crackleOsc.connect(crackleGain);
+      crackleGain.connect(this.ctx.destination);
+      crackleOsc.start(crackleTime);
+      crackleOsc.stop(crackleTime + 0.04);
     });
   }
 

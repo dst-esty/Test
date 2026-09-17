@@ -1,6 +1,6 @@
 {
   "name": "Superstition Mountains: Lost Dutchman Expedition",
-  "description": "A 3D open-world desert exploration game set in Arizona's Superstition Wilderness with real-time multiplayer, synchronized terrain deformation, shared mining claims, and live frontier telegraph chat.",
+  "description": "A 3D open-world desert exploration game in Arizona's Superstition Wilderness with dynamic weather visual effects (sandstorm dust particles, light rain overlays, monsoons), real-time multiplayer, and underground mining.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

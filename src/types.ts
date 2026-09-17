@@ -80,7 +80,7 @@ export interface Landmark {
   radius: number;
   clueId?: string;
   discovered: boolean;
-  type: 'camp' | 'needle' | 'ruins' | 'spring' | 'petroglyph' | 'massacre' | 'mine';
+  type: 'camp' | 'needle' | 'ruins' | 'spring' | 'petroglyph' | 'massacre' | 'mine' | 'town';
 }
 
 export interface ClueItem {
@@ -100,7 +100,9 @@ export type MineStructureType =
   | 'sluice_box'
   | 'rail_track'
   | 'assay_forge'
-  | 'deep_shaft';
+  | 'deep_shaft'
+  | 'campfire'
+  | 'prospector_camp';
 
 export interface BuiltStructure {
   id: string;
@@ -241,7 +243,7 @@ export interface PortalExcavationState {
   lastGroanTime: number;
 }
 
-export type WeatherType = 'clear' | 'clouds' | 'sunset' | 'storm' | 'night';
+export type WeatherType = 'clear' | 'clouds' | 'sunset' | 'storm' | 'night' | 'sandstorm' | 'light_rain';
 
 export interface GameSettings {
   timeOfDay: number; // 0 to 24 (hours)
