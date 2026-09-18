@@ -188,9 +188,23 @@ export class UndergroundLayersManager {
   private waterMeshes: Map<number, THREE.Mesh> = new Map();
   private roomMeshes: Map<string, THREE.Group> = new Map();
   private lanternLights: THREE.PointLight[] = [];
+  private undergroundAmbient?: THREE.AmbientLight;
   private animatedCrystals: THREE.Mesh[] = [];
   private dustMotesList: THREE.Points[] = [];
   public cavernWallMeshes: THREE.Mesh[] = [];
+
+  public getLayerData(level: number): MineLayerData | undefined {
+    return this.layers.find((l) => l.level === level);
+  }
+
+  // Open Mine Shaft Visual References & Atmospheric Lighting
+  private skyPortalMesh?: THREE.Mesh;
+  private sunbeamMesh?: THREE.Mesh;
+  private sunbeamDustPoints?: THREE.Points;
+  private sheaveWheelGroup?: THREE.Group;
+  private skyTexDay?: THREE.CanvasTexture;
+  private skyTexSunset?: THREE.CanvasTexture;
+  private skyTexNight?: THREE.CanvasTexture;
 
   // Flying particles during shaft digging / room blasting
   private debrisList: {
@@ -208,6 +222,11 @@ export class UndergroundLayersManager {
   public voxelEngine: UndergroundVoxelEngine;
   public dustParticleSystem?: MountainDustParticleSystem;
   public holeManager?: MountainHoleManager;
+  public wallUniformsList: {
+    uHolePositions: { value: THREE.Vector3[] };
+    uHoleRadii: { value: Float32Array };
+    uHoleCount: { value: number };
+  }[] = [];
 
   constructor(scene: THREE.Scene, dustParticles?: MountainDustParticleSystem, holeManager?: MountainHoleManager) {
     this.scene = scene;
@@ -231,6 +250,22 @@ export class UndergroundLayersManager {
   public setDustParticleSystem(ps: MountainDustParticleSystem) {
     this.dustParticleSystem = ps;
     this.voxelEngine.setDustParticleSystem(ps);
+  }
+
+  public updateCavernWallHoleCutouts(): void {
+    if (!this.holeManager) return;
+    const undergroundHoles = this.holeManager.holes.filter(
+      (h) => h.position.y < this.surfaceY - 1.5
+    );
+    for (let u = 0; u < this.wallUniformsList.length; u++) {
+      const uniforms = this.wallUniformsList[u];
+      const count = Math.min(8, undergroundHoles.length);
+      uniforms.uHoleCount.value = count;
+      for (let i = 0; i < count; i++) {
+        uniforms.uHolePositions.value[i].copy(undergroundHoles[i].position);
+        uniforms.uHoleRadii.value[i] = undergroundHoles[i].radius * 0.94;
+      }
+    }
   }
 
   private initLayersData() {
@@ -344,6 +379,15 @@ export class UndergroundLayersManager {
 
   public setSubterraneanLevel(level: number) {
     this.currentLevel = level;
+    if (this.undergroundAmbient) {
+      if (level >= 5) {
+        this.undergroundAmbient.color.setHex(0x6699bb);
+        this.undergroundAmbient.intensity = 0.7;
+      } else {
+        this.undergroundAmbient.color.setHex(0xd4a070);
+        this.undergroundAmbient.intensity = 0.8;
+      }
+    }
     if (level > 0) {
       const activeLayer = this.layers.find((l) => l.level === level) || this.layers[0];
       this.voxelEngine.generateLevelVoxels(level, this.surfacePos, this.surfaceY, activeLayer.depthMeters);
@@ -362,6 +406,11 @@ export class UndergroundLayersManager {
     this.roomMeshes.clear();
     this.lanternLights = [];
     this.animatedCrystals = [];
+
+    if (!this.undergroundAmbient) {
+      this.undergroundAmbient = new THREE.AmbientLight(0xd4a070, 0.8);
+      this.mainGroup.add(this.undergroundAmbient);
+    }
 
     this.layers.forEach((layer) => {
       const chamberGroup = this.createLayerChamber(layer);
@@ -425,6 +474,60 @@ export class UndergroundLayersManager {
       metalness: 0.04,
       side: THREE.BackSide,
     });
+
+    const holeUniforms = {
+      uHolePositions: {
+        value: [
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+        ],
+      },
+      uHoleRadii: { value: new Float32Array(8) },
+      uHoleCount: { value: 0 },
+    };
+    this.wallUniformsList.push(holeUniforms);
+
+    wallMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uHolePositions = holeUniforms.uHolePositions;
+      shader.uniforms.uHoleRadii = holeUniforms.uHoleRadii;
+      shader.uniforms.uHoleCount = holeUniforms.uHoleCount;
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+         varying vec3 vWorldPositionCustom;`
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+         vWorldPositionCustom = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+         varying vec3 vWorldPositionCustom;
+         uniform vec3 uHolePositions[8];
+         uniform float uHoleRadii[8];
+         uniform int uHoleCount;`
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+         for (int i = 0; i < 8; i++) {
+           if (i >= uHoleCount) break;
+           if (distance(vWorldPositionCustom, uHolePositions[i]) < uHoleRadii[i]) {
+             discard;
+           }
+         }`
+      );
+    };
 
     // 1. Organic Sculpted Bedrock Cavern Perimeter Mesh (Multi-octave fractal displacement)
     const caveGeo = new THREE.CylinderGeometry(radius, radius * 0.95, height, 48, 16, true);
@@ -497,26 +600,61 @@ export class UndergroundLayersManager {
       group.add(veinGroup);
     });
 
-    // 3. Cavern Ceiling with jagged rock protrusions and stalactite crags
-    const roofGeo = new THREE.CircleGeometry(radius * 1.05, 36);
+    // 3. Cavern Ceiling with smooth collar seat, stalactite crags, and open mine shaft breakthrough aperture
+    const roofGeo = new THREE.RingGeometry(1.72, radius * 1.3, 48);
     const roofPos = roofGeo.attributes.position;
     for (let i = 0; i < roofPos.count; i++) {
       const rx = roofPos.getX(i);
-      const rz = roofPos.getY(i); // CircleGeometry lies in XY before rotation
+      const rz = roofPos.getY(i); // RingGeometry lies in XY before rotation
       const dist = Math.hypot(rx, rz);
-      const roughness = Math.sin(rx * 0.8) * Math.cos(rz * 0.8) * 0.45;
-      const stalactite = dist < radius * 0.7 ? Math.pow(Math.abs(Math.sin(rx * 1.4 + rz * 1.2)), 3.0) * 0.65 : 0;
+      // Keep collar perimeter perfectly flat so it seats cleanly against ceiling timber beams
+      const edgeBlend = Math.min(1.0, Math.max(0.0, (dist - 2.2) / 1.5));
+      const roughness = Math.sin(rx * 0.8) * Math.cos(rz * 0.8) * 0.45 * edgeBlend;
+      const stalactite = dist > 3.0 && dist < radius * 0.7 ? Math.pow(Math.abs(Math.sin(rx * 1.4 + rz * 1.2)), 3.0) * 0.65 : 0;
       roofPos.setZ(i, roughness - stalactite);
     }
     roofGeo.computeVertexNormals();
 
-    const caveRoof = new THREE.Mesh(roofGeo, wallMat);
+    const roofMat = new THREE.MeshStandardMaterial({
+      color: wallColor,
+      roughness: 0.95,
+      metalness: 0.04,
+      side: THREE.DoubleSide,
+    });
+
+    const caveRoof = new THREE.Mesh(roofGeo, roofMat);
     caveRoof.position.y = height;
     caveRoof.rotation.x = Math.PI / 2;
     group.add(caveRoof);
 
-    // 4. Bedrock Floor with central shaft opening for granular bedrock sinking
-    const floorGeo = new THREE.RingGeometry(1.85, radius, 36);
+    // Thick solid rock cap above the ceiling to completely block any exterior daylight or sky
+    const capGeo = new THREE.RingGeometry(1.72, radius * 1.35, 36);
+    const capMesh = new THREE.Mesh(capGeo, roofMat);
+    capMesh.position.y = height + 0.35;
+    capMesh.rotation.x = Math.PI / 2;
+    group.add(capMesh);
+
+    // Ceiling timber collar framing the vertical mine shaft breakthrough
+    const ceilingCollarMat = new THREE.MeshStandardMaterial({ color: 0x3d2718, roughness: 0.92 });
+    [-1.75, 1.75].forEach((bx) => {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 3.85), ceilingCollarMat);
+      beam.position.set(bx, height - 0.175, 0);
+      group.add(beam);
+    });
+    [-1.75, 1.75].forEach((bz) => {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(3.85, 0.35, 0.35), ceilingCollarMat);
+      beam.position.set(0, height - 0.175, bz);
+      group.add(beam);
+    });
+
+    // Central Shaft Station Overhead Lantern illuminating the breakthrough and pit
+    const stationLantern = new THREE.PointLight(layer.level >= 5 ? 0x88ccff : 0xffa442, 2.8, 22, 1.4);
+    stationLantern.position.set(0, height - 0.85, 0);
+    group.add(stationLantern);
+    this.lanternLights.push(stationLantern);
+
+    // 4. Bedrock Floor with central shaft opening seamlessly seated under timber collar
+    const floorGeo = new THREE.RingGeometry(1.68, radius * 1.25, 48);
     const floorMat = new THREE.MeshStandardMaterial({
       color: floorColor,
       roughness: 0.96,
@@ -614,15 +752,36 @@ export class UndergroundLayersManager {
       pitCollar.add(bZ);
     });
 
-    // Sub-floor bedrock base plate deep beneath the voxel layers
+    // Sub-floor bedrock base plate and solid rock shaft walls deep beneath the voxel layers
     const fissureMat = new THREE.MeshStandardMaterial({
       color: floorColor,
       roughness: 0.95,
       emissive: layer.level >= 5 ? 0x113355 : 0x331a00,
       emissiveIntensity: 0.15,
+      side: THREE.DoubleSide,
     });
-    const fissureMesh = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.25, 3.6), fissureMat);
-    fissureMesh.position.set(0, -3.2, 0);
+
+    // Solid bedrock pit basin walls preventing any void gaps around excavation pit
+    const pitDepth = 3.6;
+    const pWallN = new THREE.Mesh(new THREE.BoxGeometry(3.9, pitDepth, 0.25), fissureMat);
+    pWallN.position.set(0, -pitDepth / 2, -1.9);
+    pitCollar.add(pWallN);
+
+    const pWallS = new THREE.Mesh(new THREE.BoxGeometry(3.9, pitDepth, 0.25), fissureMat);
+    pWallS.position.set(0, -pitDepth / 2, 1.9);
+    pitCollar.add(pWallS);
+
+    const pWallW = new THREE.Mesh(new THREE.BoxGeometry(0.25, pitDepth, 3.9), fissureMat);
+    pWallW.position.set(-1.9, -pitDepth / 2, 0);
+    pitCollar.add(pWallW);
+
+    const pWallE = new THREE.Mesh(new THREE.BoxGeometry(0.25, pitDepth, 3.9), fissureMat);
+    pWallE.position.set(1.9, -pitDepth / 2, 0);
+    pitCollar.add(pWallE);
+
+    // Floor plate at the bottom of the excavation pit basin
+    const fissureMesh = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.35, 4.2), fissureMat);
+    fissureMesh.position.set(0, -pitDepth, 0);
     pitCollar.add(fissureMesh);
     this.pitFissureMeshes.set(layer.level, fissureMesh);
 
@@ -838,19 +997,151 @@ export class UndergroundLayersManager {
     return group;
   }
 
-  // Continuous vertical shaft with pine ladders and timber guide posts
+  // Dynamic Canvas Texture for Open Desert Sky Aperture viewed from underground
+  private createSkyPortalTexture(mode: 'day' | 'sunset' | 'night' = 'day'): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return new THREE.CanvasTexture(canvas);
+
+    const cx = 256;
+    const cy = 256;
+
+    const grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, 256);
+    if (mode === 'night') {
+      grad.addColorStop(0, '#1c2e4a');
+      grad.addColorStop(0.45, '#0e1726');
+      grad.addColorStop(1, '#050a12');
+    } else if (mode === 'sunset') {
+      grad.addColorStop(0, '#ffe49e');
+      grad.addColorStop(0.35, '#ff8c3b');
+      grad.addColorStop(0.7, '#a23924');
+      grad.addColorStop(1, '#3b1d28');
+    } else {
+      // Clear Arizona Desert Sky
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.12, '#fff4cc');
+      grad.addColorStop(0.35, '#68b5e8');
+      grad.addColorStop(0.75, '#2b7ec9');
+      grad.addColorStop(1, '#1b5b9c');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 512);
+
+    if (mode === 'night') {
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 90; i++) {
+        const sx = (i * 97) % 512;
+        const sy = (i * 139) % 512;
+        const sr = (i % 3) * 0.5 + 0.6;
+        ctx.globalAlpha = 0.4 + ((i % 5) * 0.15);
+        ctx.beginPath();
+        ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = '#e8f0fe';
+      ctx.beginPath();
+      ctx.arc(cx - 40, cy - 30, 32, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = mode === 'sunset' ? 'rgba(255, 200, 160, 0.45)' : 'rgba(255, 255, 255, 0.55)';
+      for (let c = 0; c < 5; c++) {
+        const cloudY = 120 + c * 60 + Math.sin(c) * 20;
+        const cloudX = 80 + c * 80;
+        ctx.beginPath();
+        ctx.ellipse(cloudX, cloudY, 90, 22, -0.15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const sunGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 95);
+      sunGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+      sunGrad.addColorStop(0.2, 'rgba(255, 250, 210, 0.95)');
+      sunGrad.addColorStop(0.5, 'rgba(255, 220, 130, 0.6)');
+      sunGrad.addColorStop(1, 'rgba(255, 180, 50, 0)');
+      ctx.fillStyle = sunGrad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 95, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    return tex;
+  }
+
+  // Continuous vertical shaft with timber cribbing, lagging, climbable ladder, surface gallows headframe, and open sky portal
   public rebuildShaftInfrastructure() {
     this.shaftGroup.clear();
 
     const woodMat = new THREE.MeshStandardMaterial({ color: 0x3d2716, roughness: 0.92 });
-    const ironMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.85, roughness: 0.4 });
+    const altWoodMat = new THREE.MeshStandardMaterial({ color: 0x4a3220, roughness: 0.90 });
+    const darkTimberMat = new THREE.MeshStandardMaterial({ color: 0x24180e, roughness: 0.95 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.85, roughness: 0.35 });
+    const rustTinMat = new THREE.MeshStandardMaterial({ color: 0x543725, metalness: 0.5, roughness: 0.75 });
+    const goldOreMat = new THREE.MeshStandardMaterial({
+      color: 0xffd700,
+      metalness: 0.9,
+      roughness: 0.25,
+      emissive: 0x664400,
+      emissiveIntensity: 0.6,
+    });
+    const quartzMat = new THREE.MeshStandardMaterial({ color: 0xddd5c4, roughness: 0.45 });
 
     const deepestLayer = this.layers.find((l) => l.level === this.maxUnlockedLevel) || this.layers[0];
-    const totalShaftHeight = deepestLayer.depthMeters + 6.0;
-    const shaftTopY = this.surfaceY + 2.5;
-
-    // 4 Vertical Timber Corner Posts (forming the shaft way)
+    const deepestFloorY = this.surfaceY - deepestLayer.depthMeters;
+    const shaftTopY = this.surfaceY + 0.35;
+    const totalShaftHeight = shaftTopY - deepestFloorY;
     const collarRadius = 1.65;
+
+    // =========================================================================
+    // 1. SOLID SUBTERRANEAN SHAFT BEDROCK BASE & COLLAR LIGHTING
+    // =========================================================================
+    // Pure dark bedrock floor beneath the deepest mine level
+    const voidFloorGeo = new THREE.BoxGeometry(collarRadius * 2.5, 0.5, collarRadius * 2.5);
+    const voidFloorMat = new THREE.MeshStandardMaterial({ color: 0x140e0a, roughness: 0.96 });
+    const voidFloor = new THREE.Mesh(voidFloorGeo, voidFloorMat);
+    voidFloor.position.set(0, deepestFloorY - 3.5, 0);
+    this.shaftGroup.add(voidFloor);
+
+    // Faint Miner's Collar Lantern (hung on the inner timber set just below the rim)
+    const lanternGroup = new THREE.Group();
+    lanternGroup.position.set(-collarRadius + 0.32, this.surfaceY - 0.75, -collarRadius + 0.35);
+
+    const lanternBody = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.28, 6), ironMat);
+    lanternGroup.add(lanternBody);
+
+    const lanternGlobe = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.065, 0.065, 0.14, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0xffaa44,
+        emissive: 0xff8822,
+        emissiveIntensity: 0.85,
+        transparent: true,
+        opacity: 0.85,
+      })
+    );
+    lanternGlobe.position.set(0, -0.02, 0);
+    lanternGroup.add(lanternGlobe);
+
+    const collarLanternLight = new THREE.PointLight(0xff8822, 1.2, 4.8);
+    collarLanternLight.position.set(0, -0.02, 0);
+    lanternGroup.add(collarLanternLight);
+    this.shaftGroup.add(lanternGroup);
+
+    // Helper: determine if an elevation Y falls within an open stope/chamber level
+    const isOpenStope = (y: number) => {
+      return this.layers.some((l) => {
+        const fY = this.surfaceY - l.depthMeters;
+        const cH = l.level === 1 ? 5.0 : l.level === 2 ? 5.4 : l.level === 3 ? 6.2 : 6.6;
+        return y >= fY + 0.35 && y <= fY + cH - 0.35;
+      });
+    };
+
+    // =========================================================================
+    // 2. VERTICAL TIMBER SHAFT GUIDE POSTS & CRIBBING
+    // =========================================================================
     const cornerPositions = [
       { x: -collarRadius, z: -collarRadius },
       { x: collarRadius, z: -collarRadius },
@@ -860,42 +1151,599 @@ export class UndergroundLayersManager {
 
     cornerPositions.forEach((pos) => {
       const guidePost = new THREE.Mesh(
-        new THREE.BoxGeometry(0.32, totalShaftHeight, 0.32),
-        woodMat
+        new THREE.BoxGeometry(0.32, totalShaftHeight + 0.8, 0.32),
+        darkTimberMat
       );
-      guidePost.position.set(pos.x, shaftTopY - totalShaftHeight / 2, pos.z);
+      guidePost.position.set(pos.x, (shaftTopY + deepestFloorY) / 2, pos.z);
       this.shaftGroup.add(guidePost);
     });
 
-    // Hoist Cable running down center
-    const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, totalShaftHeight, 6), ironMat);
-    cable.position.set(0, shaftTopY - totalShaftHeight / 2, 0);
-    this.shaftGroup.add(cable);
+    // Square Timber Cribbing Sets every 1.1m
+    const numSets = Math.floor(totalShaftHeight / 1.1);
+    const beamThick = 0.22;
+    const beamLength = collarRadius * 2 + beamThick;
 
-    // Continuous Pine Ladder attached to north timber guide wall (Z = -collarRadius + 0.15)
+    for (let s = 0; s <= numSets; s++) {
+      const setY = deepestFloorY + s * 1.1 + 0.2;
+      const inStope = isOpenStope(setY);
+
+      // North wall beam (supports ladder backing)
+      const bZNorth = new THREE.Mesh(new THREE.BoxGeometry(beamLength, beamThick, beamThick), darkTimberMat);
+      bZNorth.position.set(0, setY, -collarRadius);
+      this.shaftGroup.add(bZNorth);
+
+      // In solid rock (overburden or between levels), build full cribbing sets on all 4 sides
+      if (!inStope) {
+        const bZSouth = new THREE.Mesh(new THREE.BoxGeometry(beamLength, beamThick, beamThick), darkTimberMat);
+        bZSouth.position.set(0, setY, collarRadius);
+        this.shaftGroup.add(bZSouth);
+
+        [-collarRadius, collarRadius].forEach((bx) => {
+          const bX = new THREE.Mesh(new THREE.BoxGeometry(beamThick, beamThick, beamLength), darkTimberMat);
+          bX.position.set(bx, setY, 0);
+          this.shaftGroup.add(bX);
+        });
+      }
+    }
+
+    // Heavy Timber Shaft Lagging Planks
+    const plankSpacing = 0.38;
+    const plankCount = Math.floor(totalShaftHeight / plankSpacing);
+    for (let p = 0; p < plankCount; p++) {
+      const py = deepestFloorY + p * plankSpacing + 0.15;
+      const curMat = p % 2 === 0 ? woodMat : altWoodMat;
+      const inStope = isOpenStope(py);
+
+      // North wall backing behind ladder is always placed for structure and climb safety
+      const plankN = new THREE.Mesh(new THREE.BoxGeometry(collarRadius * 1.8, 0.26, 0.08), curMat);
+      plankN.position.set(0, py, -collarRadius + 0.04);
+      this.shaftGroup.add(plankN);
+
+      // East, West, South walls only have lagging planks when cutting through solid rock
+      // Inside active stope chambers, sides remain open so miners can freely see and walk into the cavern
+      if (!inStope) {
+        const plankE = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.26, collarRadius * 1.8), curMat);
+        plankE.position.set(collarRadius - 0.04, py, 0);
+        this.shaftGroup.add(plankE);
+
+        const plankW = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.26, collarRadius * 1.8), curMat);
+        plankW.position.set(-collarRadius + 0.04, py, 0);
+        this.shaftGroup.add(plankW);
+
+        const plankS = new THREE.Mesh(new THREE.BoxGeometry(collarRadius * 1.8, 0.26, 0.08), curMat);
+        plankS.position.set(0, py, collarRadius - 0.04);
+        this.shaftGroup.add(plankS);
+      }
+    }
+
+    // Continuous Pine Access Ladder (North wall, reaching 1.25m above surface collar)
     const ladderWidth = 0.55;
-    const rungSpacing = 0.40;
-    const rungCount = Math.floor(totalShaftHeight / rungSpacing);
+    const rungSpacing = 0.32;
+    const ladderTopY = this.surfaceY + 1.25;
+    const ladderHeight = ladderTopY - deepestFloorY;
+    const rungCount = Math.floor(ladderHeight / rungSpacing);
 
     [-ladderWidth / 2, ladderWidth / 2].forEach((lx) => {
       const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(0.08, totalShaftHeight, 0.12),
+        new THREE.BoxGeometry(0.08, ladderHeight, 0.12),
         woodMat
       );
-      rail.position.set(lx, shaftTopY - totalShaftHeight / 2, -collarRadius + 0.18);
+      rail.position.set(lx, (ladderTopY + deepestFloorY) / 2, -collarRadius + 0.20);
       this.shaftGroup.add(rail);
     });
 
-    // Rungs
-    const rungMat = new THREE.MeshStandardMaterial({ color: 0x4a3320, roughness: 0.88 });
-    const rungGeo = new THREE.CylinderGeometry(0.022, 0.022, ladderWidth, 6);
+    const rungMatWood = new THREE.MeshStandardMaterial({ color: 0x4a3320, roughness: 0.88 });
+    const rungGeo = new THREE.CylinderGeometry(0.024, 0.024, ladderWidth - 0.04, 8);
     for (let r = 0; r < rungCount; r++) {
-      const rungY = shaftTopY - r * rungSpacing - 0.2;
-      const rung = new THREE.Mesh(rungGeo, rungMat);
+      const rungY = ladderTopY - r * rungSpacing - 0.15;
+      const rung = new THREE.Mesh(rungGeo, r % 3 === 0 ? ironMat : rungMatWood);
       rung.rotation.z = Math.PI / 2;
-      rung.position.set(0, rungY, -collarRadius + 0.18);
+      rung.position.set(0, rungY, -collarRadius + 0.20);
       this.shaftGroup.add(rung);
     }
+
+    // Extended Iron Safety Grab Rails at the Top of the Ladder
+    [-ladderWidth / 2, ladderWidth / 2].forEach((lx) => {
+      const grabRail = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.022, 0.022, 1.15, 8),
+        ironMat
+      );
+      grabRail.position.set(lx, this.surfaceY + 0.9, -collarRadius + 0.18);
+      this.shaftGroup.add(grabRail);
+
+      // Curved top grab handle
+      const grabCurve = new THREE.Mesh(
+        new THREE.TorusGeometry(0.12, 0.022, 8, 12, Math.PI),
+        ironMat
+      );
+      grabCurve.position.set(lx, this.surfaceY + 1.45, -collarRadius + 0.06);
+      grabCurve.rotation.y = Math.PI / 2;
+      this.shaftGroup.add(grabCurve);
+    });
+
+    // =========================================================================
+    // 3. SURFACE PLATFORM & HEAVY TIMBER COLLAR DECKING
+    // =========================================================================
+    // 4 Heavy Foundation Sill Timbers (Framing the collar on the desert bedrock)
+    const sillThickness = 0.42;
+    const sillLength = 5.6;
+    const sillY = this.surfaceY + 0.18;
+
+    [-2.2, 2.2].forEach((sx) => {
+      const sillZ = new THREE.Mesh(new THREE.BoxGeometry(sillThickness, sillThickness, sillLength), darkTimberMat);
+      sillZ.position.set(sx, sillY, 0);
+      sillZ.castShadow = true;
+      this.shaftGroup.add(sillZ);
+    });
+    [-2.2, 2.2].forEach((sz) => {
+      const sillX = new THREE.Mesh(new THREE.BoxGeometry(sillLength, sillThickness, sillThickness), darkTimberMat);
+      sillX.position.set(0, sillY, sz);
+      sillX.castShadow = true;
+      this.shaftGroup.add(sillX);
+    });
+
+    // Timber Staging Deck Flooring Planks around the pit collar
+    const plankWidth = 0.28;
+    for (let px = -2.3; px <= 2.3; px += plankWidth) {
+      if (Math.abs(px) < collarRadius - 0.1) {
+        // Front and back plank segments flanking the open mouth
+        [-1.85, 1.85].forEach((pz) => {
+          const plank = new THREE.Mesh(new THREE.BoxGeometry(plankWidth * 0.92, 0.09, 0.9), altWoodMat);
+          plank.position.set(px, this.surfaceY + 0.22, pz);
+          plank.receiveShadow = true;
+          this.shaftGroup.add(plank);
+        });
+      } else {
+        // Full side staging planks
+        const fullPlank = new THREE.Mesh(new THREE.BoxGeometry(plankWidth * 0.92, 0.09, 4.4), altWoodMat);
+        fullPlank.position.set(px, this.surfaceY + 0.22, 0);
+        fullPlank.receiveShadow = true;
+        this.shaftGroup.add(fullPlank);
+      }
+    }
+
+    // Protective Raised Safety Coaming Curb surrounding the open pit rim (0.35m high)
+    const curbHeight = 0.35;
+    const curbThick = 0.18;
+    const curbY = this.surfaceY + 0.34;
+    [-collarRadius, collarRadius].forEach((cz) => {
+      const curbX = new THREE.Mesh(new THREE.BoxGeometry(collarRadius * 2 + 0.36, curbHeight, curbThick), woodMat);
+      curbX.position.set(0, curbY, cz);
+      curbX.castShadow = true;
+      this.shaftGroup.add(curbX);
+    });
+    [-collarRadius, collarRadius].forEach((cx) => {
+      const curbZ = new THREE.Mesh(new THREE.BoxGeometry(curbThick, curbHeight, collarRadius * 2), woodMat);
+      curbZ.position.set(cx, curbY, 0);
+      curbZ.castShadow = true;
+      this.shaftGroup.add(curbZ);
+    });
+
+    // Timber Safety Handrails on East & West flanks
+    [-2.2, 2.2].forEach((rx) => {
+      // Stanchions
+      [-1.8, 0, 1.8].forEach((rz) => {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.1, 0.12), woodMat);
+        post.position.set(rx, this.surfaceY + 0.75, rz);
+        this.shaftGroup.add(post);
+      });
+      // Top Rail
+      const topRail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 4.0), woodMat);
+      topRail.position.set(rx, this.surfaceY + 1.25, 0);
+      this.shaftGroup.add(topRail);
+      // Mid Rail
+      const midRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 4.0), woodMat);
+      midRail.position.set(rx, this.surfaceY + 0.75, 0);
+      this.shaftGroup.add(midRail);
+    });
+
+    // =========================================================================
+    // 4. FULLY BUILT-OUT 1880s WESTERN TIMBER HEADFRAME (GALLOWS TOWER)
+    // =========================================================================
+    const gallowsHeight = 6.8;
+    const gallowsTopY = this.surfaceY + gallowsHeight;
+
+    // 4 Main Incline Gallows Posts (12"x12" squared pine timber columns)
+    const legGeo = new THREE.BoxGeometry(0.36, gallowsHeight * 1.05, 0.36);
+    const legBaseX = 1.75;
+    const legBaseZ = 1.35;
+    const legTopX = 0.95;
+
+    [
+      { bx: -legBaseX, bz: -legBaseZ, tx: -legTopX, tz: 0 },
+      { bx: legBaseX, bz: -legBaseZ, tx: legTopX, tz: 0 },
+      { bx: legBaseX, bz: legBaseZ, tx: legTopX, tz: 0 },
+      { bx: -legBaseX, bz: legBaseZ, tx: -legTopX, tz: 0 },
+    ].forEach((c) => {
+      const leg = new THREE.Mesh(legGeo, darkTimberMat);
+      leg.position.set((c.bx + c.tx) / 2, this.surfaceY + gallowsHeight / 2, (c.bz + c.tz) / 2);
+      const angleX = (c.tx - c.bx) / gallowsHeight;
+      const angleZ = (c.tz - c.bz) / gallowsHeight;
+      leg.rotation.set(angleZ, 0, -angleX);
+      leg.castShadow = true;
+      this.shaftGroup.add(leg);
+
+      // Heavy Forged Iron Footing Bracket with square bolts at base
+      const footPlate = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.25, 0.55), ironMat);
+      footPlate.position.set(c.bx, this.surfaceY + 0.3, c.bz);
+      this.shaftGroup.add(footPlate);
+    });
+
+    // Iconic Diagonal Backstays (Heavy Rear Angled Thrust Braces ~50 degrees)
+    const backstayLength = 7.6;
+    const backstayGeo = new THREE.BoxGeometry(0.36, backstayLength, 0.36);
+    [-1.5, 1.5].forEach((bsx) => {
+      const backstay = new THREE.Mesh(backstayGeo, darkTimberMat);
+      // Runs from rear winch base (z = -4.2) up to headframe crown (z = -0.2)
+      backstay.position.set(bsx * 0.85, this.surfaceY + gallowsHeight * 0.48, -2.2);
+      backstay.rotation.x = -0.58; // Angled back brace
+      backstay.castShadow = true;
+      this.shaftGroup.add(backstay);
+
+      // Cast iron anchor footing plate at the rear
+      const rearFoot = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.3, 0.6), ironMat);
+      rearFoot.position.set(bsx * 1.1, this.surfaceY + 0.3, -4.2);
+      this.shaftGroup.add(rearFoot);
+    });
+
+    // Horizontal & Diagonal Braces between the two Backstays
+    const backstayCrossGirt = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.28, 0.28), woodMat);
+    backstayCrossGirt.position.set(0, this.surfaceY + 3.2, -2.3);
+    this.shaftGroup.add(backstayCrossGirt);
+
+    [-1, 1].forEach((dir) => {
+      const bsDiagonal = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.4, 0.18), woodMat);
+      bsDiagonal.position.set(0, this.surfaceY + 2.2, -2.9);
+      bsDiagonal.rotation.set(-0.58, 0, dir * 0.45);
+      this.shaftGroup.add(bsDiagonal);
+    });
+
+    // Iron Tension Rods with Turnbuckles connecting backstays to front posts
+    [-1.1, 1.1].forEach((tx) => {
+      const tieRod = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 3.2, 6), ironMat);
+      tieRod.rotation.x = Math.PI / 2;
+      tieRod.position.set(tx, this.surfaceY + 3.8, -1.2);
+      this.shaftGroup.add(tieRod);
+
+      const turnbuckle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.32, 6), ironMat);
+      turnbuckle.rotation.x = Math.PI / 2;
+      turnbuckle.position.set(tx, this.surfaceY + 3.8, -1.2);
+      this.shaftGroup.add(turnbuckle);
+    });
+
+    // 3 Tiers of Horizontal Collar Girts & Structural "X" Bracing
+    const tiers = [
+      { y: this.surfaceY + 2.1, wX: 3.1, wZ: 2.3, beamThick: 0.28 },
+      { y: this.surfaceY + 4.0, wX: 2.5, wZ: 1.8, beamThick: 0.26 },
+      { y: this.surfaceY + 5.7, wX: 2.1, wZ: 1.4, beamThick: 0.24 },
+    ];
+
+    tiers.forEach((tier) => {
+      // Front & Back horizontal collar girts
+      [-tier.wZ / 2, tier.wZ / 2].forEach((gz) => {
+        const girtX = new THREE.Mesh(new THREE.BoxGeometry(tier.wX, tier.beamThick, tier.beamThick), woodMat);
+        girtX.position.set(0, tier.y, gz);
+        girtX.castShadow = true;
+        this.shaftGroup.add(girtX);
+      });
+      // Left & Right horizontal collar girts
+      [-tier.wX / 2, tier.wX / 2].forEach((gx) => {
+        const girtZ = new THREE.Mesh(new THREE.BoxGeometry(tier.beamThick, tier.beamThick, tier.wZ), woodMat);
+        girtZ.position.set(gx, tier.y, 0);
+        girtZ.castShadow = true;
+        this.shaftGroup.add(girtZ);
+      });
+    });
+
+    // Flank "X" Bracing Timbers (Left & Right sides)
+    [-1, 1].forEach((side) => {
+      const sideX = side * 1.35;
+      // Lower Tier X
+      [-1, 1].forEach((dir) => {
+        const brace = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.7, 0.18), woodMat);
+        brace.position.set(sideX, this.surfaceY + 3.0, 0);
+        brace.rotation.x = dir * 0.48;
+        this.shaftGroup.add(brace);
+      });
+      // Upper Tier X
+      [-1, 1].forEach((dir) => {
+        const brace = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.4, 0.16), woodMat);
+        brace.position.set(sideX * 0.85, this.surfaceY + 4.8, 0);
+        brace.rotation.x = dir * 0.46;
+        this.shaftGroup.add(brace);
+      });
+    });
+
+    // Top Crown Double Beams & Bearing Pillow Blocks
+    const crownBeamGeo = new THREE.BoxGeometry(2.4, 0.38, 0.38);
+    [-0.35, 0.35].forEach((cz) => {
+      const crownBeam = new THREE.Mesh(crownBeamGeo, darkTimberMat);
+      crownBeam.position.set(0, gallowsTopY, cz);
+      crownBeam.castShadow = true;
+      this.shaftGroup.add(crownBeam);
+    });
+
+    // Pillow block bearing housings
+    [-0.85, 0.85].forEach((bx) => {
+      const bearingBlock = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.28, 0.95), ironMat);
+      bearingBlock.position.set(bx, gallowsTopY + 0.28, 0);
+      this.shaftGroup.add(bearingBlock);
+    });
+
+    // Weathered Pitched Canopy Roof over the Sheave Wheel
+    const canopyRafterGeo = new THREE.BoxGeometry(0.14, 0.14, 2.6);
+    [-0.9, 0, 0.9].forEach((rx) => {
+      const rafter = new THREE.Mesh(canopyRafterGeo, woodMat);
+      rafter.position.set(rx, gallowsTopY + 1.25, 0);
+      this.shaftGroup.add(rafter);
+    });
+
+    const canopyRoofGeo = new THREE.BoxGeometry(2.6, 0.08, 1.4);
+    [-1, 1].forEach((side) => {
+      const roofSlope = new THREE.Mesh(canopyRoofGeo, rustTinMat);
+      roofSlope.position.set(0, gallowsTopY + 1.35, side * 0.6);
+      roofSlope.rotation.x = side * 0.26;
+      roofSlope.castShadow = true;
+      this.shaftGroup.add(roofSlope);
+    });
+
+    // Detailed Realistic Spoked Sheave Wheel (Hoist Pulley)
+    const sheaveGroup = new THREE.Group();
+    sheaveGroup.position.set(0, gallowsTopY + 0.28, 0);
+
+    // Cast-iron outer grooved rim
+    const rimRadius = 0.82;
+    const sheaveRim = new THREE.Mesh(
+      new THREE.TorusGeometry(rimRadius, 0.08, 12, 36),
+      ironMat
+    );
+    sheaveRim.rotation.y = Math.PI / 2;
+    sheaveGroup.add(sheaveRim);
+
+    // Cable groove channel inner rim
+    const innerRim = new THREE.Mesh(
+      new THREE.TorusGeometry(rimRadius - 0.04, 0.05, 8, 36),
+      ironMat
+    );
+    innerRim.rotation.y = Math.PI / 2;
+    sheaveGroup.add(innerRim);
+
+    // Center iron hub
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.26, 16), ironMat);
+    hub.rotation.z = Math.PI / 2;
+    sheaveGroup.add(hub);
+
+    // Axle shaft
+    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.0, 12), ironMat);
+    axle.rotation.z = Math.PI / 2;
+    sheaveGroup.add(axle);
+
+    // 10 Radial Forged Iron Spokes
+    const spokeGeo = new THREE.CylinderGeometry(0.022, 0.022, rimRadius - 0.1, 8);
+    for (let s = 0; s < 10; s++) {
+      const angle = (s / 10) * Math.PI * 2;
+      const spoke = new THREE.Mesh(spokeGeo, ironMat);
+      spoke.position.set(0, Math.sin(angle) * (rimRadius / 2), Math.cos(angle) * (rimRadius / 2));
+      spoke.rotation.x = angle + Math.PI / 2;
+      sheaveGroup.add(spoke);
+    }
+
+    this.shaftGroup.add(sheaveGroup);
+    this.sheaveWheelGroup = sheaveGroup;
+
+    // =========================================================================
+    // 5. HOIST CABLES, HARDWARE & SUSPENDED MINING ORE BUCKET (KIBBLE)
+    // =========================================================================
+    // Cable 1: From rear winch drum up to sheave wheel top groove
+    const winchDrumPos = new THREE.Vector3(0, this.surfaceY + 0.85, -3.8);
+    const sheaveTopPos = new THREE.Vector3(0, gallowsTopY + 0.28 + rimRadius, -0.1);
+    const rearCableLength = winchDrumPos.distanceTo(sheaveTopPos);
+    const rearCable = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.018, 0.018, rearCableLength, 8),
+      ironMat
+    );
+    rearCable.position.copy(winchDrumPos).lerp(sheaveTopPos, 0.5);
+    rearCable.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      sheaveTopPos.clone().sub(winchDrumPos).normalize()
+    );
+    this.shaftGroup.add(rearCable);
+
+    // Cable 2: Descending vertically from sheave front rim down into center of dark shaft
+    const bucketY = this.surfaceY + 1.25;
+    const vertCableLength = (gallowsTopY + 0.28 + rimRadius) - bucketY;
+    const vertCable = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.018, 0.018, vertCableLength, 8),
+      ironMat
+    );
+    vertCable.position.set(0, (gallowsTopY + 0.28 + rimRadius + bucketY) / 2, 0.4);
+    this.shaftGroup.add(vertCable);
+
+    // Forged Iron Shackle & Heavy Swivel Hoist Hook
+    const hookGroup = new THREE.Group();
+    hookGroup.position.set(0, bucketY + 0.7, 0.4);
+
+    const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.025, 8, 16), ironMat);
+    hookGroup.add(shackle);
+
+    const swivelHook = new THREE.Mesh(
+      new THREE.TorusGeometry(0.12, 0.03, 8, 16, Math.PI * 1.3),
+      ironMat
+    );
+    swivelHook.position.set(0, -0.15, 0);
+    swivelHook.rotation.z = Math.PI / 2;
+    hookGroup.add(swivelHook);
+    this.shaftGroup.add(hookGroup);
+
+    // Suspended Heavy Mining Ore Bucket (Kibble / Iron-banded tub)
+    const bucketGroup = new THREE.Group();
+    bucketGroup.position.set(0, bucketY, 0.4);
+
+    // Timber Bucket Body with taper
+    const bucketBody = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.46, 0.36, 0.72, 12),
+      woodMat
+    );
+    bucketBody.castShadow = true;
+    bucketGroup.add(bucketBody);
+
+    // Riveted Iron Reinforcement Hoops
+    [-0.28, 0, 0.28].forEach((hy) => {
+      const hoop = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.465 - (0.28 - hy) * 0.12, 0.465 - (0.28 - hy) * 0.12, 0.05, 12),
+        ironMat
+      );
+      hoop.position.set(0, hy, 0);
+      bucketGroup.add(hoop);
+    });
+
+    // Curved Iron Bail Handle
+    const bail = new THREE.Mesh(
+      new THREE.TorusGeometry(0.48, 0.03, 8, 16, Math.PI),
+      ironMat
+    );
+    bail.position.set(0, 0.36, 0);
+    bucketGroup.add(bail);
+
+    // 3 Forged Suspension Chains linking bail to the hoist hook
+    [-0.38, 0.38].forEach((cx) => {
+      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.42, 6), ironMat);
+      chain.position.set(cx * 0.5, 0.56, 0);
+      chain.rotation.z = (cx < 0 ? 0.32 : -0.32);
+      bucketGroup.add(chain);
+    });
+
+    // Sparkling Gold-Bearing Quartz Float Chunks inside the bucket
+    for (let r = 0; r < 7; r++) {
+      const a = (r / 7) * Math.PI * 2;
+      const rockRadius = 0.12 + (r % 3) * 0.04;
+      const rock = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(rockRadius, 0),
+        r % 2 === 0 ? goldOreMat : quartzMat
+      );
+      rock.position.set(Math.cos(a) * 0.22, 0.28 + (r % 2) * 0.05, Math.sin(a) * 0.22);
+      rock.rotation.set(r * 0.5, r * 0.7, 0);
+      bucketGroup.add(rock);
+    }
+    this.shaftGroup.add(bucketGroup);
+
+    // =========================================================================
+    // 6. SURFACE WINCH DRUM & OPERATOR HOIST ENGINE STATION
+    // =========================================================================
+    const winchGroup = new THREE.Group();
+    winchGroup.position.set(0, this.surfaceY + 0.2, -3.8);
+
+    // Heavy Timber Skid Sills
+    [-0.75, 0.75].forEach((wx) => {
+      const skid = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.35, 2.2), darkTimberMat);
+      skid.position.set(wx, 0.17, 0);
+      winchGroup.add(skid);
+
+      // Bearing pedestals
+      const pedestal = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.7, 0.35), ironMat);
+      pedestal.position.set(wx, 0.65, 0);
+      winchGroup.add(pedestal);
+    });
+
+    // Cast-iron Winch Cable Drum with steel wire cable coils
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 1.25, 16), ironMat);
+    drum.rotation.z = Math.PI / 2;
+    drum.position.set(0, 0.75, 0);
+    winchGroup.add(drum);
+
+    // Cable Coil Wraps around the drum
+    const coil = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.36, 0.36, 0.95, 16),
+      new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.9, roughness: 0.4 })
+    );
+    coil.rotation.z = Math.PI / 2;
+    coil.position.set(0, 0.75, 0);
+    winchGroup.add(coil);
+
+    // Drum Flange Rims
+    [-0.62, 0.62].forEach((fx) => {
+      const flange = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.06, 16), ironMat);
+      flange.rotation.z = Math.PI / 2;
+      flange.position.set(fx, 0.75, 0);
+      winchGroup.add(flange);
+    });
+
+    // Large Spoked Brake Gear Wheel on operator side
+    const gear = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.08, 20), ironMat);
+    gear.rotation.z = Math.PI / 2;
+    gear.position.set(0.72, 0.75, 0);
+    winchGroup.add(gear);
+
+    // Long Iron Friction Brake Lever with Wood Grip
+    const brakeLever = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 1.2, 8), ironMat);
+    brakeLever.position.set(0.85, 1.15, -0.2);
+    brakeLever.rotation.x = 0.35;
+    winchGroup.add(brakeLever);
+
+    const brakeHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.035, 0.28, 8), woodMat);
+    brakeHandle.position.set(0.85, 1.65, -0.38);
+    brakeHandle.rotation.x = 0.35;
+    winchGroup.add(brakeHandle);
+
+    // Hand Crank Windlass Handle on opposite side
+    const crankArm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.45, 0.05), ironMat);
+    crankArm.position.set(-0.78, 0.92, 0);
+    winchGroup.add(crankArm);
+
+    const crankHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.24, 8), woodMat);
+    crankHandle.rotation.z = Math.PI / 2;
+    crankHandle.position.set(-0.9, 1.12, 0);
+    winchGroup.add(crankHandle);
+
+    this.shaftGroup.add(winchGroup);
+
+    // =========================================================================
+    // 7. UNDERGROUND VOLUMETRIC SUNBEAM ILLUMINATION (OPEN SKY SHAFT)
+    // =========================================================================
+    // Looking up from underground directly reveals the open surface collar and real 3D sky above.
+    // Volumetric Sun Shaft / Sunlight Beam (top clamped strictly below surface collar)
+    const beamTopY = this.surfaceY - 0.6;
+    const beamHeight = beamTopY - deepestFloorY;
+    const sunbeamGeo = new THREE.CylinderGeometry(0.8, 1.4, Math.max(2, beamHeight), 24, 1, true);
+    const sunbeamMat = new THREE.MeshBasicMaterial({
+      color: 0xfffae0,
+      transparent: true,
+      opacity: 0.08,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const sunbeam = new THREE.Mesh(sunbeamGeo, sunbeamMat);
+    sunbeam.position.set(0, (beamTopY + deepestFloorY) / 2, 0);
+    sunbeam.name = 'shaft_sunbeam';
+    sunbeam.visible = this.currentLevel > 0;
+    this.shaftGroup.add(sunbeam);
+    this.sunbeamMesh = sunbeam;
+
+    // Floating Sunbeam Dust Motes inside the light column
+    const beamMoteCount = 100;
+    const beamMoteGeo = new THREE.BufferGeometry();
+    const beamMotePositions = new Float32Array(beamMoteCount * 3);
+    for (let i = 0; i < beamMoteCount; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 1.25;
+      beamMotePositions[i * 3] = Math.cos(a) * r;
+      beamMotePositions[i * 3 + 1] = deepestFloorY + 0.5 + Math.random() * Math.max(1, beamHeight - 1.0);
+      beamMotePositions[i * 3 + 2] = Math.sin(a) * r;
+    }
+    beamMoteGeo.setAttribute('position', new THREE.BufferAttribute(beamMotePositions, 3));
+    const beamMoteMat = new THREE.PointsMaterial({
+      color: 0xfffae0,
+      size: 0.12,
+      transparent: true,
+      opacity: 0.65,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const beamMotes = new THREE.Points(beamMoteGeo, beamMoteMat);
+    beamMotes.visible = this.currentLevel > 0;
+    this.shaftGroup.add(beamMotes);
+    this.sunbeamDustPoints = beamMotes;
   }
 
   // Digging downwards through the bedrock shaft floor into the next level
@@ -1375,6 +2223,65 @@ export class UndergroundLayersManager {
     return Math.sqrt(dx * dx + dz * dz) <= range;
   }
 
+  // Check if player is directly aligned and close to the shaft ladder on the North wall
+  public isNearShaftLadder(pos: Vector3D, horizontalTolerance = 1.45): boolean {
+    const ladderX = this.surfacePos.x;
+    const ladderZ = this.surfacePos.z - 1.45;
+    const dx = pos.x - ladderX;
+    const dz = pos.z - ladderZ;
+    const horizDist = Math.hypot(dx, dz);
+    if (horizDist > horizontalTolerance) return false;
+
+    const deepestLayer = this.layers.find((l) => l.level === this.maxUnlockedLevel) || this.layers[0];
+    const minY = this.surfaceY - deepestLayer.depthMeters - 1.5;
+    const maxY = this.surfaceY + 2.5;
+    return pos.y >= minY && pos.y <= maxY;
+  }
+
+  // Retrieve exact world coordinates of the vertical mine shaft ladder
+  public getShaftLadderPosition(): { x: number; z: number; surfaceY: number; topY: number; bottomY: number } {
+    const deepestLayer = this.layers.find((l) => l.level === this.maxUnlockedLevel) || this.layers[0];
+    return {
+      x: this.surfacePos.x,
+      z: this.surfacePos.z - 1.45,
+      surfaceY: this.surfaceY,
+      topY: this.surfaceY + 1.25,
+      bottomY: this.surfaceY - deepestLayer.depthMeters,
+    };
+  }
+
+  // Determine which stratum layer level corresponds to a given vertical elevation Y
+  public getLevelAtY(y: number): number {
+    if (y >= this.surfaceY - 0.5) return 0;
+
+    // Filter to only unlocked layers and sort ascending by level (1, 2, ...)
+    const unlockedLayers = this.layers
+      .filter((l) => l.level <= this.maxUnlockedLevel)
+      .sort((a, b) => a.level - b.level);
+
+    if (unlockedLayers.length === 0) return 0;
+
+    for (let i = 0; i < unlockedLayers.length; i++) {
+      const layer = unlockedLayers[i];
+      const floorY = this.surfaceY - layer.depthMeters;
+      const nextLayer = unlockedLayers[i + 1];
+
+      // If there is a deeper unlocked layer, transition halfway between the two floors
+      if (nextLayer) {
+        const nextFloorY = this.surfaceY - nextLayer.depthMeters;
+        const transitionY = (floorY + nextFloorY) / 2;
+        if (y >= transitionY) {
+          return layer.level;
+        }
+      } else {
+        // Deepest unlocked layer contains everything down to its floor and pit
+        return layer.level;
+      }
+    }
+
+    return unlockedLayers[unlockedLayers.length - 1].level;
+  }
+
   // Check if player is near the excavation pit in the center of the chamber
   public isNearExcavationPit(pos: Vector3D, range = 3.2): boolean {
     const dx = pos.x - this.surfacePos.x;
@@ -1429,9 +2336,10 @@ export class UndergroundLayersManager {
     if (this.holeManager) {
       const holeHit = this.holeManager.raycastMountainHoles(raycaster, maxDistance);
       if (holeHit.hit && holeHit.point) {
+        // Enforce vector pointing strictly inward from the wall into the cavern toward the mine shaft center
         const wallNormal = new THREE.Vector3(
           this.surfacePos.x - holeHit.point.x,
-          0.12,
+          0.05,
           this.surfacePos.z - holeHit.point.z
         ).normalize();
         return {
@@ -1449,18 +2357,15 @@ export class UndergroundLayersManager {
       const hits = raycaster.intersectObjects(this.cavernWallMeshes, false);
       if (hits.length > 0 && hits[0].distance <= maxDistance) {
         const hit = hits[0];
-        // Calculate inward normal from wall face pointing into cavern towards player
-        let normal = hit.face?.normal?.clone();
-        if (normal) {
-          normal.transformDirection(hit.object.matrixWorld);
-        } else {
-          normal = new THREE.Vector3(
-            this.surfacePos.x - hit.point.x,
-            0.12,
-            this.surfacePos.z - hit.point.z
-          ).normalize();
-        }
-        if (normal.lengthSq() < 0.01) normal.set(0, 1, 0);
+        // Calculate inward normal from wall face pointing into cavern toward shaft center (never into the rock)
+        const toShaft = new THREE.Vector3(
+          this.surfacePos.x - hit.point.x,
+          0,
+          this.surfacePos.z - hit.point.z
+        ).normalize();
+        const normal = toShaft.clone();
+        normal.y = 0.06;
+        normal.normalize();
 
         return {
           hit: true,
@@ -1562,13 +2467,19 @@ export class UndergroundLayersManager {
       particleMatType = 'volcanic_crag';
     }
 
-    // Calculate normal vector pointing out from the wall face into the cavern
-    const wallNormal = customNormal?.clone() || new THREE.Vector3(
+    // Calculate normal vector pointing strictly inward from the wall face into the cavern towards shaft
+    const toShaft = new THREE.Vector3(
       this.surfacePos.x - hitPoint.x,
-      0.18,
+      0,
       this.surfacePos.z - hitPoint.z
     ).normalize();
-    if (wallNormal.lengthSq() < 0.01) wallNormal.set(0, 1, 0);
+
+    let wallNormal = customNormal?.clone();
+    if (!wallNormal || wallNormal.lengthSq() < 0.01 || wallNormal.dot(toShaft) < 0.2) {
+      wallNormal = toShaft.clone();
+      wallNormal.y = 0.06;
+      wallNormal.normalize();
+    }
 
     // Procedural volumetric hole excavation inside the mine!
     let createdHole: MountainHole | undefined;
@@ -1589,6 +2500,7 @@ export class UndergroundLayersManager {
         goldAwarded: digRes.goldAwarded,
         message: digRes.message,
       };
+      this.updateCavernWallHoleCutouts();
     }
 
     // Rare hydrothermal quartz vein hit detection (~8% probability or bonus with depth)
@@ -1646,7 +2558,7 @@ export class UndergroundLayersManager {
   }
 
   // Main update loop: hydrological flooding, pump mechanics, light flickers, particles
-  public update(delta: number, now: number) {
+  public update(delta: number, now: number, timeOfDay?: number, weather?: string) {
     // 1. Cornish Dewatering Pump & Aquifer Hydrological Simulation
     if (this.waterTable.aquiferBreached || this.currentLevel >= 6) {
       // Flooding rate
@@ -1738,6 +2650,80 @@ export class UndergroundLayersManager {
         this.particlesGroup.remove(p.mesh);
         p.mesh.geometry.dispose();
         this.debrisList.splice(i, 1);
+      }
+    }
+
+    // 6. Dynamic open sky portal & volumetric sunbeam illumination
+    // Sky portal and sunbeam are ONLY visible when looking up from underground (currentLevel > 0)
+    const isUnderground = this.currentLevel > 0;
+    if (this.skyPortalMesh) {
+      this.skyPortalMesh.visible = isUnderground;
+    }
+    if (this.sunbeamMesh) {
+      this.sunbeamMesh.visible = isUnderground;
+    }
+    if (this.sunbeamDustPoints) {
+      this.sunbeamDustPoints.visible = isUnderground;
+    }
+
+    // Continuously spin the large cast-iron sheave wheel on the headframe crown
+    if (this.sheaveWheelGroup) {
+      this.sheaveWheelGroup.rotation.x += delta * 0.45;
+    }
+
+    if (this.sunbeamMesh && timeOfDay !== undefined) {
+      let skyMode: 'day' | 'sunset' | 'night' = 'day';
+      let beamColor = 0xfffae0;
+      let beamOpacity = 0.26;
+
+      if (timeOfDay >= 19.5 || timeOfDay < 5.0) {
+        skyMode = 'night';
+        beamColor = 0x5070a8;
+        beamOpacity = 0.12;
+      } else if ((timeOfDay >= 5.0 && timeOfDay < 6.5) || (timeOfDay >= 17.5 && timeOfDay < 19.5)) {
+        skyMode = 'sunset';
+        beamColor = 0xff9c42;
+        beamOpacity = 0.28;
+      }
+
+      if (weather === 'storm' || weather === 'light_rain') {
+        beamOpacity *= 0.6;
+        beamColor = 0x8fa4b8;
+      }
+
+      if (this.skyPortalMesh) {
+        const portalMat = this.skyPortalMesh.material as THREE.MeshBasicMaterial;
+        if (portalMat) {
+          if (skyMode === 'night' && this.skyTexNight) portalMat.map = this.skyTexNight;
+          else if (skyMode === 'sunset' && this.skyTexSunset) portalMat.map = this.skyTexSunset;
+          else if (this.skyTexDay) portalMat.map = this.skyTexDay;
+          portalMat.needsUpdate = true;
+        }
+      }
+
+      const sunbeamMat = this.sunbeamMesh.material as THREE.MeshBasicMaterial;
+      if (sunbeamMat) {
+        sunbeamMat.color.setHex(beamColor);
+        sunbeamMat.opacity = beamOpacity;
+      }
+    }
+
+    // 7. Sunbeam dust motes drifting along the vertical daylight column
+    if (this.sunbeamDustPoints) {
+      const posAttr = this.sunbeamDustPoints.geometry.attributes.position;
+      if (posAttr) {
+        const deepestLayer = this.layers.find((l) => l.level === this.maxUnlockedLevel) || this.layers[0];
+        const minY = this.surfaceY - deepestLayer.depthMeters + 0.5;
+        const maxY = this.surfaceY + 0.2;
+        for (let i = 0; i < posAttr.count; i++) {
+          let y = posAttr.getY(i) + Math.sin(now * 0.0012 + i * 0.4) * delta * 0.25;
+          let x = posAttr.getX(i) + Math.cos(now * 0.0009 + i * 0.2) * delta * 0.08;
+          let z = posAttr.getZ(i) + Math.sin(now * 0.0007 + i * 0.3) * delta * 0.08;
+          if (y < minY) y = maxY - 0.2;
+          if (y > maxY) y = minY + 0.2;
+          posAttr.setXYZ(i, x, y, z);
+        }
+        posAttr.needsUpdate = true;
       }
     }
   }

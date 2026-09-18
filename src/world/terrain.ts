@@ -1514,8 +1514,8 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
     roughness: 0.88,
     metalness: 0.04,
     flatShading: false,
-    side: THREE.DoubleSide,
-    shadowSide: THREE.DoubleSide,
+    side: THREE.FrontSide,
+    shadowSide: THREE.FrontSide,
   });
 
   material.onBeforeCompile = (shader) => {

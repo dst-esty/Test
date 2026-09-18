@@ -1652,29 +1652,6 @@ class SoundEngine {
     osc.stop(t + 1.65);
   }
 
-  // Wooden Ladder Climb Step Thump
-  public playLadderClimb() {
-    if (this.isMuted) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(180, t);
-    osc.frequency.exponentialRampToValueAtTime(65, t + 0.12);
-
-    gain.gain.setValueAtTime(0.2, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-    osc.start(t);
-    osc.stop(t + 0.13);
-  }
-
   // Geotechnical Pit Wall Slump & Loose Gravel Slide
   public playTrenchSlump() {
     if (this.isMuted) return;
@@ -1966,6 +1943,131 @@ class SoundEngine {
       osc.start(noteTime);
       osc.stop(noteTime + 0.42);
     });
+  }
+
+  // Prospector's Inspection Goggles Ratchet / Lens Click Sound
+  public playGogglesClick(active: boolean = true) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Brass lens shutter click / optics alignment ratchet
+    const freq = active ? 1420 : 920;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(active ? 2200 : 640, t + 0.08);
+
+    gain.gain.setValueAtTime(0.2, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.1);
+
+    // Second mechanical ratchet click
+    const osc2 = this.ctx.createOscillator();
+    const gain2 = this.ctx.createGain();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(active ? 1800 : 780, t + 0.05);
+    osc2.frequency.exponentialRampToValueAtTime(active ? 2600 : 420, t + 0.12);
+
+    gain2.gain.setValueAtTime(0.18, t + 0.05);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+
+    osc2.connect(gain2);
+    gain2.connect(this.ctx.destination);
+    osc2.start(t + 0.05);
+    osc2.stop(t + 0.14);
+  }
+
+  // Mine Shaft Ladder Climbing Audio: Rhythmic metal rung clanking & boot thuds
+  public playLadderClimb(isMetal: boolean = true) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    if (isMetal) {
+      // 1. Heavy boot heel impact on iron rung
+      const thud = this.ctx.createOscillator();
+      const thudGain = this.ctx.createGain();
+      thud.type = 'sine';
+      thud.frequency.setValueAtTime(140 + Math.random() * 20, t);
+      thud.frequency.exponentialRampToValueAtTime(45, t + 0.09);
+      thudGain.gain.setValueAtTime(0.26, t);
+      thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      thud.connect(thudGain);
+      thudGain.connect(this.ctx.destination);
+      thud.start(t);
+      thud.stop(t + 0.11);
+
+      // 2. Resonant metallic rung clank & harmonic ping
+      const rungFreq = 720 + Math.random() * 80;
+      const rungOsc = this.ctx.createOscillator();
+      const rungGain = this.ctx.createGain();
+      rungOsc.type = 'triangle';
+      rungOsc.frequency.setValueAtTime(rungFreq, t + 0.01);
+      rungOsc.frequency.exponentialRampToValueAtTime(rungFreq * 0.92, t + 0.16);
+      rungGain.gain.setValueAtTime(0.18, t + 0.01);
+      rungGain.gain.exponentialRampToValueAtTime(0.001, t + 0.17);
+      rungOsc.connect(rungGain);
+      rungGain.connect(this.ctx.destination);
+      rungOsc.start(t + 0.01);
+      rungOsc.stop(t + 0.18);
+
+      // 3. High metal harmonic shimmer
+      const overtone = this.ctx.createOscillator();
+      const overtoneGain = this.ctx.createGain();
+      overtone.type = 'sine';
+      overtone.frequency.setValueAtTime(rungFreq * 2.14, t + 0.01);
+      overtoneGain.gain.setValueAtTime(0.08, t + 0.01);
+      overtoneGain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      overtone.connect(overtoneGain);
+      overtoneGain.connect(this.ctx.destination);
+      overtone.start(t + 0.01);
+      overtone.stop(t + 0.13);
+    } else {
+      // Wood rung creak and boot impact
+      const woodThud = this.ctx.createOscillator();
+      const woodGain = this.ctx.createGain();
+      woodThud.type = 'triangle';
+      woodThud.frequency.setValueAtTime(180, t);
+      woodThud.frequency.exponentialRampToValueAtTime(60, t + 0.12);
+      woodGain.gain.setValueAtTime(0.24, t);
+      woodGain.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+      woodThud.connect(woodGain);
+      woodGain.connect(this.ctx.destination);
+      woodThud.start(t);
+      woodThud.stop(t + 0.14);
+    }
+  }
+
+  // Initial Ladder Grip / Mounting Clank
+  public playLadderInitiate(isMetal: boolean = true) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    this.playLadderClimb(isMetal);
+
+    // Additional grip grasp rattle
+    const rattleOsc = this.ctx.createOscillator();
+    const rattleGain = this.ctx.createGain();
+    rattleOsc.type = 'sawtooth';
+    rattleOsc.frequency.setValueAtTime(420, t + 0.05);
+    rattleOsc.frequency.exponentialRampToValueAtTime(260, t + 0.12);
+    rattleGain.gain.setValueAtTime(0.12, t + 0.05);
+    rattleGain.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+    rattleOsc.connect(rattleGain);
+    rattleGain.connect(this.ctx.destination);
+    rattleOsc.start(t + 0.05);
+    rattleOsc.stop(t + 0.14);
   }
 }
 

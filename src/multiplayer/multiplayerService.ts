@@ -376,9 +376,15 @@ class MultiplayerService {
   }
 
   public updateProfile(name: string, outfitColor: string) {
+    if (name && name.trim()) {
+      localStorage.setItem('prospector_name', name.trim());
+    }
+    if (outfitColor) {
+      localStorage.setItem('prospector_color', outfitColor);
+    }
     this.sendRaw({
       type: 'player:profile',
-      name,
+      name: name.trim(),
       outfitColor,
     });
   }

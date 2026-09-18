@@ -43,9 +43,11 @@ import { MovableRockManager } from '../world/movableRocks';
 import { ShaftSinkingStats } from '../world/undergroundVoxels';
 import { RemoteProspector } from '../world/remoteProspector';
 import { multiplayer } from '../multiplayer/multiplayerService';
+import { isMobileDevice } from '../utils/device';
 import { DesertHydrologyEngine } from '../world/hydrology';
 import { resolveKinematicMovement } from '../physics/collisionEngine';
 import { MountainDustParticleSystem } from '../world/mountainDustParticles';
+import { friendshipService } from '../services/friendshipService';
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -118,9 +120,7 @@ interface WorldCanvasProps {
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality) => {
-  const isMobile =
-    typeof window !== 'undefined' &&
-    (window.innerWidth <= 840 || /Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent));
+  const isMobile = isMobileDevice();
   const rawDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
   if (quality === 'performance') {
     return Math.min(rawDpr, isMobile ? 0.92 : 1.05);
@@ -305,6 +305,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const atmosphereManagerRef = useRef<AtmosphereManager | null>(null);
   const hydrologyEngineRef = useRef<DesertHydrologyEngine | null>(null);
   const undergroundLayersRef = useRef<UndergroundLayersManager | null>(null);
+  const isClimbingLadderRef = useRef(false);
+  const ladderClimbAudioTimer = useRef(0);
   const voxelUniformsRef = useRef<VoxelShaderUniforms[]>([]);
   const voxelTimeRef = useRef<{ value: number }>({ value: 0 });
   const noiseTextureRef = useRef<THREE.Texture | null>(null);
@@ -405,11 +407,23 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       Math.abs(playerPos.current.x - playerState.position.x) > 2 ||
       Math.abs(playerPos.current.z - playerState.position.z) > 2
     ) {
+      const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
+      const uLayers = undergroundLayersRef.current;
+      const groundY =
+        isUnderground && uLayers
+          ? uLayers.getFloorElevationForPosition(
+              playerState.position.x,
+              playerState.position.z,
+              uLayers.currentLevel
+            )
+          : getTerrainHeight(playerState.position.x, playerState.position.z);
       playerPos.current.set(
         playerState.position.x,
-        getTerrainHeight(playerState.position.x, playerState.position.z) + 1.7,
+        groundY + 1.7,
         playerState.position.z
       );
+      verticalVelocity.current = 0;
+      isGrounded.current = true;
     }
   }, [playerState.position.x, playerState.position.z]);
 
@@ -438,13 +452,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     // 2. Camera Setup
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
-    const camera = new THREE.PerspectiveCamera(65, width / height, 0.2, 800);
+    const camera = new THREE.PerspectiveCamera(65, width / height, 0.08, 800);
     cameraRef.current = camera;
 
     // 3. Renderer Setup (Hardware Accelerated WebGL2 Pipeline with Adaptive Mobile Performance)
-    const isMobile =
-      typeof window !== 'undefined' &&
-      (window.innerWidth <= 840 || /Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent));
+    const isMobile = isMobileDevice();
     const initQuality = qualityRef.current;
     const isPerf = initQuality === 'performance';
 
@@ -800,10 +812,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           if (p.id === selfId) return;
           if (!remoteProspectorsRef.current.has(p.id)) {
             const rp = new RemoteProspector(p);
+            const pStatus = friendshipService.getPardnerStatus(p.id, p.name);
+            rp.setPardnerStatus(pStatus.status === 'pardner');
             scene.add(rp.group);
             remoteProspectorsRef.current.set(p.id, rp);
           } else {
-            remoteProspectorsRef.current.get(p.id)!.updateData(p);
+            const rp = remoteProspectorsRef.current.get(p.id)!;
+            rp.updateData(p);
+            const pStatus = friendshipService.getPardnerStatus(p.id, p.name);
+            rp.setPardnerStatus(pStatus.status === 'pardner');
           }
         });
       },
@@ -828,6 +845,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             ping: 0,
             lastUpdate: Date.now(),
           });
+          const pStatus = friendshipService.getPardnerStatus(data.id);
+          rp.setPardnerStatus(pStatus.status === 'pardner');
           scene.add(rp.group);
           remoteProspectorsRef.current.set(data.id, rp);
         }
@@ -837,6 +856,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const rp = remoteProspectorsRef.current.get(player.id);
         if (rp) {
           rp.setProfile(player.name, player.outfitColor);
+          const pStatus = friendshipService.getPardnerStatus(player.id, player.name);
+          rp.setPardnerStatus(pStatus.status === 'pardner');
         }
       },
       onPlayerAction: (data) => {
@@ -895,6 +916,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           );
         }
       },
+    });
+
+    const unsubFriendships = friendshipService.subscribe(() => {
+      remoteProspectorsRef.current.forEach((rp) => {
+        const pStatus = friendshipService.getPardnerStatus(rp.id, rp.name);
+        rp.setPardnerStatus(pStatus.status === 'pardner');
+      });
     });
 
     // 9. Universal Action Executors (Digging, Shooting, Dynamite)
@@ -1820,9 +1848,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (!uLayers) return;
       if (level === 0) {
         soundEngine.playLadderClimb();
-        uLayers.currentLevel = 0;
+        uLayers.setSubterraneanLevel(0);
         const surfY = getTerrainHeight(uLayers.surfacePos.x + 1.5, uLayers.surfacePos.z + 1.5);
         playerPos.current.set(uLayers.surfacePos.x + 1.5, surfY + 1.7, uLayers.surfacePos.z + 1.5);
+        verticalVelocity.current = 0;
+        isGrounded.current = true;
+        isClimbingLadderRef.current = false;
         setPlayerState((prev) => ({
           ...prev,
           isInsideMine: false,
@@ -1845,6 +1876,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const targetLayer = uLayers.layers.find((l) => l.level === level);
       const floorY = uLayers.surfaceY - (targetLayer ? targetLayer.depthMeters : 8.5);
       playerPos.current.set(uLayers.surfacePos.x + 1.2, floorY + 1.7, uLayers.surfacePos.z + 1.2);
+      verticalVelocity.current = 0;
+      isGrounded.current = true;
+      isClimbingLadderRef.current = false;
       setPlayerState((prev) => ({
         ...prev,
         isInsideMine: true,
@@ -2124,7 +2158,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         (playerStateRef.current.woodPlanks || 0) < woodCost
       ) {
         if (onShowBanner) {
-          if (type === 'campfire') {
+          if (type === 'frontier_torch') {
+            onShowBanner(`Need ${woodCost} Cut Wood Log to stake a Frontier Ground Torch! Harvest wood with Axe [X] or buy at Tortilla Flat.`);
+          } else if (type === 'campfire') {
             onShowBanner(`Need ${blueprint.rockCost} Rocks & ${woodCost} Cut Wood Logs to build a Frontier Campfire! Chop trees at springs with Axe [X].`);
           } else if (type === 'prospector_camp') {
             onShowBanner(`Need ${blueprint.goldCost} oz Gold, ${blueprint.rockCost} Rocks & ${woodCost} Wood to pitch an Outpost Camp!`);
@@ -2141,27 +2177,45 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         ghostRotationY.current
       );
 
-      // Hide holographic ghost preview immediately
-      if (mineBuildingRef.current) {
+      // If staking torches and player still has wood, keep torch equipped so they can stake 3 or 4 in a row!
+      const remainingWood = Math.max(0, (playerStateRef.current.woodPlanks || 0) - woodCost);
+      const keepTorchEquipped = type === 'frontier_torch' && remainingWood >= (blueprint.woodCost || 1);
+
+      if (!keepTorchEquipped && mineBuildingRef.current) {
         mineBuildingRef.current.hideGhost();
       }
 
-      // Automatically revert to pickaxe so the campsite menu/placement ribbon immediately disappears
       setPlayerState((prev) => ({
         ...prev,
         goldFound: Math.max(0, (prev.goldFound || 0) - blueprint.goldCost),
         blocksDug: Math.max(0, (prev.blocksDug || 0) - blueprint.rockCost),
-        woodPlanks: Math.max(0, (prev.woodPlanks || 0) - woodCost),
+        woodPlanks: remainingWood,
         builtStructures: [...(prev.builtStructures || []), structure],
-        equippedTool: 'pickaxe',
+        equippedTool: keepTorchEquipped ? 'builder' : 'pickaxe',
       }));
 
       if (onBuildStructure) {
         onBuildStructure(type, { x: targetPos.x, y: targetPos.y, z: targetPos.z }, ghostRotationY.current);
       }
 
+      // If building a mine portal or shaft, anchor subterranean layers to this structure!
+      if (type === 'timber_portal' || type === 'deep_shaft' || type === 'headframe_hoist') {
+        const sY = getTerrainHeight(targetPos.x, targetPos.z);
+        if (undergroundLayersRef.current) {
+          undergroundLayersRef.current.initAtPosition({ x: targetPos.x, y: sY, z: targetPos.z }, sY);
+          if (onUpdateShaftLayers) onUpdateShaftLayers(undergroundLayersRef.current.layers);
+          if (onUpdateShaftLevel) onUpdateShaftLevel(0, undergroundLayersRef.current.maxUnlockedLevel);
+        }
+      }
+
       if (onShowBanner) {
-        if (type === 'campfire') {
+        if (type === 'frontier_torch') {
+          if (keepTorchEquipped) {
+            onShowBanner(`🔥 Ground Torch Staked! Warm firelight illuminates the area. Aim & Left-Click to stake another torch (${remainingWood} wood left, Esc to finish).`);
+          } else {
+            onShowBanner(`🔥 Frontier Ground Torch Staked! Beautiful warm firelight illuminates your camp and surroundings.`);
+          }
+        } else if (type === 'campfire') {
           onShowBanner(`🔥 Frontier Campfire Built! Crackling mesquite embers provide light & warmth. Press [E] to rest, brew coffee, and fill canteen.`);
         } else if (type === 'prospector_camp') {
           onShowBanner(`⛺ Prospector Outpost Camp Pitched! Canvas tent, bedroll, and campfire ready for wilderness shelter.`);
@@ -2190,7 +2244,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         checkInteractions(true);
       }
       if (e.code === 'Space') {
-        if (isGrounded.current) {
+        const uLayers = undergroundLayersRef.current;
+        if (uLayers && uLayers.isNearShaftLadder(playerPos.current, 1.45)) {
+          isClimbingLadderRef.current = true;
+          isGrounded.current = false;
+        } else if (isGrounded.current) {
           verticalVelocity.current = 7.5;
           isGrounded.current = false;
           soundEngine.playJump();
@@ -2489,6 +2547,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const checkInteractions = (executeAction = false) => {
       const px = playerPos.current.x;
       const pz = playerPos.current.z;
+      const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
 
       // -1. Carried Object (Rock) Placement & Stowing
       if (playerStateRef.current.carriedObject) {
@@ -2550,8 +2609,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
-      // Geotechnical Excavation Trench check
-      const nearbyTrench = getNearbyDugHole(px, pz, 4.8);
+      // Geotechnical Excavation Trench check (only active on surface terrain)
+      const nearbyTrench = isUnderground ? null : getNearbyDugHole(px, pz, 4.8);
       const currentLayer = nearbyTrench ? getGeologicalLayerAtDepth(nearbyTrench.depth) : null;
       const minRequiredDepth = currentLayer?.id === 'strata_sand' ? 0.50 : 0.85;
       const shoredUntil = nearbyTrench?.shoredUntilDepth || 0;
@@ -2613,8 +2672,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (undergroundLayersRef.current) {
         const uLayers = undergroundLayersRef.current;
         if (onUpdateShaftSinkingStats) {
-          const isNearShaft = uLayers.isNearShaft(playerPos.current, 7.5) || uLayers.currentLevel > 0;
-          if (isNearShaft) {
+          // Never force shaft sinking gauge on the surface unless player is actively targeting a mini-voxel
+          const isTargetingVoxel = !!uLayers.voxelEngine.targetedVoxel;
+          const isUnderground = uLayers.currentLevel > 0;
+          if (isUnderground || isTargetingVoxel) {
             onUpdateShaftSinkingStats(uLayers.voxelEngine.getShaftSinkingStats());
           } else {
             onUpdateShaftSinkingStats(null);
@@ -2624,21 +2685,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         // Check if targeting a granular mini-voxel
         const targetedVoxel = uLayers.voxelEngine.targetedVoxel;
         if (targetedVoxel) {
-          let label = `Mine Voxel [Left Click / E]`;
+          let label = `Mine Voxel`;
           if (targetedVoxel.isFloor) {
-            label = `⛏️ Sink Shaft Floor (-${targetedVoxel.strataDepth.toFixed(2)}m) [Left Click / E]`;
+            label = `⛏️ Sink Shaft Floor (-${targetedVoxel.strataDepth.toFixed(1)}m)`;
           } else if (targetedVoxel.type === 'quartz_gold') {
-            label = `⛏️ Mine Bonanza Quartz-Gold Vein [Left Click / E]`;
+            label = `⛏️ Bonanza Quartz-Gold Vein`;
           } else if (targetedVoxel.type === 'silver_ore') {
-            label = `⛏️ Mine Silver-Galena Ore Pocket [Left Click / E]`;
+            label = `⛏️ Silver-Galena Ore Pocket`;
           } else if (targetedVoxel.type === 'amethyst') {
-            label = `⛏️ Mine Imperial Amethyst Geode [Left Click / E]`;
+            label = `⛏️ Imperial Amethyst Geode`;
           } else if (targetedVoxel.type === 'copper') {
-            label = `⛏️ Mine Native Copper-Gold Lode [Left Click / E]`;
+            label = `⛏️ Native Copper-Gold Lode`;
           } else if (targetedVoxel.type === 'basalt') {
-            label = `⛏️ Mine Dense Basalt Stratum [Left Click / E]`;
+            label = `⛏️ Dense Basalt Stratum`;
           } else {
-            label = `⛏️ Carve Drift into ${targetedVoxel.type.replace('_', ' ').toUpperCase()} [Left Click / E]`;
+            const typeName = targetedVoxel.type.replace('_', ' ');
+            label = `⛏️ Carve Drift (${typeName.charAt(0).toUpperCase() + typeName.slice(1)})`;
           }
 
           if (executeAction) {
@@ -2672,18 +2734,25 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
           // Check proximity to shaft ladder / hoist
           if (uLayers.isNearShaft(playerPos.current, 4.5)) {
+            const isAtLadder = uLayers.isNearShaftLadder(playerPos.current, 1.8);
             if (uLayers.currentLevel === 1) {
               if (executeAction) {
                 executeTraverseShaft(0);
               } else {
-                onPromptInteract('Climb Shaft Ladder to Desert Surface [E]', () => executeTraverseShaft(0));
+                const promptText = isAtLadder
+                  ? '🪜 Shaft Ladder: [W / Space] Climb Up  •  [S] Climb Down  •  [E] Ascend to Surface'
+                  : 'Climb Shaft Ladder to Desert Surface [E]';
+                onPromptInteract(promptText, () => executeTraverseShaft(0));
               }
               return;
             } else {
               if (executeAction) {
                 executeTraverseShaft(uLayers.currentLevel - 1);
               } else {
-                onPromptInteract(`Climb Shaft Ladder to Layer ${uLayers.currentLevel - 1} [E]`, () => executeTraverseShaft(uLayers.currentLevel - 1));
+                const promptText = isAtLadder
+                  ? `🪜 Shaft Ladder: [W / Space] Climb Up  •  [S] Climb Down  •  [E] Ascend to Layer ${uLayers.currentLevel - 1}`
+                  : `Climb Shaft Ladder to Layer ${uLayers.currentLevel - 1} [E]`;
+                onPromptInteract(promptText, () => executeTraverseShaft(uLayers.currentLevel - 1));
               }
               return;
             }
@@ -2741,7 +2810,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             if (executeAction) {
               executeTraverseShaft(1);
             } else {
-              onPromptInteract('Descend into Subterranean Mine Shaft (Layer 1) [E]', () =>
+              const isAtLadder = uLayers.isNearShaftLadder(playerPos.current, 1.8);
+              const promptText = isAtLadder
+                ? '🪜 Shaft Ladder: [S] Climb Down  •  [E] Descend to Layer 1'
+                : 'Descend into Subterranean Mine Shaft (Layer 1) [E]';
+              onPromptInteract(promptText, () =>
                 executeTraverseShaft(1)
               );
             }
@@ -2835,15 +2908,30 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
             return;
           } else if (nearby.type === 'headframe_hoist') {
+            const enterAction = () => {
+              const uLayersInst = undergroundLayersRef.current;
+              if (uLayersInst) {
+                const sY = getTerrainHeight(nearby.position.x, nearby.position.z);
+                if (
+                  Math.hypot(
+                    uLayersInst.surfacePos.x - nearby.position.x,
+                    uLayersInst.surfacePos.z - nearby.position.z
+                  ) > 1.0
+                ) {
+                  uLayersInst.initAtPosition(
+                    { x: nearby.position.x, y: sY, z: nearby.position.z },
+                    sY
+                  );
+                  if (onUpdateShaftLayers) onUpdateShaftLayers(uLayersInst.layers);
+                  if (onUpdateShaftLevel) onUpdateShaftLevel(0, uLayersInst.maxUnlockedLevel);
+                }
+                executeTraverseShaft(1);
+              }
+            };
             if (executeAction) {
-              soundEngine.playPickaxe();
-              setPlayerState((prev) => ({
-                ...prev,
-                goldFound: prev.goldFound + 3.0,
-              }));
-              if (onShowBanner) onShowBanner("Cranked Deep Hoist: Hauled rich ore bucket from the depths! (+3.0 oz Gold)");
+              enterAction();
             } else {
-              onPromptInteract('Crank Deep Headframe Hoist [E]', () => checkInteractions(true));
+              onPromptInteract('Ride Headframe Hoist into Shaft [E]', enterAction);
             }
             return;
           } else if (nearby.type === 'rail_track') {
@@ -2858,24 +2946,40 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               onPromptInteract('Push Ore Minecart along Rail [E]', () => checkInteractions(true));
             }
             return;
-          } else if (nearby.type === 'timber_portal') {
+          } else if (
+            nearby.type === 'timber_portal' ||
+            nearby.type === 'deep_shaft'
+          ) {
+            const label =
+              nearby.type === 'timber_portal'
+                ? 'Enter Timber Mine Portal Shaft [E]'
+                : 'Descend Deep Bedrock Shaft [E]';
+
+            const enterAction = () => {
+              const uLayersInst = undergroundLayersRef.current;
+              if (uLayersInst) {
+                const sY = getTerrainHeight(nearby.position.x, nearby.position.z);
+                if (
+                  Math.hypot(
+                    uLayersInst.surfacePos.x - nearby.position.x,
+                    uLayersInst.surfacePos.z - nearby.position.z
+                  ) > 1.0
+                ) {
+                  uLayersInst.initAtPosition(
+                    { x: nearby.position.x, y: sY, z: nearby.position.z },
+                    sY
+                  );
+                  if (onUpdateShaftLayers) onUpdateShaftLayers(uLayersInst.layers);
+                  if (onUpdateShaftLevel) onUpdateShaftLevel(0, uLayersInst.maxUnlockedLevel);
+                }
+                executeTraverseShaft(1);
+              }
+            };
+
             if (executeAction) {
-              onEnterMine();
+              enterAction();
             } else {
-              onPromptInteract('Enter Timber Mine Portal Shaft [E]', () => onEnterMine());
-            }
-            return;
-          } else if (nearby.type === 'deep_shaft') {
-            if (executeAction) {
-              soundEngine.playPickaxe();
-              setPlayerState((prev) => ({
-                ...prev,
-                goldFound: prev.goldFound + 4.0,
-                blocksDug: prev.blocksDug + 2,
-              }));
-              if (onShowBanner) onShowBanner("Excavated Deep Bedrock Shaft: Struck rich gold vein! (+4.0 oz Gold)");
-            } else {
-              onPromptInteract('Excavate Deep Bedrock Shaft [E]', () => checkInteractions(true));
+              onPromptInteract(label, enterAction);
             }
             return;
           }
@@ -3080,24 +3184,46 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
-      // 5b. Mountain Excavation Holes (Pickaxe Carved Cavities & Adits)
-      if (foliageManagerRef.current?.mountainHoleManager) {
-        const mtnHole = foliageManagerRef.current.mountainHoleManager.getNearbyHole(playerPos.current, 3.2);
+      // 5b. Mountain & Cavern Excavation Holes & Walk-in Adits
+      const currentULayers = undergroundLayersRef.current;
+      const isUndergroundNow = (currentULayers?.currentLevel || 0) > 0;
+      const mtnMgr = isUndergroundNow ? currentULayers?.holeManager : foliageManagerRef.current?.mountainHoleManager;
+      if (mtnMgr) {
+        const tunnelStatus = mtnMgr.isInsideMountainTunnel(
+          playerPos.current.x,
+          playerPos.current.y,
+          playerPos.current.z,
+          0.8
+        );
+        const mtnHole = (tunnelStatus.inside && tunnelStatus.hole)
+          ? tunnelStatus.hole
+          : mtnMgr.getNearbyHole(playerPos.current, 3.5);
+
         if (mtnHole) {
-          const veinText = mtnHole.hasExposedGoldVein ? ' | ✨ Gold Vein Exposed' : '';
-          const label = `⛏️ Mountain Excavation Hole (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Pickaxe to Bore Deeper]`;
+          const isDeepAdit = mtnHole.depth >= 2.0;
+          const veinText = mtnHole.hasExposedGoldVein ? ' | ✨ High-Grade Gold Vein' : '';
+          const label = tunnelStatus.inside
+            ? `⛏️ Inside Mountain Adit (Bore: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Working-Face with Pickaxe [3] or Blast Dynamite [5]]`
+            : isDeepAdit
+            ? `🚪 Mountain Drift Portal (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Step Inside or Strike to Bore Deeper]`
+            : `⛏️ Mountain Excavation (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Pickaxe to Bore Deeper]`;
+
           if (executeAction) {
-            if (mtnHole.hasExposedGoldVein && Math.random() < 0.35) {
+            if (mtnHole.hasExposedGoldVein && Math.random() < 0.4) {
               setPlayerState((prev) => ({
                 ...prev,
                 goldFound: (prev.goldFound || 0) + 1,
               }));
               soundEngine.playOreChime();
               if (onShowBanner) {
-                onShowBanner(`✨ Extracted loose 1 oz Gold Specimen from mountain cavity!`);
+                onShowBanner(`✨ Chiseled 1 oz Native Gold Specimen from deep mountain cavity!`);
               }
             } else if (onShowBanner) {
-              onShowBanner(`⛏️ Mountain Hole: -${mtnHole.depth.toFixed(1)}m deep into bedrock. Strike with Pickaxe [3] to carve deeper!`);
+              onShowBanner(
+                isDeepAdit
+                  ? `⛏️ Mountain Adit: -${mtnHole.depth.toFixed(1)}m deep. Step inside to explore timbered drift, or strike the back face to bore further!`
+                  : `⛏️ Mountain Hole: -${mtnHole.depth.toFixed(1)}m deep. Strike with Pickaxe [3] or toss Dynamite [5] to expand into a walk-in adit!`
+              );
             }
           } else {
             onPromptInteract(label, () => checkInteractions(true));
@@ -3287,34 +3413,204 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         });
       }
 
-      // Vertical Gravity and Ground Clamping
+      // Vertical Gravity, Ladder Climbing, and Ground Clamping
       const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
-      let currentGroundY = 0;
-      if (isUnderground && undergroundLayersRef.current) {
-        currentGroundY = undergroundLayersRef.current.getFloorElevationForPosition(
-          playerPos.current.x,
-          playerPos.current.z,
-          undergroundLayersRef.current.currentLevel
-        );
+      const uLayers = undergroundLayersRef.current;
+      const nearShaftLadder = !!(uLayers && uLayers.isNearShaftLadder(playerPos.current, 1.45));
+
+      // Handle real-time shaft ladder climbing
+      if (nearShaftLadder) {
+        const wantsClimbUp = keys['KeyW'] || keys['KeyZ'] || keys['ArrowUp'] || keys['Space'] || (virtualJoystickInput.current.forward > 0.15);
+        const wantsClimbDown = keys['KeyS'] || keys['ArrowDown'] || keys['ShiftLeft'] || keys['ShiftRight'] || (virtualJoystickInput.current.forward < -0.15);
+        const ladderPos = uLayers.getShaftLadderPosition();
+
+        if (wantsClimbUp) {
+          if (!isClimbingLadderRef.current) {
+            soundEngine.playLadderInitiate(true);
+          }
+          isClimbingLadderRef.current = true;
+          isGrounded.current = false;
+          verticalVelocity.current = 0;
+          const climbSpeed = (isSprinting ? 5.2 : 3.8) * delta;
+          playerPos.current.y += climbSpeed;
+
+          // Gently align horizontal position towards ladder rungs
+          playerPos.current.x = THREE.MathUtils.lerp(playerPos.current.x, ladderPos.x, 0.14);
+          playerPos.current.z = THREE.MathUtils.lerp(playerPos.current.z, ladderPos.z + 0.38, 0.14);
+
+          ladderClimbAudioTimer.current += delta;
+          if (ladderClimbAudioTimer.current >= 0.28) {
+            ladderClimbAudioTimer.current = 0;
+            soundEngine.playLadderClimb(true);
+          }
+
+          // Check if climbed out past top of shaft onto desert surface
+          if (playerPos.current.y >= uLayers.surfaceY + 0.6) {
+            isClimbingLadderRef.current = false;
+            executeTraverseShaft(0);
+          } else {
+            // Update current stratum level as player ascends between subterranean stopes
+            const lvlAtY = uLayers.getLevelAtY(playerPos.current.y);
+            if (lvlAtY !== uLayers.currentLevel && lvlAtY > 0) {
+              uLayers.setSubterraneanLevel(lvlAtY);
+              setPlayerState((prev) => ({ ...prev, currentMineLevel: lvlAtY }));
+              if (onUpdateShaftLevel) onUpdateShaftLevel(lvlAtY, uLayers.maxUnlockedLevel);
+            }
+          }
+        } else if (wantsClimbDown) {
+          // If on surface, stepping down onto ladder transitions into mine shaft
+          if (!isUnderground) {
+            uLayers.setSubterraneanLevel(1);
+            setPlayerState((prev) => ({ ...prev, isInsideMine: true, currentMineLevel: 1 }));
+            if (onUpdateShaftLevel) onUpdateShaftLevel(1, uLayers.maxUnlockedLevel);
+          }
+
+          let currentFloorY = uLayers.getFloorElevationForPosition(
+            playerPos.current.x,
+            playerPos.current.z,
+            uLayers.currentLevel
+          );
+          const deepestLayer =
+            uLayers.layers.find((l) => l.level === uLayers.maxUnlockedLevel) || uLayers.layers[0];
+          const lowestAllowedY = uLayers.surfaceY - deepestLayer.depthMeters + 1.7;
+
+          // Prevent climbing downward through the floor of the deepest unlocked stope
+          if (
+            uLayers.currentLevel >= uLayers.maxUnlockedLevel &&
+            playerPos.current.y <= lowestAllowedY + 0.05
+          ) {
+            playerPos.current.y = currentFloorY + 1.7;
+            isGrounded.current = true;
+            isClimbingLadderRef.current = false;
+            verticalVelocity.current = 0;
+          } else {
+            if (!isClimbingLadderRef.current) {
+              soundEngine.playLadderInitiate(true);
+            }
+            isClimbingLadderRef.current = true;
+            isGrounded.current = false;
+            verticalVelocity.current = 0;
+            const climbSpeed = (isSprinting ? 5.2 : 3.8) * delta;
+            playerPos.current.y -= climbSpeed;
+
+            playerPos.current.x = THREE.MathUtils.lerp(playerPos.current.x, ladderPos.x, 0.14);
+            playerPos.current.z = THREE.MathUtils.lerp(playerPos.current.z, ladderPos.z + 0.38, 0.14);
+
+            ladderClimbAudioTimer.current += delta;
+            if (ladderClimbAudioTimer.current >= 0.28) {
+              ladderClimbAudioTimer.current = 0;
+              soundEngine.playLadderClimb(true);
+            }
+
+            // Check if reached bottom or layer floor
+            currentFloorY = uLayers.getFloorElevationForPosition(
+              playerPos.current.x,
+              playerPos.current.z,
+              uLayers.currentLevel
+            );
+            if (playerPos.current.y <= currentFloorY + 1.7) {
+              playerPos.current.y = currentFloorY + 1.7;
+              isGrounded.current = true;
+              isClimbingLadderRef.current = false;
+            } else {
+              const lvlAtY = uLayers.getLevelAtY(playerPos.current.y);
+              if (lvlAtY !== uLayers.currentLevel && lvlAtY > 0) {
+                uLayers.setSubterraneanLevel(lvlAtY);
+                setPlayerState((prev) => ({ ...prev, currentMineLevel: lvlAtY }));
+                if (onUpdateShaftLevel) onUpdateShaftLevel(lvlAtY, uLayers.maxUnlockedLevel);
+              }
+            }
+          }
+        } else if (isClimbingLadderRef.current) {
+          // Player holding onto ladder rungs
+          verticalVelocity.current = 0;
+          isGrounded.current = false;
+        }
       } else {
-        currentGroundY = getTerrainHeight(playerPos.current.x, playerPos.current.z);
+        isClimbingLadderRef.current = false;
       }
-      const targetEyeY = currentGroundY + 1.7;
 
-      if (isGrounded.current) {
-        // Cleanly clamped to terrain - walking up/down dunes and ridges is buttery smooth!
-        playerPos.current.y = targetEyeY;
-        verticalVelocity.current = 0;
+      // Compute ground elevation for positioning and camera
+      let currentGroundY = 0;
+      if (isUnderground && uLayers) {
+        const tunnelCheck = uLayers.holeManager?.isInsideMountainTunnel(
+          playerPos.current.x,
+          playerPos.current.y,
+          playerPos.current.z,
+          0.5
+        );
+        if (tunnelCheck?.inside && tunnelCheck.floorY !== undefined) {
+          currentGroundY = tunnelCheck.floorY;
+        } else {
+          currentGroundY = uLayers.getFloorElevationForPosition(
+            playerPos.current.x,
+            playerPos.current.z,
+            uLayers.currentLevel
+          );
+        }
       } else {
-        // Airborne jump physics
-        verticalVelocity.current -= 22.0 * delta;
-        playerPos.current.y += verticalVelocity.current * delta;
+        // Check if player is walking inside a carved mountain adit tunnel!
+        const tunnelCheck = foliageManagerRef.current?.mountainHoleManager?.isInsideMountainTunnel(
+          playerPos.current.x,
+          playerPos.current.y,
+          playerPos.current.z,
+          0.45
+        );
+        if (tunnelCheck?.inside && tunnelCheck.floorY !== undefined) {
+          currentGroundY = tunnelCheck.floorY;
+        } else {
+          currentGroundY = getTerrainHeight(playerPos.current.x, playerPos.current.z);
+        }
+      }
 
-        if (playerPos.current.y <= targetEyeY) {
+      // Vertical Gravity and Ground Clamping (when not holding or climbing ladder)
+      if (!isClimbingLadderRef.current) {
+        const targetEyeY = currentGroundY + 1.7;
+
+        if (isGrounded.current) {
+          // Cleanly clamped to terrain - walking up/down dunes and ridges is buttery smooth!
           playerPos.current.y = targetEyeY;
           verticalVelocity.current = 0;
+        } else {
+          // Airborne jump physics
+          verticalVelocity.current -= 22.0 * delta;
+          playerPos.current.y += verticalVelocity.current * delta;
+
+          if (playerPos.current.y <= targetEyeY) {
+            playerPos.current.y = targetEyeY;
+            verticalVelocity.current = 0;
+            isGrounded.current = true;
+            soundEngine.playLand();
+          }
+        }
+      }
+
+      // Subterranean & surface abyss safety net - hard catch prevents falling into void
+      if (isUnderground && uLayers) {
+        const deepestL =
+          uLayers.layers.find((l) => l.level === uLayers.maxUnlockedLevel) || uLayers.layers[0];
+        const minSafeY = uLayers.surfaceY - deepestL.depthMeters - 2.5;
+        if (playerPos.current.y < minSafeY || isNaN(playerPos.current.y)) {
+          playerPos.current.y = currentGroundY + 1.7;
+          verticalVelocity.current = 0;
           isGrounded.current = true;
-          soundEngine.playLand();
+        }
+      } else {
+        const tunnelCheck = foliageManagerRef.current?.mountainHoleManager?.isInsideMountainTunnel(
+          playerPos.current.x,
+          playerPos.current.y,
+          playerPos.current.z,
+          0.6
+        );
+        const minSurfaceY =
+          tunnelCheck?.inside && tunnelCheck.floorY !== undefined
+            ? tunnelCheck.floorY
+            : getTerrainHeight(playerPos.current.x, playerPos.current.z);
+
+        if (playerPos.current.y < minSurfaceY - 4.0 || isNaN(playerPos.current.y)) {
+          playerPos.current.y = minSurfaceY + 1.7;
+          verticalVelocity.current = 0;
+          isGrounded.current = true;
         }
       }
 
@@ -3437,19 +3733,59 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         camera.lookAt(camera.position.clone().add(lookDir));
       } else {
         // Third-person camera behind and above character
-        const distBehind = 4.2;
-        const camYOffset = 1.8;
-        const camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
-        const camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
-        const camGroundY = isUnderground ? currentGroundY : getTerrainHeight(camX, camZ);
-        const camY = Math.max(
-          camGroundY + 0.65,
-          currentGroundY + 1.2,
-          playerPos.current.y + camYOffset + Math.sin(playerPitch.current) * 2.0
-        );
+        if (isUnderground && undergroundLayersRef.current) {
+          const uLayers = undergroundLayersRef.current;
+          const currentLvl = uLayers.currentLevel > 0 ? uLayers.currentLevel : 1;
+          const layerData = uLayers.getLayerData(currentLvl);
+          const chamberHeight = layerData?.level === 1 ? 5.0 : 5.8;
+          const chamberRadius = layerData?.level === 1 ? 13.0 : 14.5;
+          const floorY = uLayers.surfaceY - (layerData?.depthMeters || 8.5);
+          const ceilY = floorY + chamberHeight;
 
-        camera.position.set(camX, camY, camZ);
-        camera.lookAt(playerPos.current.x, playerPos.current.y + 0.3, playerPos.current.z);
+          // Distance check from central shaft station
+          const dxFromShaft = playerPos.current.x - uLayers.surfacePos.x;
+          const dzFromShaft = playerPos.current.z - uLayers.surfacePos.z;
+          const distToShaft = Math.hypot(dxFromShaft, dzFromShaft);
+
+          // Close over-shoulder camera underground to prevent wall clipping
+          const distBehind = distToShaft <= 2.2 ? 1.8 : 2.5;
+          const camYOffset = 1.35;
+
+          let camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
+          let camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
+
+          // Chamber wall boundary constraint
+          const camDx = camX - uLayers.surfacePos.x;
+          const camDz = camZ - uLayers.surfacePos.z;
+          const camDist = Math.hypot(camDx, camDz);
+          const maxAllowedRadius = chamberRadius - 1.2;
+          if (camDist > maxAllowedRadius && camDist > 0.001) {
+            const scale = maxAllowedRadius / camDist;
+            camX = uLayers.surfacePos.x + camDx * scale;
+            camZ = uLayers.surfacePos.z + camDz * scale;
+          }
+
+          // Ceiling and floor height constraints
+          let camY = playerPos.current.y + camYOffset + Math.sin(playerPitch.current) * 1.2;
+          camY = Math.max(floorY + 0.6, Math.min(ceilY - 0.45, camY));
+
+          camera.position.set(camX, camY, camZ);
+          camera.lookAt(playerPos.current.x, playerPos.current.y + 0.35, playerPos.current.z);
+        } else {
+          const distBehind = 4.2;
+          const camYOffset = 1.8;
+          const camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
+          const camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
+          const camGroundY = getTerrainHeight(camX, camZ);
+          const camY = Math.max(
+            camGroundY + 0.65,
+            currentGroundY + 1.2,
+            playerPos.current.y + camYOffset + Math.sin(playerPitch.current) * 2.0
+          );
+
+          camera.position.set(camX, camY, camZ);
+          camera.lookAt(playerPos.current.x, playerPos.current.y + 0.3, playerPos.current.z);
+        }
       }
 
       // First-Person Tool Swing & Idle Breathing Animation
@@ -3793,7 +4129,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // 5c. Subterranean Mine Shaft & Granular Mini-Voxel Engine
       if (undergroundLayersRef.current) {
-        undergroundLayersRef.current.update(delta, performance.now());
+        undergroundLayersRef.current.update(delta, performance.now(), timeOfDay, weather);
         undergroundLayersRef.current.voxelEngine.updateReticle(camera, 6.5);
         undergroundLayersRef.current.voxelEngine.update(delta);
       }
@@ -3880,6 +4216,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     animationFrameId = requestAnimationFrame(animate);
 
     return () => {
+      unsubFriendships();
       cancelAnimationFrame(animationFrameId);
       remoteProspectorsRef.current.forEach((rp) => {
         scene.remove(rp.group);

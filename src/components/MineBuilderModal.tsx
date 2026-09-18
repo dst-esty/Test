@@ -82,6 +82,8 @@ export const MineBuilderModal: React.FC<MineBuilderModalProps> = ({
         return <Flame className="w-6 h-6 text-orange-500" />;
       case 'prospector_camp':
         return <Tent className="w-6 h-6 text-amber-300" />;
+      case 'frontier_torch':
+        return <Flame className="w-6 h-6 text-amber-400" />;
     }
   };
 

@@ -39,6 +39,41 @@ export class FriendshipService {
     return localStorage.getItem('prospector_name') || 'Canyon Jack';
   }
 
+  public setProspectorName(name: string) {
+    const trimmed = name.trim();
+    if (trimmed) {
+      localStorage.setItem('prospector_name', trimmed);
+      this.notifySubscribers(Array.from(this.friendshipsCache.values()));
+    }
+  }
+
+  public getAcceptedPardners(): { pardnerId: string; pardnerName: string; friendship: Friendship }[] {
+    const selfId = this.getOrCreateProspectorId();
+    const selfName = this.getProspectorName().toLowerCase();
+    const pardners: { pardnerId: string; pardnerName: string; friendship: Friendship }[] = [];
+
+    for (const f of this.friendshipsCache.values()) {
+      if (f.status !== 'accepted') continue;
+      const isSender = f.senderId === selfId || f.senderName.toLowerCase() === selfName;
+      const isReceiver = f.receiverId === selfId || f.receiverName.toLowerCase() === selfName;
+
+      if (isSender) {
+        pardners.push({
+          pardnerId: f.receiverId,
+          pardnerName: f.receiverName,
+          friendship: f,
+        });
+      } else if (isReceiver) {
+        pardners.push({
+          pardnerId: f.senderId,
+          pardnerName: f.senderName,
+          friendship: f,
+        });
+      }
+    }
+    return pardners;
+  }
+
   private initRealtimeListener() {
     const path = 'friendships';
     try {

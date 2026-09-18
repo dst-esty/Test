@@ -17,17 +17,17 @@ import { ClaimDeedModal } from './components/ClaimDeedModal';
 import { ClaimStakedModal } from './components/ClaimStakedModal';
 import { RockDepotModal } from './components/RockDepotModal';
 import { TortillaFlatModal } from './components/TortillaFlatModal';
-import { MineShaftHUD } from './components/MineShaftHUD';
 import { GameOverModal } from './components/GameOverModal';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
 import { soundEngine } from './audio/soundEffects';
 import { westernMusic } from './audio/westernMusic';
 import { ClaimInfo, ClueItem, Landmark, MineStructureType, PlayerState, Vector3D, WeatherType, MineLayerData, GameOverDetails, MultiplayerPlayer, MultiplayerChatMessage, RoomDirection, WaterTableState, GraphicsQuality } from './types';
 import { MultiplayerHUD } from './components/MultiplayerHUD';
-import { ShaftSinkingGauge } from './components/ShaftSinkingGauge';
 import { ShaftSinkingStats } from './world/undergroundVoxels';
 import { multiplayer } from './multiplayer/multiplayerService';
+import { getTerrainHeight } from './world/terrain';
 import { Compass, BookOpen, Map as MapIcon, Sparkles, AlertCircle } from 'lucide-react';
+import { isMobileDevice } from './utils/device';
 
 export default function App() {
   // Player State
@@ -42,6 +42,7 @@ export default function App() {
     equippedTool: 'hands',
     ammo: 24,
     dynamite: 6,
+    woodPlanks: 6, // Starting seasoned timber stakes & firewood
     goldFound: 2.0, // 2 oz starting gold from prospecting
     blocksDug: 0,
     bullionBars: 0,
@@ -166,6 +167,22 @@ export default function App() {
     setTimeout(() => setBannerMessage(null), 4500);
   }, []);
 
+  // Prospector's Inspection Goggles: Toggles detailed subterranean strata & shaft HUD
+  const [areGogglesActive, setAreGogglesActive] = useState<boolean>(false);
+
+  const handleToggleGoggles = useCallback(() => {
+    setAreGogglesActive((prev) => {
+      const next = !prev;
+      soundEngine.playGogglesClick(next);
+      showBanner(
+        next
+          ? "🥽 Prospector's Inspection Goggles ON — Subterranean Strata Diagnostics Active [Press G to remove]"
+          : "🥽 Prospector's Inspection Goggles OFF — Clean Subterranean View Restored"
+      );
+      return next;
+    });
+  }, [showBanner]);
+
   // Graphics Quality & Frame Pacing Engine (Performance / Balanced / High)
   const [graphicsQuality, setGraphicsQuality] = useState<GraphicsQuality>(() => {
     if (typeof window !== 'undefined') {
@@ -173,9 +190,7 @@ export default function App() {
       if (saved && (saved === 'performance' || saved === 'balanced' || saved === 'high')) {
         return saved;
       }
-      const isMobile =
-        window.innerWidth <= 840 ||
-        /Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent);
+      const isMobile = isMobileDevice();
       return isMobile ? 'performance' : 'balanced';
     }
     return 'balanced';
@@ -288,6 +303,8 @@ export default function App() {
       showBanner("🔥 Frontier Campfire Equipped! Aim at ground & Left-Click to place [R to rotate, Esc to cancel].");
     } else if (type === 'prospector_camp') {
       showBanner("⛺ Prospector Outpost Camp Equipped! Aim at ground & Left-Click to pitch [R to rotate, Esc to cancel].");
+    } else if (type === 'frontier_torch') {
+      showBanner("🔥 Frontier Ground Torch Equipped! Aim at ground & Left-Click to drive stake into earth (place 3-4 along your trail/camp, Esc to finish).");
     }
   }, [showBanner]);
   const digHandlerRef = useRef<(() => void) | null>(null);
@@ -466,11 +483,14 @@ export default function App() {
       if (e.code === 'KeyH') {
         e.preventDefault();
         setIsHudVisible((prev) => !prev);
+      } else if (e.code === 'KeyG') {
+        e.preventDefault();
+        handleToggleGoggles();
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
+  }, [handleToggleGoggles]);
 
   // Calculate nearest landmark for Compass HUD
   const nearestLandmark = React.useMemo(() => {
@@ -564,10 +584,11 @@ export default function App() {
   // Enter the Lost Dutchman Mine
   const handleEnterMine = useCallback(() => {
     soundEngine.playDiscovery();
+    const mineY = getTerrainHeight(160, 110);
     setPlayerState((prev) => ({
       ...prev,
       isInsideMine: true,
-      position: { x: 160, y: 35, z: 132 },
+      position: { x: 160, y: mineY - 0.5, z: 132 },
     }));
 
     // Mark mine landmark and clue as discovered
@@ -680,12 +701,15 @@ export default function App() {
         } else {
           setPlayerState((p) => ({ ...p, equippedTool: 'builder' }));
         }
+      } else if (e.code === 'KeyG') {
+        e.preventDefault();
+        handleToggleGoggles();
       }
     };
 
     window.addEventListener('keydown', handleGlobalKey);
     return () => window.removeEventListener('keydown', handleGlobalKey);
-  }, []);
+  }, [handleToggleGoggles]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-stone-950 font-sans select-none">
@@ -835,20 +859,6 @@ export default function App() {
         onFpsUpdate={setCurrentFps}
       />
 
-      {/* Mini-Voxel Shaft Sinking & Bedrock Strata Gauge */}
-      {isHudVisible && (
-        <ShaftSinkingGauge
-          stats={shaftSinkingStats}
-          onStrikeVoxel={() => {
-            if (strikeVoxelHandlerRef.current) strikeVoxelHandlerRef.current();
-          }}
-          onPlaceTimber={() => {
-            if (placeTimberHandlerRef.current) placeTimberHandlerRef.current();
-          }}
-          equippedTool={playerState.equippedTool}
-        />
-      )}
-
       {/* Real-time Frontier Multiplayer HUD & Roster Modal */}
       <MultiplayerHUD
         onlinePlayers={onlinePlayers}
@@ -864,57 +874,6 @@ export default function App() {
         isOpen={isTelegraphOpen}
         onToggleOpen={(open) => {
           setIsTelegraphOpen(open);
-        }}
-      />
-
-      {/* Subterranean Mine Shaft & Strata HUD */}
-      <MineShaftHUD
-        isInsideMine={playerState.isInsideMine || currentMineLevel > 0}
-        currentLevel={currentMineLevel}
-        maxUnlockedLevel={maxUnlockedMineLevel}
-        layers={shaftLayers}
-        waterTable={waterTable}
-        oxygenPercent={oxygenPercent}
-        isSubmerged={isSubmerged}
-        onAscend={() => {
-          if (shaftTraverseHandlerRef.current) {
-            shaftTraverseHandlerRef.current(Math.max(0, currentMineLevel - 1));
-          }
-        }}
-        onDescend={() => {
-          if (shaftTraverseHandlerRef.current) {
-            shaftTraverseHandlerRef.current(Math.min(maxUnlockedMineLevel, currentMineLevel + 1));
-          }
-        }}
-        onExitToSurface={() => {
-          if (shaftExitHandlerRef.current) {
-            shaftExitHandlerRef.current();
-          }
-        }}
-        onSelectLevel={(lvl) => {
-          if (shaftTraverseHandlerRef.current) {
-            shaftTraverseHandlerRef.current(lvl);
-          }
-        }}
-        onDigDown={() => {
-          if (shaftDigHandlerRef.current) {
-            shaftDigHandlerRef.current();
-          }
-        }}
-        onExcavateRoom={(dir) => {
-          if (excavateRoomHandlerRef.current) {
-            excavateRoomHandlerRef.current(dir);
-          }
-        }}
-        onTimberRoom={(dir) => {
-          if (timberRoomHandlerRef.current) {
-            timberRoomHandlerRef.current(dir);
-          }
-        }}
-        onTogglePump={() => {
-          if (togglePumpHandlerRef.current) {
-            togglePumpHandlerRef.current();
-          }
         }}
       />
 
@@ -1024,7 +983,22 @@ export default function App() {
         graphicsQuality={graphicsQuality}
         fps={currentFps}
         onCycleGraphicsQuality={handleCycleGraphicsQuality}
+        areGogglesActive={areGogglesActive}
+        onToggleGoggles={handleToggleGoggles}
       />
+
+      {/* Prospector's Goggles Optical Vignette Lens */}
+      {areGogglesActive && (
+        <div
+          id="prospector-goggles-lens-overlay"
+          className="pointer-events-none fixed inset-0 z-20 shadow-[inset_0_0_120px_rgba(180,83,9,0.38)] border-[6px] border-amber-900/40 rounded-3xl transition-all duration-300"
+        >
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-amber-950/90 backdrop-blur-md border border-amber-500/70 rounded-full px-4 py-1 text-[11px] font-mono font-bold text-amber-200 flex items-center gap-2 shadow-2xl animate-fade-in">
+            <span className="animate-pulse">🥽</span>
+            <span>PROSPECTOR'S INSPECTION GOGGLES ACTIVE [G]</span>
+          </div>
+        </div>
+      )}
 
       {/* Welcome & Expedition Briefing Modal */}
       {!hasShownWelcome && (

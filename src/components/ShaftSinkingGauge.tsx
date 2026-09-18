@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShaftSinkingStats } from '../world/undergroundVoxels';
-import { Pickaxe, Shield, Sparkles, AlertCircle, ArrowDownCircle } from 'lucide-react';
+import { Pickaxe, Shield, Sparkles, AlertCircle, ArrowDownCircle, X } from 'lucide-react';
 
 interface ShaftSinkingGaugeProps {
   stats: ShaftSinkingStats | null;
@@ -15,7 +15,17 @@ export const ShaftSinkingGauge: React.FC<ShaftSinkingGaugeProps> = ({
   onPlaceTimber,
   equippedTool,
 }) => {
-  if (!stats) return null;
+  const [isDismissed, setIsDismissed] = useState(false);
+  const [lastLevel, setLastLevel] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (stats && stats.currentLevel !== lastLevel) {
+      setIsDismissed(false);
+      setLastLevel(stats.currentLevel);
+    }
+  }, [stats?.currentLevel, lastLevel]);
+
+  if (!stats || isDismissed) return null;
 
   const {
     currentLevel,
@@ -51,14 +61,23 @@ export const ShaftSinkingGauge: React.FC<ShaftSinkingGaugeProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-col items-end">
-            <div className="flex items-center gap-1 text-amber-200 font-mono font-bold text-xs">
-              <ArrowDownCircle className="w-3 h-3 text-amber-400" />
-              <span>-{currentDepth.toFixed(2)}m</span>
+          <div className="flex items-center gap-2">
+            <div className="flex flex-col items-end">
+              <div className="flex items-center gap-1 text-amber-200 font-mono font-bold text-xs">
+                <ArrowDownCircle className="w-3 h-3 text-amber-400" />
+                <span>-{currentDepth.toFixed(2)}m</span>
+              </div>
+              <span className="text-[9px] font-mono text-stone-400">
+                Breakthrough: -{targetDepth.toFixed(1)}m
+              </span>
             </div>
-            <span className="text-[9px] font-mono text-stone-400">
-              Breakthrough: -{targetDepth.toFixed(1)}m
-            </span>
+            <button
+              onClick={() => setIsDismissed(true)}
+              className="p-1 rounded-lg bg-stone-900/80 hover:bg-stone-800 text-stone-400 hover:text-amber-300 transition cursor-pointer border border-stone-800 hover:border-amber-700/60 ml-1"
+              title="Close Shaft Gauge"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
 

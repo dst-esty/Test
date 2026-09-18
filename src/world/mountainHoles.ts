@@ -18,6 +18,7 @@ export interface MountainHole {
   veinMesh?: THREE.Mesh;
   sillRubbleMesh?: THREE.Mesh;
   timberLintel?: THREE.Mesh;
+  timberSets?: THREE.Group[];
   interiorGlow?: THREE.PointLight;
 }
 
@@ -76,27 +77,93 @@ export class MountainHoleManager {
   }
 
   /**
-   * Raycasts directly against active mountain hole entrance meshes
+   * Checks if a 3D world coordinate is inside the carved corridor of any mountain adit.
+   * Returns information on whether the player is inside, the tunnel floor Y, and the hole instance.
    */
-  public raycastMountainHoles(raycaster: THREE.Raycaster, maxDist: number = 6.5): {
+  public isInsideMountainTunnel(
+    worldX: number,
+    worldY: number,
+    worldZ: number,
+    toleranceMargin: number = 0.5
+  ): { inside: boolean; floorY?: number; hole?: MountainHole; distFromEntrance?: number } {
+    const testPos = new THREE.Vector3(worldX, worldY, worldZ);
+    for (let i = 0; i < this.holes.length; i++) {
+      const h = this.holes[i];
+      // Quick bounding sphere check
+      const distToHole = testPos.distanceTo(h.position);
+      if (distToHole > h.depth + h.radius + 3.0) continue;
+
+      // Project test point into hole local space
+      // In local space:
+      // - (0,0,0) is entrance mouth
+      // - local +Z is outward facing away from mountain
+      // - local -Z is into the mountain tunnel (0 down to -depth)
+      const localP = testPos.clone().sub(h.position);
+      // Invert hole quaternion rotation to get local coordinates
+      const invQuat = h.group.quaternion.clone().invert();
+      localP.applyQuaternion(invQuat);
+
+      const z = localP.z;
+      // Along the tunnel bore: allow slight threshold outside entrance (+1.2m) down to beyond the back face (-depth - 0.5m)
+      if (z <= 1.2 && z >= -h.depth - 0.5) {
+        const halfWidth = Math.max(1.3, h.radius * 1.25) + toleranceMargin;
+        const isWithinWidth = Math.abs(localP.x) <= halfWidth;
+
+        // Vertical clearance: generous leeway from bedrock floor up to ceiling
+        const minLocalY = -h.radius * 1.4 - toleranceMargin;
+        const maxLocalY = h.radius * 1.4 + 1.2 + toleranceMargin;
+        const isWithinHeight = localP.y >= minLocalY && localP.y <= maxLocalY;
+
+        if (isWithinWidth && isWithinHeight) {
+          // Inside tunnel corridor! Calculate tunnel bedrock floor Y
+          // Floor in local space is at bottom sill: y ≈ -h.radius * 0.92
+          const localFloor = new THREE.Vector3(localP.x, -h.radius * 0.92, z);
+          localFloor.applyQuaternion(h.group.quaternion).add(h.position);
+
+          return {
+            inside: true,
+            floorY: localFloor.y,
+            hole: h,
+            distFromEntrance: Math.max(0, -z),
+          };
+        }
+      }
+    }
+    return { inside: false };
+  }
+
+  /**
+   * Raycasts directly against active mountain hole entrance and interior meshes
+   */
+  public raycastMountainHoles(raycaster: THREE.Raycaster, maxDist: number = 7.5): {
     hit: boolean;
     hole?: MountainHole;
     point?: THREE.Vector3;
     distance?: number;
+    isBackFace?: boolean;
   } {
     for (let i = 0; i < this.holes.length; i++) {
       const h = this.holes[i];
-      const dist = raycaster.ray.origin.distanceTo(h.position);
-      if (dist > maxDist + 1.0) continue;
+      // Test if ray origin or direction is near the hole entrance or tunnel line
+      const distToEntrance = raycaster.ray.origin.distanceTo(h.position);
+      if (distToEntrance > maxDist + h.depth + 2.0) continue;
 
-      // Test intersection against the hole's entry rim and cavity
+      // Test intersection against the hole's hierarchy (rim, cavity walls, back wall, vein)
       const hits = raycaster.intersectObject(h.group, true);
       if (hits.length > 0 && hits[0].distance <= maxDist) {
+        const hitPt = hits[0].point;
+        // Check if hit is near the deep working face
+        const localHit = hitPt.clone().sub(h.position);
+        const invQuat = h.group.quaternion.clone().invert();
+        localHit.applyQuaternion(invQuat);
+        const isBackFace = localHit.z <= -h.depth * 0.75;
+
         return {
           hit: true,
           hole: h,
-          point: hits[0].point,
+          point: hitPt,
           distance: hits[0].distance,
+          isBackFace,
         };
       }
     }
@@ -122,17 +189,34 @@ export class MountainHoleManager {
     }
 
     // Check if an existing hole is close enough to be deepened
-    const existing = this.findNearbyHole(hitPoint, 1.25);
+    // Check both entrance proximity and along tunnel bore proximity
+    let existing = this.findNearbyHole(hitPoint, 1.6);
+    if (!existing) {
+      const insideCheck = this.isInsideMountainTunnel(hitPoint.x, hitPoint.y, hitPoint.z, 0.8);
+      if (insideCheck.inside && insideCheck.hole) {
+        existing = insideCheck.hole;
+      }
+    }
+
     const isPickaxe = tool === 'pickaxe';
     const isDynamite = tool === 'dynamite';
-
-    const baseDepthIncrement = isDynamite ? 1.2 : isPickaxe ? 0.42 : 0.22;
-    const baseRadiusIncrement = isDynamite ? 0.35 : isPickaxe ? 0.08 : 0.04;
+    // Walk-in adit scaling: pickaxe penetrates ~0.45m - 0.65m per swing; dynamite blasts ~1.5m - 2.2m!
+    const baseDepthIncrement = isDynamite ? 1.8 : isPickaxe ? 0.55 : 0.28;
+    const baseRadiusIncrement = isDynamite ? 0.35 : isPickaxe ? 0.09 : 0.04;
 
     if (existing) {
       existing.strikes += 1;
-      existing.depth = Math.min(3.2, existing.depth + baseDepthIncrement);
-      existing.radius = Math.min(1.35, existing.radius + baseRadiusIncrement);
+      // Auto-correct orientation if normal was previously inverted or misaligned
+      if (normal.lengthSq() > 0.01 && existing.normal.dot(normal) < 0.2) {
+        existing.normal.copy(normal);
+        const defaultNormal = new THREE.Vector3(0, 0, 1);
+        const quat = new THREE.Quaternion().setFromUnitVectors(defaultNormal, normal);
+        existing.group.quaternion.copy(quat);
+      }
+      // Max depth up to 25.0m into the mountain bedrock!
+      existing.depth = Math.min(25.0, existing.depth + baseDepthIncrement);
+      // Radius expands to a walk-in adit passage (~1.4m - 1.85m radius = ~2.8m - 3.7m wide tunnel)
+      existing.radius = Math.min(1.85, Math.max(1.15, existing.radius + baseRadiusIncrement));
 
       // Rebuild 3D visual geometry to reflect the newly deepened excavation
       this.rebuildHoleVisuals(existing);
@@ -140,25 +224,32 @@ export class MountainHoleManager {
       // Gold discovery calculations
       let goldAwarded = 0;
       let msg = '';
-      if (existing.depth >= 1.0 && !existing.hasExposedGoldVein && Math.random() < 0.65) {
+      const roll = Math.random();
+
+      if (existing.depth >= 1.2 && !existing.hasExposedGoldVein && roll < 0.7) {
         existing.hasExposedGoldVein = true;
-        goldAwarded = 2 + Math.floor(Math.random() * 3);
+        goldAwarded = 2 + Math.floor(Math.random() * 4);
         existing.goldAwardedTotal += goldAwarded;
         this.rebuildHoleVisuals(existing);
         msg = `⛏️ BORED DEEPER INTO MOUNTAIN (-${existing.depth.toFixed(1)}m)! Struck high-grade Gold Quartz Vein in bedrock! (+${goldAwarded} oz Gold)`;
-      } else if (existing.hasExposedGoldVein && Math.random() < 0.45) {
-        goldAwarded = 1 + Math.floor(Math.random() * 2);
+      } else if (existing.hasExposedGoldVein && roll < 0.5) {
+        goldAwarded = 1 + Math.floor(Math.random() * 3);
         existing.goldAwardedTotal += goldAwarded;
-        msg = `⛏️ Chiseled Mountain Adit (-${existing.depth.toFixed(1)}m): Extracted +${goldAwarded} oz Gold Quartz from cavity!`;
-      } else if (existing.depth >= 2.0) {
-        msg = `⛏️ Driven Mountain Drift Tunnel to -${existing.depth.toFixed(1)}m! Exposed solid metamorphic mountain core (+2 Quarry Stone)`;
+        msg = `⛏️ Chiseled Mountain Adit Face (-${existing.depth.toFixed(1)}m): Extracted +${goldAwarded} oz Gold Quartz from cavity!`;
+      } else if (existing.depth >= 6.0 && roll < 0.4) {
+        // Deep mountain bonanza strike!
+        goldAwarded = 3 + Math.floor(Math.random() * 5);
+        existing.goldAwardedTotal += goldAwarded;
+        msg = `✨ BONANZA VEIN BREACH at -${existing.depth.toFixed(1)}m deep inside mountain! Extracted +${goldAwarded} oz Native Electrum & Gold!`;
+      } else if (existing.depth >= 3.0) {
+        msg = `⛏️ Driven Mountain Drift Tunnel to -${existing.depth.toFixed(1)}m! Erected timber support sets inside adit (+2 Quarry Stone)`;
       } else {
-        msg = `⛏️ Carved Mountain Hole to -${existing.depth.toFixed(1)}m deep! (+2 Building Stone)`;
+        msg = `⛏️ Carved Mountain Adit to -${existing.depth.toFixed(1)}m deep! (+2 Building Stone)`;
       }
 
       if (this.dustParticleSystem) {
         const mat = existing.hasExposedGoldVein ? 'quartz_gold' : rockType;
-        const mult = isDynamite ? 2.4 : isPickaxe ? 1.0 + existing.depth * 0.2 : 0.8;
+        const mult = isDynamite ? 2.8 : isPickaxe ? 1.0 + Math.min(2.0, existing.depth * 0.15) : 0.8;
         this.dustParticleSystem.triggerMountainStrike(existing.position, normal, mat, mult);
       }
 
@@ -167,7 +258,7 @@ export class MountainHoleManager {
         isNew: false,
         depthReached: existing.depth,
         goldAwarded,
-        rocksAwarded: isDynamite ? 4 : 2,
+        rocksAwarded: isDynamite ? 5 : 2,
         message: msg,
         hitPoint: existing.position.clone(),
         debrisType: rockType.includes('sand') ? 'sandstone' : 'granite',
@@ -311,13 +402,17 @@ export class MountainHoleManager {
     hole.rimMesh = rimMesh;
 
     // 2. Excavated Concave Interior Cavity (Deep into the Mountain along -Z)
-    // A tapering, rough-hewn polygonal hollow penetrating into the mountain bedrock
+    // For shallow gouges (< 2m), it tapers organically; for walk-in adits (>= 2m), it forms a full navigable tunnel bore
+    const isAdit = D >= 2.0;
+    const rearR = isAdit ? Math.max(R * 0.88, R - 0.18) : R * 0.62;
+    const heightSegs = Math.max(4, Math.min(24, Math.floor(D * 1.6)));
+
     const cavityGeo = new THREE.CylinderGeometry(
-      R * 0.96,   // top/entrance radius (at z = 0)
-      R * 0.62,   // bottom/interior rear radius (at z = -D)
+      R * 0.98,   // top/entrance radius (at z = 0)
+      rearR,      // interior rear radius (at z = -D)
       D,          // length of excavated bore
-      12,         // radial segments
-      4,          // height segments
+      14,         // radial segments
+      heightSegs, // height segments along the tunnel
       false       // open-ended
     );
 
@@ -325,24 +420,30 @@ export class MountainHoleManager {
     cavityGeo.rotateX(Math.PI / 2);
     cavityGeo.translate(0, 0, -D * 0.5);
 
-    // Perturb vertices for organic hand-pickaxe chisel facets
+    // Perturb vertices for organic hand-pickaxe chisel facets, keeping the floor flat for easy walking
     const posAttr = cavityGeo.attributes.position;
     for (let i = 0; i < posAttr.count; i++) {
       const z = posAttr.getZ(i);
+      const y = posAttr.getY(i);
       if (z < -0.05) {
-        const noise = (Math.sin(posAttr.getX(i) * 12 + z * 8) + Math.cos(posAttr.getY(i) * 14)) * 0.04 * R;
-        posAttr.setX(i, posAttr.getX(i) + noise);
-        posAttr.setY(i, posAttr.getY(i) + noise);
+        // Flatten the bottom floor slightly so prospectors have stable footing
+        if (y < -R * 0.55 && isAdit) {
+          posAttr.setY(i, Math.max(-R * 0.92, y * 0.88));
+        } else {
+          const noise = (Math.sin(posAttr.getX(i) * 12 + z * 6) + Math.cos(posAttr.getY(i) * 14)) * 0.04 * R;
+          posAttr.setX(i, posAttr.getX(i) + noise);
+          posAttr.setY(i, posAttr.getY(i) + noise);
+        }
       }
     }
     cavityGeo.computeVertexNormals();
 
-    // Dark interior rock material with high ambient occlusion and deep shadow
-    const darkInteriorColor = new THREE.Color(hole.rockColor).multiplyScalar(0.42);
+    // Realistic interior rock material that catches lantern light with rocky texture
+    const darkInteriorColor = new THREE.Color(hole.rockColor).multiplyScalar(0.68);
     const cavityMat = new THREE.MeshStandardMaterial({
       color: darkInteriorColor,
-      roughness: 0.98,
-      metalness: 0.08,
+      roughness: 0.88,
+      metalness: 0.05,
       side: THREE.DoubleSide, // Allows viewing inside the carved cave
       flatShading: true,
     });
@@ -351,8 +452,8 @@ export class MountainHoleManager {
     hole.group.add(cavityMesh);
     hole.cavityMesh = cavityMesh;
 
-    // 2b. Solid Back Wall / Bedrock Face of the Excavation Cavity
-    const backWallGeo = new THREE.CircleGeometry(R * 0.64, 12);
+    // 2b. Solid Back Wall / Bedrock Face of the Excavation Cavity (Working Face)
+    const backWallGeo = new THREE.CircleGeometry(rearR * 1.02, 14);
     // Perturb back wall vertices so it looks like rough fractured granite
     const backPos = backWallGeo.attributes.position;
     for (let i = 0; i < backPos.count; i++) {
@@ -368,8 +469,8 @@ export class MountainHoleManager {
     if (hole.hasExposedGoldVein) {
       const veinGroup = new THREE.Group();
 
-      // Quartz seam band
-      const quartzGeo = new THREE.BoxGeometry(R * 0.85, R * 0.28, 0.12);
+      // Quartz seam band across working face
+      const quartzGeo = new THREE.BoxGeometry(rearR * 1.1, rearR * 0.32, 0.14);
       const quartzMat = new THREE.MeshStandardMaterial({
         color: 0xefede8,
         roughness: 0.38,
@@ -377,7 +478,7 @@ export class MountainHoleManager {
         bumpScale: 0.08,
       });
       const quartzMesh = new THREE.Mesh(quartzGeo, quartzMat);
-      quartzMesh.position.set(0, 0, -D * 0.94);
+      quartzMesh.position.set(0, 0, -D * 0.96);
       quartzMesh.rotation.z = 0.45;
       veinGroup.add(quartzMesh);
 
@@ -390,13 +491,13 @@ export class MountainHoleManager {
         emissiveIntensity: 0.35,
       });
 
-      const nuggetCount = Math.min(6, 2 + Math.floor(hole.depth * 1.5));
+      const nuggetCount = Math.min(8, 2 + Math.floor(hole.depth * 1.4));
       for (let n = 0; n < nuggetCount; n++) {
-        const nGeo = new THREE.DodecahedronGeometry(0.045 + Math.random() * 0.035, 0);
+        const nGeo = new THREE.DodecahedronGeometry(0.05 + Math.random() * 0.04, 0);
         const nMesh = new THREE.Mesh(nGeo, goldMat);
-        const offsetX = (n - (nuggetCount - 1) * 0.5) * (R * 0.14) + (Math.random() - 0.5) * 0.04;
-        const offsetY = offsetX * Math.tan(0.45) + (Math.random() - 0.5) * 0.04;
-        nMesh.position.set(offsetX, offsetY, -D * 0.92 + (Math.random() - 0.5) * 0.02);
+        const offsetX = (n - (nuggetCount - 1) * 0.5) * (rearR * 0.18) + (Math.random() - 0.5) * 0.05;
+        const offsetY = offsetX * Math.tan(0.45) + (Math.random() - 0.5) * 0.05;
+        nMesh.position.set(offsetX, offsetY, -D * 0.94 + (Math.random() - 0.5) * 0.02);
         nMesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
         veinGroup.add(nMesh);
       }
@@ -407,7 +508,7 @@ export class MountainHoleManager {
 
     // 4. Blasted Chisel Rubble Sill at the Bottom of the Opening
     const rubbleGroup = new THREE.Group();
-    const rubbleCount = Math.min(8, 3 + hole.strikes);
+    const rubbleCount = Math.min(10, 3 + hole.strikes);
     const rubbleMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(hole.rockColor).offsetHSL(0, 0, 0.04),
       roughness: 0.95,
@@ -416,7 +517,7 @@ export class MountainHoleManager {
     });
 
     for (let r = 0; r < rubbleCount; r++) {
-      const stoneGeo = new THREE.DodecahedronGeometry(0.04 + Math.random() * 0.05, 0);
+      const stoneGeo = new THREE.DodecahedronGeometry(0.04 + Math.random() * 0.06, 0);
       const stoneMesh = new THREE.Mesh(stoneGeo, rubbleMat);
       const angle = -Math.PI * 0.5 + (Math.random() - 0.5) * 0.8;
       const dist = R * (0.8 + Math.random() * 0.35);
@@ -430,7 +531,8 @@ export class MountainHoleManager {
     }
     hole.group.add(rubbleGroup);
 
-    // 5. Timber Lintel Prop (for deep adit excavations >= 1.2m)
+    // 5. Timber Support Architecture (Lintels, Portals, and Square-Set Drift Frames)
+    hole.timberSets = [];
     if (hole.depth >= 1.2) {
       const timberMat = new THREE.MeshStandardMaterial({
         color: 0x5c3d24,
@@ -438,25 +540,105 @@ export class MountainHoleManager {
         metalness: 0.02,
       });
 
-      // Split header beam across upper arch
-      const beamGeo = new THREE.BoxGeometry(R * 1.55, 0.12, 0.14);
+      // Entrance Portal Header Beam across upper arch
+      const beamGeo = new THREE.BoxGeometry(R * 1.55, 0.14, 0.16);
       const beamMesh = new THREE.Mesh(beamGeo, timberMat);
       beamMesh.position.set(0, R * 0.72, 0.02);
       hole.group.add(beamMesh);
 
-      // Wooden wedge cleats
-      const wedgeGeo = new THREE.BoxGeometry(0.08, 0.08, 0.15);
-      const wedgeL = new THREE.Mesh(wedgeGeo, timberMat);
-      wedgeL.position.set(-R * 0.65, R * 0.76, 0.03);
-      wedgeL.rotation.z = -0.2;
-      hole.group.add(wedgeL);
+      // Entrance wooden side wedge cleats / vertical prop posts
+      const wedgeGeo = new THREE.BoxGeometry(0.12, R * 1.1, 0.14);
+      const postL = new THREE.Mesh(wedgeGeo, timberMat);
+      postL.position.set(-R * 0.68, R * 0.15, 0.02);
+      hole.group.add(postL);
 
-      const wedgeR = new THREE.Mesh(wedgeGeo, timberMat);
-      wedgeR.position.set(R * 0.65, R * 0.76, 0.03);
-      wedgeR.rotation.z = 0.2;
-      hole.group.add(wedgeR);
-
+      const postR = new THREE.Mesh(wedgeGeo, timberMat);
+      postR.position.set(R * 0.68, R * 0.15, 0.02);
+      hole.group.add(postR);
       hole.timberLintel = beamMesh;
+
+      // 5b. Internal Drift Timber Sets (every ~2.5m along the tunnel depth)
+      if (hole.depth >= 2.8) {
+        const numSets = Math.floor((hole.depth - 0.8) / 2.5);
+        for (let s = 1; s <= numSets; s++) {
+          const setDist = s * 2.5;
+          if (setDist > hole.depth - 0.6) break;
+
+          const setGroup = new THREE.Group();
+          setGroup.position.set(0, 0, -setDist);
+
+          // Cap log
+          const capLog = new THREE.Mesh(new THREE.BoxGeometry(R * 1.45, 0.13, 0.14), timberMat);
+          capLog.position.set(0, R * 0.68, 0);
+          setGroup.add(capLog);
+
+          // Left leg post
+          const legL = new THREE.Mesh(new THREE.BoxGeometry(0.12, R * 1.35, 0.13), timberMat);
+          legL.position.set(-R * 0.64, 0, 0);
+          legL.rotation.z = -0.06;
+          setGroup.add(legL);
+
+          // Right leg post
+          const legR = new THREE.Mesh(new THREE.BoxGeometry(0.12, R * 1.35, 0.13), timberMat);
+          legR.position.set(R * 0.64, 0, 0);
+          legR.rotation.z = 0.06;
+          setGroup.add(legR);
+
+          // Spreader sill at bottom
+          const sill = new THREE.Mesh(new THREE.BoxGeometry(R * 1.35, 0.08, 0.14), timberMat);
+          sill.position.set(0, -R * 0.72, 0);
+          setGroup.add(sill);
+
+          hole.group.add(setGroup);
+          hole.timberSets.push(setGroup);
+        }
+      }
+    }
+
+    // 6. Portal & Drift Adit Illumination (Entrance Lantern & Interior Corridor Lights)
+    if (hole.depth >= 1.2) {
+      // Entrance arch lantern: warms up the portal mouth and illuminates the entrance area
+      const entranceLight = new THREE.PointLight(0xffb555, 1.8, Math.max(10.0, R * 8.0));
+      entranceLight.position.set(R * 0.4, R * 0.65, 0.2);
+      hole.group.add(entranceLight);
+
+      const entranceLantern = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.08, 0.18, 6),
+        new THREE.MeshStandardMaterial({
+          color: 0x1c1917,
+          metalness: 0.8,
+          roughness: 0.2,
+          emissive: 0xff9922,
+          emissiveIntensity: 0.8,
+        })
+      );
+      entranceLantern.position.set(R * 0.4, R * 0.65, 0.2);
+      hole.group.add(entranceLantern);
+
+      // Deep adit corridor lighting (spaced every 3.5m down the drift and at the working face)
+      if (hole.depth >= 2.5) {
+        const lightSteps = Math.max(1, Math.floor(hole.depth / 3.5));
+        for (let l = 1; l <= lightSteps; l++) {
+          const lz = -Math.min(hole.depth - 0.7, l * 3.5);
+          const corridorLight = new THREE.PointLight(0xffaa44, 1.6, 9.0);
+          corridorLight.position.set(0, R * 0.35, lz);
+          hole.group.add(corridorLight);
+
+          // Hanging miner's lantern fixture
+          const lanternMesh = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.05, 0.07, 0.16, 6),
+            new THREE.MeshStandardMaterial({
+              color: 0x222222,
+              metalness: 0.9,
+              roughness: 0.3,
+              emissive: 0xff8811,
+              emissiveIntensity: 0.75,
+            })
+          );
+          lanternMesh.position.set(R * 0.42, R * 0.45, lz);
+          hole.group.add(lanternMesh);
+        }
+      }
     }
   }
 

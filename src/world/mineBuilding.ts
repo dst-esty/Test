@@ -78,6 +78,16 @@ export const STRUCTURE_BLUEPRINTS: Record<MineStructureType, StructureBlueprint>
     dimensions: { width: 4.8, height: 2.8, depth: 4.8 },
     benefit: 'Wilderness forward expedition base with weather shelter, safe overnight sleep spot, and campfire.',
   },
+  frontier_torch: {
+    type: 'frontier_torch',
+    name: 'Frontier Ground Torch',
+    description: 'Old West pine stake torch driven into the earth with pitch-soaked burlap, glowing coals, and beautiful warm flickering firelight.',
+    goldCost: 0,
+    rockCost: 0,
+    woodCost: 1,
+    dimensions: { width: 0.6, height: 2.2, depth: 0.6 },
+    benefit: 'Stakes into the earth like a tiki torch to illuminate campsites, claim borders, dark trails, and mine tunnels with warm firelight.',
+  },
 };
 
 export class MineBuildingSystem {
@@ -106,6 +116,18 @@ export class MineBuildingSystem {
       ashBedMat: THREE.MeshStandardMaterial;
       flames: THREE.Group;
       isLit: boolean;
+    }
+  > = new Map();
+  private torchNodes: Map<
+    string,
+    {
+      light: THREE.PointLight;
+      flameGroup: THREE.Group;
+      emberMat: THREE.MeshStandardMaterial;
+      haloMesh?: THREE.Mesh;
+      sparkPositions?: Float32Array;
+      sparkGeometry?: THREE.BufferGeometry;
+      seed: number;
     }
   > = new Map();
 
@@ -900,6 +922,9 @@ export class MineBuildingSystem {
       case 'prospector_camp':
         mesh = this.createProspectorCampMesh(structure);
         break;
+      case 'frontier_torch':
+        mesh = this.createFrontierTorchMesh(structure);
+        break;
     }
 
     mesh.position.set(structure.position.x, structure.position.y, structure.position.z);
@@ -999,116 +1024,409 @@ export class MineBuildingSystem {
     lanternLight.position.set(0, 3.6, 0.2);
     group.add(lanternLight);
 
-    // Dark subterranean void plane
+    // Dark tunnel interior lining (walls, ceiling, floor) from entrance to back
+    const tunnelLiningMat = new THREE.MeshBasicMaterial({ color: 0x050403, side: THREE.BackSide });
+    const tunnelLining = new THREE.Mesh(
+      new THREE.BoxGeometry(3.6, 4.2, 5.8),
+      tunnelLiningMat
+    );
+    tunnelLining.position.set(0, 2.1, -2.9);
+    group.add(tunnelLining);
+
+    // Dark subterranean void plane at deepest end of adit
     const voidPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(3.6, 4.2),
-      new THREE.MeshBasicMaterial({ color: 0x050403, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide })
     );
-    voidPlane.position.set(0, 2.1, -5.6);
+    voidPlane.position.set(0, 2.1, -5.8);
     group.add(voidPlane);
+
+    // Entrance shadow falloff plane (darkens interior depth)
+    const shadowPortal = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.4, 4.0),
+      new THREE.MeshBasicMaterial({
+        color: 0x040302,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.88,
+      })
+    );
+    shadowPortal.position.set(0, 2.1, -0.6);
+    group.add(shadowPortal);
 
     return group;
   }
 
-  // Structure 2: Shaft Headframe & Hoist Tower
+  // Structure 2: Fully Built-Out 1880s Shaft Headframe & Hoist Tower (Gallows Frame)
   private createHeadframeMesh(_structure: BuiltStructure): THREE.Group {
     const group = new THREE.Group();
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x422d1b, roughness: 0.9 });
-    const ironMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.85, roughness: 0.4 });
-
-    // 4 Inclined Timber Legs (A-frame tower ~7.5m high)
-    const legGeo = new THREE.BoxGeometry(0.4, 7.8, 0.4);
-    const legPositions = [
-      { x: -1.6, z: -1.6, rotZ: -0.12, rotX: -0.12 },
-      { x: 1.6, z: -1.6, rotZ: 0.12, rotX: -0.12 },
-      { x: 1.6, z: 1.6, rotZ: 0.12, rotX: 0.12 },
-      { x: -1.6, z: 1.6, rotZ: -0.12, rotX: 0.12 },
-    ];
-
-    legPositions.forEach((l) => {
-      const leg = new THREE.Mesh(legGeo, woodMat);
-      leg.position.set(l.x, 3.8, l.z);
-      leg.rotation.z = l.rotZ;
-      leg.rotation.x = l.rotX;
-      leg.castShadow = true;
-      group.add(leg);
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0x3d2716, roughness: 0.92 });
+    const altWoodMat = new THREE.MeshStandardMaterial({ color: 0x4a3220, roughness: 0.90 });
+    const darkTimberMat = new THREE.MeshStandardMaterial({ color: 0x24180e, roughness: 0.95 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.85, roughness: 0.35 });
+    const rustTinMat = new THREE.MeshStandardMaterial({ color: 0x543725, metalness: 0.5, roughness: 0.75 });
+    const goldOreMat = new THREE.MeshStandardMaterial({
+      color: 0xffd700,
+      metalness: 0.9,
+      roughness: 0.25,
+      emissive: 0x664400,
+      emissiveIntensity: 0.6,
     });
+    const quartzMat = new THREE.MeshStandardMaterial({ color: 0xddd5c4, roughness: 0.45 });
 
-    // Horizontal & X Cross-bracing timbers
-    [2.2, 4.5, 6.8].forEach((h) => {
-      const w = 3.6 - (h / 7.8) * 1.6;
-      const braceX1 = new THREE.Mesh(new THREE.BoxGeometry(w, 0.25, 0.25), woodMat);
-      braceX1.position.set(0, h, -w / 2);
-      group.add(braceX1);
+    const gallowsHeight = 7.4;
 
-      const braceX2 = new THREE.Mesh(new THREE.BoxGeometry(w, 0.25, 0.25), woodMat);
-      braceX2.position.set(0, h, w / 2);
-      group.add(braceX2);
-
-      const braceZ1 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, w), woodMat);
-      braceZ1.position.set(-w / 2, h, 0);
-      group.add(braceZ1);
-
-      const braceZ2 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, w), woodMat);
-      braceZ2.position.set(w / 2, h, 0);
-      group.add(braceZ2);
-    });
-
-    // Top Sheave Wheel Housing & Rotating Iron Pulley
-    const topCap = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.4, 1.8), woodMat);
-    topCap.position.y = 7.4;
-    group.add(topCap);
-
-    const sheaveWheel = new THREE.Mesh(
-      new THREE.TorusGeometry(0.85, 0.09, 8, 24),
-      ironMat
+    // 1. Pit Mouth Void (Inky Black Depth Void)
+    const voidBox = new THREE.Mesh(
+      new THREE.BoxGeometry(3.2, 16.0, 3.2),
+      new THREE.MeshBasicMaterial({ color: 0x020101, side: THREE.BackSide })
     );
-    sheaveWheel.position.set(0, 8.2, 0);
-    sheaveWheel.rotation.y = Math.PI / 2;
-    sheaveWheel.castShadow = true;
-    group.add(sheaveWheel);
-    this.sheaveWheels.push(sheaveWheel);
+    voidBox.position.set(0, -8.0, 0);
+    group.add(voidBox);
 
-    // Steel Hoist Cable
-    const cable = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.02, 0.02, 6.5, 4),
-      ironMat
+    const voidFloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.2, 3.2),
+      new THREE.MeshBasicMaterial({ color: 0x000000 })
     );
-    cable.position.set(0, 4.8, 0.5);
-    group.add(cable);
+    voidFloor.rotation.x = -Math.PI / 2;
+    voidFloor.position.set(0, -15.8, 0);
+    group.add(voidFloor);
 
-    // Heavy Timber & Iron Ore Bucket
-    const bucket = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.55, 0.45, 0.9, 10),
-      ironMat
-    );
-    bucket.position.set(0, 1.5, 0.5);
-    bucket.castShadow = true;
-    group.add(bucket);
-
-    // Raw quartz gold ore chunks in the bucket
-    const goldOreInBucket = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(0.35, 0),
-      new THREE.MeshStandardMaterial({
-        color: 0xffd700,
-        metalness: 0.9,
-        roughness: 0.25,
-        emissive: 0x664400,
-        emissiveIntensity: 0.5,
+    // Vignette shadow collar at mouth
+    const collarShadow = new THREE.Mesh(
+      new THREE.RingGeometry(1.2, 1.8, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0x040302,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.94,
       })
     );
-    goldOreInBucket.position.set(0, 1.9, 0.5);
-    group.add(goldOreInBucket);
+    collarShadow.rotation.x = -Math.PI / 2;
+    collarShadow.position.set(0, 0.05, 0);
+    group.add(collarShadow);
 
-    // Ground Winch Drum & Hand Crank
-    const winchDrum = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1.2, 8), woodMat);
-    winchDrum.rotation.z = Math.PI / 2;
-    winchDrum.position.set(0, 0.8, -1.2);
-    group.add(winchDrum);
+    // 2. Foundation Sills & Staging Platform Decking
+    const sillThickness = 0.44;
+    [-2.4, 2.4].forEach((sx) => {
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(sillThickness, sillThickness, 5.8), darkTimberMat);
+      sill.position.set(sx, 0.22, 0);
+      sill.castShadow = true;
+      group.add(sill);
+    });
+    [-2.4, 2.4].forEach((sz) => {
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(5.8, sillThickness, sillThickness), darkTimberMat);
+      sill.position.set(0, 0.22, sz);
+      sill.castShadow = true;
+      group.add(sill);
+    });
 
-    const crankHandle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.6, 0.08), ironMat);
-    crankHandle.position.set(0.65, 0.9, -1.2);
-    group.add(crankHandle);
+    // Staging platform planks
+    for (let px = -2.4; px <= 2.4; px += 0.28) {
+      if (Math.abs(px) < 1.6) {
+        [-2.0, 2.0].forEach((pz) => {
+          const plank = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.09, 0.9), altWoodMat);
+          plank.position.set(px, 0.26, pz);
+          group.add(plank);
+        });
+      } else {
+        const fullPlank = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.09, 4.8), altWoodMat);
+        fullPlank.position.set(px, 0.26, 0);
+        group.add(fullPlank);
+      }
+    }
+
+    // Safety Coaming Curb around the pit rim (0.35m high)
+    [-1.7, 1.7].forEach((cz) => {
+      const curb = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.35, 0.18), woodMat);
+      curb.position.set(0, 0.42, cz);
+      group.add(curb);
+    });
+    [-1.7, 1.7].forEach((cx) => {
+      const curb = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.35, 3.6), woodMat);
+      curb.position.set(cx, 0.42, 0);
+      group.add(curb);
+    });
+
+    // Safety Handrails
+    [-2.4, 2.4].forEach((rx) => {
+      [-2.0, 0, 2.0].forEach((rz) => {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.1, 0.12), woodMat);
+        post.position.set(rx, 0.8, rz);
+        group.add(post);
+      });
+      const topRail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 4.4), woodMat);
+      topRail.position.set(rx, 1.3, 0);
+      group.add(topRail);
+    });
+
+    // 3. 4 Main Incline Gallows Columns (12"x12" squared pine timber columns)
+    const legGeo = new THREE.BoxGeometry(0.38, gallowsHeight * 1.05, 0.38);
+    const legBaseX = 1.85;
+    const legBaseZ = 1.45;
+    const legTopX = 1.0;
+
+    [
+      { bx: -legBaseX, bz: -legBaseZ, tx: -legTopX, tz: 0 },
+      { bx: legBaseX, bz: -legBaseZ, tx: legTopX, tz: 0 },
+      { bx: legBaseX, bz: legBaseZ, tx: legTopX, tz: 0 },
+      { bx: -legBaseX, bz: legBaseZ, tx: -legTopX, tz: 0 },
+    ].forEach((c) => {
+      const leg = new THREE.Mesh(legGeo, darkTimberMat);
+      leg.position.set((c.bx + c.tx) / 2, gallowsHeight / 2, (c.bz + c.tz) / 2);
+      const angleX = (c.tx - c.bx) / gallowsHeight;
+      const angleZ = (c.tz - c.bz) / gallowsHeight;
+      leg.rotation.set(angleZ, 0, -angleX);
+      leg.castShadow = true;
+      group.add(leg);
+
+      const footPlate = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.25, 0.55), ironMat);
+      footPlate.position.set(c.bx, 0.35, c.bz);
+      group.add(footPlate);
+    });
+
+    // 4. Iconic Diagonal Backstays (Angled Rear Thrust Braces)
+    const backstayGeo = new THREE.BoxGeometry(0.38, 8.2, 0.38);
+    [-1.6, 1.6].forEach((bsx) => {
+      const backstay = new THREE.Mesh(backstayGeo, darkTimberMat);
+      backstay.position.set(bsx * 0.85, gallowsHeight * 0.48, -2.3);
+      backstay.rotation.x = -0.58;
+      backstay.castShadow = true;
+      group.add(backstay);
+
+      const rearFoot = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.3, 0.6), ironMat);
+      rearFoot.position.set(bsx * 1.15, 0.35, -4.4);
+      group.add(rearFoot);
+    });
+
+    const backstayCrossGirt = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.28, 0.28), woodMat);
+    backstayCrossGirt.position.set(0, 3.4, -2.4);
+    group.add(backstayCrossGirt);
+
+    // Diagonal Braces between backstays
+    [-1, 1].forEach((dir) => {
+      const bsDiag = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.6, 0.18), woodMat);
+      bsDiag.position.set(0, 2.4, -3.1);
+      bsDiag.rotation.set(-0.58, 0, dir * 0.45);
+      group.add(bsDiag);
+    });
+
+    // Tension Rods with Turnbuckles
+    [-1.15, 1.15].forEach((tx) => {
+      const tieRod = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 3.4, 6), ironMat);
+      tieRod.rotation.x = Math.PI / 2;
+      tieRod.position.set(tx, 4.0, -1.3);
+      group.add(tieRod);
+
+      const turnbuckle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.32, 6), ironMat);
+      turnbuckle.rotation.x = Math.PI / 2;
+      turnbuckle.position.set(tx, 4.0, -1.3);
+      group.add(turnbuckle);
+    });
+
+    // 5. 3 Tiers of Horizontal Collar Girts & Flank "X" Bracing
+    const tiers = [
+      { y: 2.3, wX: 3.3, wZ: 2.4, beamThick: 0.28 },
+      { y: 4.4, wX: 2.6, wZ: 1.8, beamThick: 0.26 },
+      { y: 6.2, wX: 2.2, wZ: 1.4, beamThick: 0.24 },
+    ];
+    tiers.forEach((tier) => {
+      [-tier.wZ / 2, tier.wZ / 2].forEach((gz) => {
+        const girtX = new THREE.Mesh(new THREE.BoxGeometry(tier.wX, tier.beamThick, tier.beamThick), woodMat);
+        girtX.position.set(0, tier.y, gz);
+        group.add(girtX);
+      });
+      [-tier.wX / 2, tier.wX / 2].forEach((gx) => {
+        const girtZ = new THREE.Mesh(new THREE.BoxGeometry(tier.beamThick, tier.beamThick, tier.wZ), woodMat);
+        girtZ.position.set(gx, tier.y, 0);
+        group.add(girtZ);
+      });
+    });
+
+    [-1, 1].forEach((side) => {
+      const sideX = side * 1.4;
+      [-1, 1].forEach((dir) => {
+        const brace = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.8, 0.18), woodMat);
+        brace.position.set(sideX, 3.3, 0);
+        brace.rotation.x = dir * 0.48;
+        group.add(brace);
+      });
+      [-1, 1].forEach((dir) => {
+        const brace = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.5, 0.16), woodMat);
+        brace.position.set(sideX * 0.85, 5.3, 0);
+        brace.rotation.x = dir * 0.46;
+        group.add(brace);
+      });
+    });
+
+    // 6. Top Crown Head Beams & Canopy Roof
+    const crownBeamGeo = new THREE.BoxGeometry(2.6, 0.4, 0.4);
+    [-0.38, 0.38].forEach((cz) => {
+      const crown = new THREE.Mesh(crownBeamGeo, darkTimberMat);
+      crown.position.set(0, gallowsHeight, cz);
+      crown.castShadow = true;
+      group.add(crown);
+    });
+
+    // Pillow block bearing housings
+    [-0.9, 0.9].forEach((bx) => {
+      const bearing = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.28, 1.0), ironMat);
+      bearing.position.set(bx, gallowsHeight + 0.3, 0);
+      group.add(bearing);
+    });
+
+    // Pitched Canopy Roof
+    const canopyRafterGeo = new THREE.BoxGeometry(0.14, 0.14, 2.8);
+    [-1.0, 0, 1.0].forEach((rx) => {
+      const rafter = new THREE.Mesh(canopyRafterGeo, woodMat);
+      rafter.position.set(rx, gallowsHeight + 1.35, 0);
+      group.add(rafter);
+    });
+
+    const canopyRoofGeo = new THREE.BoxGeometry(2.8, 0.08, 1.5);
+    [-1, 1].forEach((side) => {
+      const roof = new THREE.Mesh(canopyRoofGeo, rustTinMat);
+      roof.position.set(0, gallowsHeight + 1.45, side * 0.65);
+      roof.rotation.x = side * 0.26;
+      roof.castShadow = true;
+      group.add(roof);
+    });
+
+    // 7. Detailed Spoked Sheave Wheel (Hoist Pulley)
+    const sheaveGroup = new THREE.Group();
+    sheaveGroup.position.set(0, gallowsHeight + 0.3, 0);
+
+    const rimRadius = 0.85;
+    const sheaveRim = new THREE.Mesh(
+      new THREE.TorusGeometry(rimRadius, 0.08, 12, 36),
+      ironMat
+    );
+    sheaveRim.rotation.y = Math.PI / 2;
+    sheaveRim.castShadow = true;
+    sheaveGroup.add(sheaveRim);
+
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.26, 16), ironMat);
+    hub.rotation.z = Math.PI / 2;
+    sheaveGroup.add(hub);
+
+    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.1, 12), ironMat);
+    axle.rotation.z = Math.PI / 2;
+    sheaveGroup.add(axle);
+
+    // 10 Forged Spokes
+    const spokeGeo = new THREE.CylinderGeometry(0.022, 0.022, rimRadius - 0.1, 8);
+    for (let s = 0; s < 10; s++) {
+      const angle = (s / 10) * Math.PI * 2;
+      const spoke = new THREE.Mesh(spokeGeo, ironMat);
+      spoke.position.set(0, Math.sin(angle) * (rimRadius / 2), Math.cos(angle) * (rimRadius / 2));
+      spoke.rotation.x = angle + Math.PI / 2;
+      sheaveGroup.add(spoke);
+    }
+    group.add(sheaveGroup);
+    this.sheaveWheels.push(sheaveRim);
+
+    // 8. Steel Hoist Cables & Suspended Mining Ore Bucket (Kibble)
+    const winchDrumPos = new THREE.Vector3(0, 0.85, -4.0);
+    const sheaveTopPos = new THREE.Vector3(0, gallowsHeight + 0.3 + rimRadius, -0.1);
+    const rearCableLen = winchDrumPos.distanceTo(sheaveTopPos);
+    const rearCable = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, rearCableLen, 8), ironMat);
+    rearCable.position.copy(winchDrumPos).lerp(sheaveTopPos, 0.5);
+    rearCable.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), sheaveTopPos.clone().sub(winchDrumPos).normalize());
+    group.add(rearCable);
+
+    const bucketY = 1.35;
+    const vertCableLen = (gallowsHeight + 0.3 + rimRadius) - bucketY;
+    const vertCable = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, vertCableLen, 8), ironMat);
+    vertCable.position.set(0, (gallowsHeight + 0.3 + rimRadius + bucketY) / 2, 0.45);
+    group.add(vertCable);
+
+    // Shackle & Swivel Hook
+    const hookGroup = new THREE.Group();
+    hookGroup.position.set(0, bucketY + 0.7, 0.45);
+    const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.025, 8, 16), ironMat);
+    hookGroup.add(shackle);
+    const swivelHook = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.03, 8, 16, Math.PI * 1.3), ironMat);
+    swivelHook.position.set(0, -0.15, 0);
+    swivelHook.rotation.z = Math.PI / 2;
+    hookGroup.add(swivelHook);
+    group.add(hookGroup);
+
+    // Heavy Mining Ore Bucket
+    const bucketGroup = new THREE.Group();
+    bucketGroup.position.set(0, bucketY, 0.45);
+
+    const bucketBody = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.38, 0.75, 12), woodMat);
+    bucketBody.castShadow = true;
+    bucketGroup.add(bucketBody);
+
+    [-0.28, 0, 0.28].forEach((hy) => {
+      const hoop = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.485 - (0.28 - hy) * 0.12, 0.485 - (0.28 - hy) * 0.12, 0.05, 12),
+        ironMat
+      );
+      hoop.position.set(0, hy, 0);
+      bucketGroup.add(hoop);
+    });
+
+    const bail = new THREE.Mesh(new THREE.TorusGeometry(0.50, 0.03, 8, 16, Math.PI), ironMat);
+    bail.position.set(0, 0.38, 0);
+    bucketGroup.add(bail);
+
+    [-0.4, 0.4].forEach((cx) => {
+      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.44, 6), ironMat);
+      chain.position.set(cx * 0.5, 0.58, 0);
+      chain.rotation.z = cx < 0 ? 0.32 : -0.32;
+      bucketGroup.add(chain);
+    });
+
+    for (let r = 0; r < 7; r++) {
+      const a = (r / 7) * Math.PI * 2;
+      const rockRadius = 0.13 + (r % 3) * 0.04;
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(rockRadius, 0), r % 2 === 0 ? goldOreMat : quartzMat);
+      rock.position.set(Math.cos(a) * 0.22, 0.3 + (r % 2) * 0.05, Math.sin(a) * 0.22);
+      bucketGroup.add(rock);
+    }
+    group.add(bucketGroup);
+
+    // 9. Surface Winch Station
+    const winchGroup = new THREE.Group();
+    winchGroup.position.set(0, 0.2, -4.0);
+
+    [-0.75, 0.75].forEach((wx) => {
+      const skid = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.35, 2.2), darkTimberMat);
+      skid.position.set(wx, 0.17, 0);
+      winchGroup.add(skid);
+
+      const pedestal = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.7, 0.35), ironMat);
+      pedestal.position.set(wx, 0.65, 0);
+      winchGroup.add(pedestal);
+    });
+
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 1.25, 16), ironMat);
+    drum.rotation.z = Math.PI / 2;
+    drum.position.set(0, 0.75, 0);
+    winchGroup.add(drum);
+
+    const gear = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.08, 20), ironMat);
+    gear.rotation.z = Math.PI / 2;
+    gear.position.set(0.72, 0.75, 0);
+    winchGroup.add(gear);
+
+    const brakeLever = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 1.2, 8), ironMat);
+    brakeLever.position.set(0.85, 1.15, -0.2);
+    brakeLever.rotation.x = 0.35;
+    winchGroup.add(brakeLever);
+
+    const crankArm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.45, 0.05), ironMat);
+    crankArm.position.set(-0.78, 0.92, 0);
+    winchGroup.add(crankArm);
+
+    const crankHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.24, 8), woodMat);
+    crankHandle.rotation.z = Math.PI / 2;
+    crankHandle.position.set(-0.9, 1.12, 0);
+    winchGroup.add(crankHandle);
+
+    group.add(winchGroup);
 
     return group;
   }
@@ -1361,10 +1679,42 @@ export class MineBuildingSystem {
   private createDeepShaftMesh(_structure: BuiltStructure): THREE.Group {
     const group = new THREE.Group();
     const woodMat = new THREE.MeshStandardMaterial({ color: 0x3d2716, roughness: 0.92 });
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x4f3627, roughness: 0.95 });
+    const darkWoodMat = new THREE.MeshStandardMaterial({ color: 0x22150a, roughness: 0.96 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x2e2e2e, metalness: 0.8, roughness: 0.4 });
 
-    // Square Timber Shaft Collar
     const collarSize = 4.2;
+
+    // 1. Deep Subterranean Pit Void (pitch black down 16m)
+    const voidBox = new THREE.Mesh(
+      new THREE.BoxGeometry(collarSize - 0.4, 16.0, collarSize - 0.4),
+      new THREE.MeshBasicMaterial({ color: 0x020101, side: THREE.BackSide })
+    );
+    voidBox.position.set(0, -8.0, 0);
+    group.add(voidBox);
+
+    const voidFloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(collarSize - 0.4, collarSize - 0.4),
+      new THREE.MeshBasicMaterial({ color: 0x000000 })
+    );
+    voidFloor.rotation.x = -Math.PI / 2;
+    voidFloor.position.set(0, -15.8, 0);
+    group.add(voidFloor);
+
+    // Collar shadow vignette ring
+    const collarShadow = new THREE.Mesh(
+      new THREE.RingGeometry((collarSize - 0.6) / 2, (collarSize + 0.4) / 2, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0x030201,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.94,
+      })
+    );
+    collarShadow.rotation.x = -Math.PI / 2;
+    collarShadow.position.set(0, 0.05, 0);
+    group.add(collarShadow);
+
+    // 2. Square Timber Shaft Collar (Above ground sets)
     for (let h = 0; h < 3; h++) {
       const y = 0.3 + h * 0.5;
       [-collarSize / 2, collarSize / 2].forEach((cx) => {
@@ -1381,54 +1731,60 @@ export class MineBuildingSystem {
       });
     }
 
-    // Wooden Ladder leading down into the pit
-    const ladderL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 3.8, 5), woodMat);
-    ladderL.position.set(-1.4, 1.4, -1.8);
-    ladderL.rotation.x = -0.15;
+    // Sub-surface timber cribbing sets stepping down into darkness
+    [-0.5, -1.3, -2.4, -3.8].forEach((subY) => {
+      const subSize = collarSize - 0.3;
+      [-subSize / 2, subSize / 2].forEach((cx) => {
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, subSize + 0.35), darkWoodMat);
+        beam.position.set(cx, subY, 0);
+        group.add(beam);
+      });
+      [-subSize / 2, subSize / 2].forEach((cz) => {
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(subSize + 0.35, 0.35, 0.35), darkWoodMat);
+        beam.position.set(0, subY, cz);
+        group.add(beam);
+      });
+    });
+
+    // 3. Wooden Ladder leading deep down into the dark abyss
+    const ladderLength = 8.5;
+    const ladderL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, ladderLength, 5), darkWoodMat);
+    ladderL.position.set(-1.4, 1.4 - ladderLength / 2, -1.7);
     group.add(ladderL);
 
-    const ladderR = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 3.8, 5), woodMat);
-    ladderR.position.set(-0.8, 1.4, -1.8);
-    ladderR.rotation.x = -0.15;
+    const ladderR = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, ladderLength, 5), darkWoodMat);
+    ladderR.position.set(-0.8, 1.4 - ladderLength / 2, -1.7);
     group.add(ladderR);
 
-    // Ladder rungs
-    for (let r = 0; r < 9; r++) {
-      const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6, 5), woodMat);
+    // Ladder rungs stepping down into darkness
+    for (let r = 0; r < 20; r++) {
+      const rungY = 1.2 - r * 0.38;
+      const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6, 5), darkWoodMat);
       rung.rotation.z = Math.PI / 2;
-      rung.position.set(-1.1, 0.2 + r * 0.38, -1.8 + r * 0.05);
+      rung.position.set(-1.1, rungY, -1.7);
       group.add(rung);
     }
 
-    // Pit Bedrock Floor with Exposed Quartz Gold Vein
-    const pitFloor = new THREE.Mesh(
-      new THREE.BoxGeometry(collarSize * 0.9, 0.4, collarSize * 0.9),
-      rockMat
-    );
-    pitFloor.position.set(0, -0.4, 0);
-    group.add(pitFloor);
+    // 4. Hanging Miner's Lantern illuminating the collar while depth stays pitch black
+    const lantern = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.3, 6), ironMat);
+    lantern.position.set(1.4, 1.2, -1.6);
+    group.add(lantern);
 
-    // Glowing quartz gold vein outcrop inside the excavation pit
-    const vein = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 0.6, 1.4),
-      new THREE.MeshStandardMaterial({
-        color: 0xffdf66,
-        metalness: 0.85,
-        roughness: 0.25,
-        emissive: 0x885500,
-        emissiveIntensity: 0.75,
-      })
-    );
-    vein.position.set(0.5, 0.1, 0.3);
-    group.add(vein);
+    const lanternLight = new THREE.PointLight(0xffaa44, 1.4, 6.5);
+    lanternLight.position.set(1.4, 1.1, -1.6);
+    group.add(lanternLight);
 
-    // Yellow safety warning sign: "DANGER - ACTIVE SHAFT"
-    const sign = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4, 0.6, 0.08),
-      new THREE.MeshStandardMaterial({ color: 0xe6b800, roughness: 0.4 })
+    // Safety warning board: "DANGER - DEEP ACTIVE SHAFT"
+    const signBoard = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 0.08), woodMat);
+    signBoard.position.set(0, 1.9, collarSize / 2 + 0.08);
+    group.add(signBoard);
+
+    const signPlate = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 0.45, 0.09),
+      new THREE.MeshStandardMaterial({ color: 0xcc9900, roughness: 0.5 })
     );
-    sign.position.set(0, 1.9, collarSize / 2 + 0.1);
-    group.add(sign);
+    signPlate.position.set(0, 1.9, collarSize / 2 + 0.09);
+    group.add(signPlate);
 
     return group;
   }
@@ -1599,6 +1955,181 @@ export class MineBuildingSystem {
     return group;
   }
 
+  // Structure 9: Old West Frontier Ground Torch (Pitch-Pine Stake Torch)
+  private createFrontierTorchMesh(structure: BuiltStructure): THREE.Group {
+    const group = new THREE.Group();
+
+    // 1. Natural Weathered Timber Stake Pole
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0x3d2a19,
+      roughness: 0.94,
+    });
+    // Main pole driven firmly into earth: 2.1m tall, slight taper
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.065, 2.1, 8), woodMat);
+    pole.position.y = 1.05;
+    group.add(pole);
+
+    // Clustered desert river stones around the ground entry point
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x5a4332, roughness: 0.95 });
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2 + 0.35;
+      const r = 0.13 + (i % 2) * 0.04;
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.08 + (i % 2) * 0.025, 0), stoneMat);
+      rock.position.set(Math.cos(angle) * r, 0.07, Math.sin(angle) * r);
+      rock.rotation.set(i * 0.7, i * 1.1, i * 0.5);
+      group.add(rock);
+    }
+
+    // Mid-pole forged iron reinforcing ring
+    const ironMat = new THREE.MeshStandardMaterial({
+      color: 0x222222,
+      metalness: 0.85,
+      roughness: 0.38,
+    });
+    const midBand = new THREE.Mesh(new THREE.TorusGeometry(0.054, 0.007, 4, 12), ironMat);
+    midBand.rotation.x = Math.PI / 2;
+    midBand.position.y = 1.15;
+    group.add(midBand);
+
+    // 2. Old West Forged Iron Sconce Basket & Drip Catcher
+    const dripPan = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.07, 0.08, 8), ironMat);
+    dripPan.position.y = 1.92;
+    group.add(dripPan);
+
+    const sconceRim = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.012, 6, 12), ironMat);
+    sconceRim.rotation.x = Math.PI / 2;
+    sconceRim.position.y = 1.96;
+    group.add(sconceRim);
+
+    // 4 vertical curved wrought iron cage straps
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const rib = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.32, 0.014), ironMat);
+      rib.position.set(Math.cos(angle) * 0.105, 2.05, Math.sin(angle) * 0.105);
+      rib.rotation.y = -angle;
+      group.add(rib);
+    }
+
+    // 3. Pitch-Soaked Burlap Linen & Pine Knot Core
+    const pitchMat = new THREE.MeshStandardMaterial({
+      color: 0x1a130e,
+      roughness: 0.96,
+    });
+    const pitchBundle = new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.075, 0.28, 8), pitchMat);
+    pitchBundle.position.y = 2.02;
+    group.add(pitchBundle);
+
+    // Rusted iron binding wire wrapping
+    const wireMat = new THREE.MeshStandardMaterial({ color: 0x4a2a1a, metalness: 0.7, roughness: 0.5 });
+    const wire1 = new THREE.Mesh(new THREE.TorusGeometry(0.089, 0.006, 4, 12), wireMat);
+    wire1.rotation.x = Math.PI / 2;
+    wire1.position.y = 1.98;
+    group.add(wire1);
+    const wire2 = new THREE.Mesh(new THREE.TorusGeometry(0.086, 0.006, 4, 12), wireMat);
+    wire2.rotation.x = Math.PI / 2;
+    wire2.position.y = 2.08;
+    group.add(wire2);
+
+    // 4. Hot Glowing Embers Bed
+    const emberMat = new THREE.MeshStandardMaterial({
+      color: 0xff3b00,
+      emissive: 0xff2800,
+      emissiveIntensity: 1.4,
+      roughness: 0.75,
+    });
+    const emberBed = new THREE.Mesh(new THREE.DodecahedronGeometry(0.085, 1), emberMat);
+    emberBed.position.y = 2.14;
+    emberBed.scale.set(1.1, 0.5, 1.1);
+    group.add(emberBed);
+
+    // 5. Dynamic Layered Realistic Flame
+    const flameGroup = new THREE.Group();
+    flameGroup.position.set(0, 2.16, 0);
+
+    // Outer warm orange licking flame
+    const outerFlameMat = new THREE.MeshStandardMaterial({
+      color: 0xff6600,
+      emissive: 0xff4800,
+      emissiveIntensity: 1.4,
+      transparent: true,
+      opacity: 0.88,
+      roughness: 0.2,
+    });
+    const outerFlame = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.44, 8), outerFlameMat);
+    outerFlame.position.y = 0.22;
+    flameGroup.add(outerFlame);
+
+    // Inner bright blazing yellow-white core
+    const coreFlameMat = new THREE.MeshStandardMaterial({
+      color: 0xfffae0,
+      emissive: 0xffea70,
+      emissiveIntensity: 2.2,
+      roughness: 0.1,
+    });
+    const coreFlame = new THREE.Mesh(new THREE.ConeGeometry(0.062, 0.30, 8), coreFlameMat);
+    coreFlame.position.y = 0.15;
+    flameGroup.add(coreFlame);
+
+    // Dancing flame tip tongue
+    const tipFlame = new THREE.Mesh(new THREE.ConeGeometry(0.038, 0.22, 6), outerFlameMat);
+    tipFlame.position.set(0.015, 0.28, 0.01);
+    flameGroup.add(tipFlame);
+
+    group.add(flameGroup);
+
+    // 6. Atmospheric Fire Glow Halo
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0xff8c1a,
+      transparent: true,
+      opacity: 0.16,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const haloMesh = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), haloMat);
+    haloMesh.position.set(0, 2.28, 0);
+    group.add(haloMesh);
+
+    // 7. Rising Fire Sparks / Embers Particles
+    const sparkCount = 8;
+    const sparkGeo = new THREE.BufferGeometry();
+    const sparkPositions = new Float32Array(sparkCount * 3);
+    for (let i = 0; i < sparkCount; i++) {
+      sparkPositions[i * 3] = (Math.random() - 0.5) * 0.1;
+      sparkPositions[i * 3 + 1] = 2.15 + Math.random() * 0.6;
+      sparkPositions[i * 3 + 2] = (Math.random() - 0.5) * 0.1;
+    }
+    sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPositions, 3));
+    const sparkMat = new THREE.PointsMaterial({
+      color: 0xff9922,
+      size: 0.045,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const sparks = new THREE.Points(sparkGeo, sparkMat);
+    group.add(sparks);
+
+    // 8. Primary Beautiful Warm Point Light
+    const fireLight = new THREE.PointLight(0xff942c, 3.6, 20, 2.0);
+    fireLight.position.set(0, 2.28, 0);
+    group.add(fireLight);
+
+    // Register into torchNodes for individual organic wind flicker & spark animation
+    const seed = Math.random() * 500;
+    this.torchNodes.set(structure.id, {
+      light: fireLight,
+      flameGroup,
+      emberMat,
+      haloMesh,
+      sparkPositions,
+      sparkGeometry: sparkGeo,
+      seed,
+    });
+
+    return group;
+  }
+
   // ==========================================
   // HOLOGRAPHIC BLUEPRINT GHOST PREVIEW
   // ==========================================
@@ -1634,6 +2165,30 @@ export class MineBuildingSystem {
       stakeGhost.add(ring);
 
       this.ghostMesh = stakeGhost;
+    } else if (type === 'frontier_torch') {
+      const torchGhost = new THREE.Group();
+      // Wooden stake ghost
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.065, 2.1, 8), ghostMat);
+      pole.position.y = 1.05;
+      torchGhost.add(pole);
+
+      // Sconce basket ghost
+      const basket = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.08, 0.28, 8), ghostMat);
+      basket.position.y = 2.0;
+      torchGhost.add(basket);
+
+      // Flame shape ghost
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.45, 8), ghostMat);
+      flame.position.y = 2.35;
+      torchGhost.add(flame);
+
+      // Ground radius ring showing warm light perimeter
+      const lightRing = new THREE.Mesh(new THREE.RingGeometry(2.8, 3.0, 24), ghostMat);
+      lightRing.rotation.x = -Math.PI / 2;
+      lightRing.position.y = 0.05;
+      torchGhost.add(lightRing);
+
+      this.ghostMesh = torchGhost;
     } else {
       const bp = STRUCTURE_BLUEPRINTS[type];
       const box = new THREE.Mesh(
@@ -1719,6 +2274,50 @@ export class MineBuildingSystem {
       if (node.isLit) {
         node.light.intensity = 2.3 + Math.sin(Date.now() * 0.015) * 0.5 + Math.random() * 0.3;
         node.flames.scale.y = 0.85 + Math.sin(Date.now() * 0.02) * 0.25 + Math.random() * 0.15;
+      }
+    });
+
+    // 3c. Flicker Lit Frontier Ground Torches (Realistic wind flicker & rising sparks)
+    const nowSec = Date.now() * 0.001;
+    this.torchNodes.forEach((node) => {
+      const t = nowSec + node.seed;
+      // Multi-frequency organic flame flicker
+      const flicker =
+        Math.sin(t * 13.7) * 0.38 +
+        Math.sin(t * 27.3) * 0.22 +
+        Math.sin(t * 4.9) * 0.16 +
+        (Math.random() - 0.5) * 0.1;
+      node.light.intensity = Math.max(1.8, 3.4 + flicker);
+
+      // Subtle light source micro-wander for moving dynamic shadows on rocks
+      node.light.position.x = Math.sin(t * 7.9) * 0.035;
+      node.light.position.z = Math.cos(t * 9.3) * 0.035;
+
+      // Organic flame fluttering in mountain wind
+      node.flameGroup.scale.y = 0.95 + Math.sin(t * 16.2) * 0.18 + (Math.random() - 0.5) * 0.08;
+      node.flameGroup.scale.x = 0.98 + Math.cos(t * 11.5) * 0.1;
+      node.flameGroup.rotation.z = Math.sin(t * 9.2) * 0.08;
+      node.flameGroup.rotation.x = Math.cos(t * 7.8) * 0.07;
+
+      // Luminous halo pulse
+      if (node.haloMesh) {
+        node.haloMesh.scale.setScalar(1.0 + Math.sin(t * 12.0) * 0.08);
+      }
+
+      // Rising sparks animation
+      if (node.sparkPositions && node.sparkGeometry) {
+        const pos = node.sparkPositions;
+        for (let i = 0; i < pos.length; i += 3) {
+          pos[i + 1] += delta * (0.65 + (i % 3) * 0.25); // float upwards
+          pos[i] += Math.sin(t * 4.0 + i) * delta * 0.15; // wind drift X
+          pos[i + 2] += Math.cos(t * 4.0 + i) * delta * 0.15; // wind drift Z
+          if (pos[i + 1] > 2.85) {
+            pos[i + 1] = 2.15;
+            pos[i] = (Math.random() - 0.5) * 0.09;
+            pos[i + 2] = (Math.random() - 0.5) * 0.09;
+          }
+        }
+        node.sparkGeometry.attributes.position.needsUpdate = true;
       }
     });
 
@@ -1890,8 +2489,16 @@ export class MineBuildingSystem {
   ): { hit: boolean; structure?: BuiltStructure } {
     for (let i = 0; i < this.builtStructures.length; i++) {
       const s = this.builtStructures[i];
-      // Campfires or rails can be stepped over / walked past
-      if (s.type === 'campfire' || s.type === 'rail_track') continue;
+      // Campfires, rails, torches, and shaft/portal entrances can be stepped into / entered without solid block
+      if (
+        s.type === 'campfire' ||
+        s.type === 'rail_track' ||
+        s.type === 'timber_portal' ||
+        s.type === 'deep_shaft' ||
+        s.type === 'headframe_hoist' ||
+        s.type === 'frontier_torch'
+      )
+        continue;
       const bp = STRUCTURE_BLUEPRINTS[s.type];
       const hw = (bp?.dimensions.width || 3.2) * 0.42;
       const hd = (bp?.dimensions.depth || 3.2) * 0.42;

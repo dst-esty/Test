@@ -21,10 +21,18 @@ import {
   X,
   Megaphone,
   Bell,
-  BellOff
+  BellOff,
+  Handshake,
+  Star,
+  Check,
+  RefreshCw,
+  Copy,
+  UserCheck,
+  UserPlus
 } from 'lucide-react';
-import { MultiplayerChatMessage, MultiplayerPlayer, MultiplayerColorPreset } from '../types';
+import { MultiplayerChatMessage, MultiplayerPlayer, MultiplayerColorPreset, Friendship } from '../types';
 import { multiplayer } from '../multiplayer/multiplayerService';
+import { friendshipService } from '../services/friendshipService';
 
 interface MultiplayerHUDProps {
   onlinePlayers: Record<string, MultiplayerPlayer>;
@@ -100,7 +108,81 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
   const [chatText, setChatText] = useState('');
   const [editName, setEditName] = useState(selfName);
   const [editColor, setEditColor] = useState(selfColor);
-  const [activeTab, setActiveTab] = useState<'roster' | 'customize' | 'chat'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'pardners' | 'customize' | 'chat'>('roster');
+  const [friendships, setFriendships] = useState<Friendship[]>(() => friendshipService.getAllFriendships());
+  const [directPardnerName, setDirectPardnerName] = useState('');
+  const [pardnerNotice, setPardnerNotice] = useState<string | null>(null);
+  const [copiedProspectorId, setCopiedProspectorId] = useState(false);
+
+  useEffect(() => {
+    return friendshipService.subscribe(setFriendships);
+  }, []);
+
+  const WESTERN_NAMES = [
+    'Dutchman Jacob',
+    'Canyon Jack',
+    'Tombstone Tom',
+    'Desert Hawk',
+    'Cactus Kate',
+    'Sierra Sage',
+    'Apache Slim',
+    'Goldpan Gus',
+    'Silver Strike Sal',
+    'Red Rock Dan',
+    'Pecos Pete',
+    'Gila Jim',
+    'Superstition Sam',
+    'Quartz Creek Bill',
+    'Dusty Trail Hank',
+    'Boulder Ridge Ned',
+    'Sourdough Pete',
+  ];
+
+  const rollRandomNickname = () => {
+    const current = editName.trim();
+    const pool = WESTERN_NAMES.filter((n) => n !== current);
+    const chosen = pool[Math.floor(Math.random() * pool.length)];
+    setEditName(chosen);
+  };
+
+  const handleOfferPardner = async (targetId: string, targetName: string) => {
+    const res = await friendshipService.sendPardnerRequest(targetId, targetName);
+    setPardnerNotice(res.message);
+    setTimeout(() => setPardnerNotice(null), 4500);
+  };
+
+  const handleAcceptPardner = async (friendshipId: string, partnerName: string) => {
+    const ok = await friendshipService.acceptPardnerRequest(friendshipId);
+    if (ok) {
+      setPardnerNotice(`🤝 Frontier alliance confirmed! You and ${partnerName} are now official Pardners.`);
+      setTimeout(() => setPardnerNotice(null), 4500);
+    }
+  };
+
+  const handleDissolvePardner = async (friendshipId: string, partnerName: string) => {
+    const ok = await friendshipService.dissolvePardnership(friendshipId);
+    if (ok) {
+      setPardnerNotice(`Pardnership with ${partnerName} dissolved.`);
+      setTimeout(() => setPardnerNotice(null), 4000);
+    }
+  };
+
+  const handleDirectPardnerInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = directPardnerName.trim();
+    if (!name) return;
+    const res = await friendshipService.sendPardnerRequest(`callsign_${name.toLowerCase()}`, name);
+    setPardnerNotice(res.message);
+    setDirectPardnerName('');
+    setTimeout(() => setPardnerNotice(null), 4500);
+  };
+
+  const copyProspectorId = () => {
+    const id = friendshipService.getOrCreateProspectorId();
+    navigator.clipboard.writeText(id).catch(() => {});
+    setCopiedProspectorId(true);
+    setTimeout(() => setCopiedProspectorId(false), 2500);
+  };
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -231,7 +313,11 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
 
   const handleSaveProfile = () => {
     if (!editName.trim()) return;
-    onUpdateProfile(editName.trim(), editColor);
+    const cleanName = editName.trim();
+    onUpdateProfile(cleanName, editColor);
+    friendshipService.setProspectorName(cleanName);
+    setPardnerNotice(`🤠 Callsign "${cleanName}" permanently saved & telegraphed to the frontier.`);
+    setTimeout(() => setPardnerNotice(null), 3500);
     setShowRosterModal(false);
   };
 
@@ -651,6 +737,19 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
               </button>
             </div>
 
+            {/* Notice Banner */}
+            {pardnerNotice && (
+              <div className="mt-3 px-3 py-2 rounded-xl bg-amber-950/80 border border-amber-500/60 text-amber-200 text-xs flex items-center justify-between animate-fadeIn">
+                <span>{pardnerNotice}</span>
+                <button
+                  onClick={() => setPardnerNotice(null)}
+                  className="text-stone-400 hover:text-stone-200 text-xs ml-2 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* Navigation Tabs */}
             <div className="flex border-b border-stone-800 mt-4">
               <button
@@ -662,6 +761,17 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                 }`}
               >
                 Prospectors ({onlineCount})
+              </button>
+              <button
+                onClick={() => setActiveTab('pardners')}
+                className={`flex-1 py-2 text-xs font-semibold text-center border-b-2 transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeTab === 'pardners'
+                    ? 'border-amber-500 text-amber-400'
+                    : 'border-transparent text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <Handshake className="w-3.5 h-3.5" />
+                <span>Pardners ({friendshipService.getAcceptedPardners().length})</span>
               </button>
               <button
                 onClick={() => setActiveTab('customize')}
@@ -713,79 +823,310 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                     onClick={() => setActiveTab('customize')}
                     className="px-2.5 py-1 text-xs rounded bg-stone-800 hover:bg-stone-700 text-amber-300 border border-stone-700 cursor-pointer"
                   >
-                    Edit
+                    Edit Moniker
                   </button>
                 </div>
 
                 {/* Remote Players */}
                 {playersList.length === 0 ? (
                   <div className="p-6 text-center text-stone-500 text-xs">
-                    No other prospectors in your immediate sector right now. Share the expedition link with fellow prospectors to explore together!
+                    No other prospectors in your immediate sector right now. Invite friends with your callsign to form a pardnership!
                   </div>
                 ) : (
-                  playersList.map((player) => (
-                    <div
-                      key={player.id}
-                      className="flex items-center justify-between p-3 rounded-xl bg-stone-800/60 border border-stone-700/60 hover:border-amber-500/30 transition-all"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white shadow"
-                          style={{ backgroundColor: player.outfitColor || '#8c5932' }}
-                        >
-                          <User className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-stone-200 text-sm">{player.name}</span>
-                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  playersList.map((player) => {
+                    const pStatus = friendshipService.getPardnerStatus(player.id, player.name);
+                    return (
+                      <div
+                        key={player.id}
+                        className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                          pStatus.status === 'pardner'
+                            ? 'bg-amber-950/20 border-amber-500/50 hover:border-amber-400'
+                            : 'bg-stone-800/60 border-stone-700/60 hover:border-amber-500/30'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white shadow"
+                            style={{ backgroundColor: player.outfitColor || '#8c5932' }}
+                          >
+                            <User className="w-4 h-4" />
                           </div>
-                          <p className="text-xs text-stone-400 flex items-center gap-2">
-                            <span>Tool: {player.activeTool || 'Pickaxe'}</span>
-                            <span>•</span>
-                            <span className="text-amber-400 font-mono">{(player.goldFound || 0).toFixed(1)} oz</span>
-                            {player.distanceToLocal !== undefined && (
-                              <>
-                                <span>•</span>
-                                <span className="text-stone-300">{Math.round(player.distanceToLocal)}m</span>
-                              </>
-                            )}
-                          </p>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-stone-200 text-sm">{player.name}</span>
+                              {pStatus.status === 'pardner' && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 flex items-center gap-1">
+                                  <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+                                  Pardner
+                                </span>
+                              )}
+                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            </div>
+                            <p className="text-xs text-stone-400 flex items-center gap-2">
+                              <span>Tool: {player.activeTool || 'Pickaxe'}</span>
+                              <span>•</span>
+                              <span className="text-amber-400 font-mono">{(player.goldFound || 0).toFixed(1)} oz</span>
+                              {player.distanceToLocal !== undefined && (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-stone-300">{Math.round(player.distanceToLocal)}m</span>
+                                </>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {pStatus.status === 'pardner' ? (
+                            <span className="text-[11px] text-amber-300 font-semibold px-2 py-0.5 rounded bg-amber-950/40 border border-amber-500/30 flex items-center gap-1">
+                              <Check className="w-3 h-3 text-amber-400" /> Bonded
+                            </span>
+                          ) : pStatus.status === 'pending_received' && pStatus.friendship ? (
+                            <button
+                              onClick={() => handleAcceptPardner(pStatus.friendship!.id, player.name)}
+                              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer shadow"
+                            >
+                              <Handshake className="w-3.5 h-3.5" /> Handshake
+                            </button>
+                          ) : pStatus.status === 'pending_sent' ? (
+                            <span className="text-[11px] text-stone-400 px-2 py-0.5 rounded bg-stone-800 border border-stone-700">
+                              ⏳ Pact Sent
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleOfferPardner(player.id, player.name)}
+                              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-amber-950/50 hover:bg-amber-900 text-amber-300 border border-amber-600/40 cursor-pointer"
+                              title="Offer a blood pardnership"
+                            >
+                              <Handshake className="w-3.5 h-3.5" /> Pardner Pact
+                            </button>
+                          )}
+
+                          {onTrackPlayer && (
+                            <button
+                              onClick={() => {
+                                onTrackPlayer(player);
+                                setShowRosterModal(false);
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700 cursor-pointer"
+                            >
+                              <Compass className="w-3.5 h-3.5" /> Locate
+                            </button>
+                          )}
                         </div>
                       </div>
-
-                      {onTrackPlayer && (
-                        <button
-                          onClick={() => {
-                            onTrackPlayer(player);
-                            setShowRosterModal(false);
-                          }}
-                          className="flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 border border-amber-600/40 cursor-pointer"
-                        >
-                          <Compass className="w-3.5 h-3.5" /> Locate
-                        </button>
-                      )}
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}
 
-            {/* Tab: Customize Profile */}
+            {/* Tab: Pardners Alliance Management */}
+            {activeTab === 'pardners' && (
+              <div className="mt-4 space-y-4 max-h-80 overflow-y-auto pr-1">
+                {/* Pardner Lore & Benefits */}
+                <div className="p-3 rounded-xl bg-gradient-to-r from-amber-950/40 to-stone-900/60 border border-amber-500/30 text-xs text-stone-300 space-y-1">
+                  <div className="flex items-center gap-1.5 text-amber-400 font-bold">
+                    <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                    <span>Frontier Pardner Alliance</span>
+                  </div>
+                  <p className="text-[11px] text-stone-400 leading-relaxed">
+                    Pardners display prestigious golden 3D banners, share survival notifications across the canyon, and stand together against claim jumpers.
+                  </p>
+                </div>
+
+                {/* Incoming Handshake Requests */}
+                {(() => {
+                  const selfId = friendshipService.getOrCreateProspectorId();
+                  const incoming = friendships.filter(
+                    (f) =>
+                      f.status === 'pending' &&
+                      (f.receiverId === selfId || f.receiverName.toLowerCase() === selfName.toLowerCase())
+                  );
+
+                  if (incoming.length === 0) return null;
+
+                  return (
+                    <div className="space-y-2">
+                      <h3 className="text-xs font-bold text-amber-300 uppercase tracking-wide flex items-center gap-1.5">
+                        <Handshake className="w-3.5 h-3.5 text-amber-400" /> Pending Handshakes ({incoming.length})
+                      </h3>
+                      {incoming.map((f) => (
+                        <div
+                          key={f.id}
+                          className="flex items-center justify-between p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/50"
+                        >
+                          <div>
+                            <span className="font-bold text-stone-100 text-sm">{f.senderName}</span>
+                            <p className="text-[11px] text-amber-300/80">Offered a trail pardnership pact</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleAcceptPardner(f.id, f.senderName)}
+                              className="px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                            >
+                              Accept Handshake
+                            </button>
+                            <button
+                              onClick={() => handleDissolvePardner(f.id, f.senderName)}
+                              className="px-2 py-1 text-xs rounded bg-stone-800 hover:bg-stone-700 text-stone-400 cursor-pointer"
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                {/* Accepted Pardners List */}
+                {(() => {
+                  const accepted = friendshipService.getAcceptedPardners();
+                  return (
+                    <div className="space-y-2">
+                      <h3 className="text-xs font-bold text-stone-300 uppercase tracking-wide flex items-center justify-between">
+                        <span>Loyal Pardners ({accepted.length})</span>
+                      </h3>
+
+                      {accepted.length === 0 ? (
+                        <div className="p-4 text-center rounded-xl bg-stone-950/50 border border-stone-800 text-stone-500 text-xs">
+                          You haven't formed any pardnerships yet. Send an invite below or shake hands in the prospector roster!
+                        </div>
+                      ) : (
+                        accepted.map((item) => {
+                          const onlinePlayer = playersList.find(
+                            (p) =>
+                              p.id === item.pardnerId ||
+                              p.name.toLowerCase() === item.pardnerName.toLowerCase()
+                          );
+
+                          return (
+                            <div
+                              key={item.friendship.id}
+                              className="flex items-center justify-between p-2.5 rounded-xl bg-stone-800/80 border border-amber-500/30 hover:border-amber-400/50"
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300">
+                                  <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-stone-100 text-sm">{item.pardnerName}</span>
+                                    {onlinePlayer ? (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-500/20 text-emerald-400 font-semibold">
+                                        On Trail
+                                      </span>
+                                    ) : (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] bg-stone-700/40 text-stone-400">
+                                        Off Mountain
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-stone-400">
+                                    Alliance bonded {new Date(item.friendship.createdAt).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                {onlinePlayer && onTrackPlayer && (
+                                  <button
+                                    onClick={() => {
+                                      onTrackPlayer(onlinePlayer);
+                                      setShowRosterModal(false);
+                                    }}
+                                    className="px-2 py-1 text-xs rounded bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 border border-amber-600/40 cursor-pointer"
+                                  >
+                                    Locate
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDissolvePardner(item.friendship.id, item.pardnerName)}
+                                  className="px-2 py-1 text-xs rounded bg-stone-800 hover:bg-red-950/60 text-stone-400 hover:text-red-300 border border-stone-700 hover:border-red-800 cursor-pointer"
+                                  title="Dissolve Pardnership"
+                                >
+                                  Dissolve
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Direct Invite by Callsign / Name */}
+                <form onSubmit={handleDirectPardnerInvite} className="p-3 rounded-xl bg-stone-950 border border-stone-800 space-y-2">
+                  <label className="block text-xs font-semibold text-stone-300">
+                    Telegraph Pact by Prospector Name:
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={directPardnerName}
+                      onChange={(e) => setDirectPardnerName(e.target.value)}
+                      placeholder="e.g. Dutchman Jacob or Red Rock Dan"
+                      className="flex-1 px-3 py-1.5 rounded-lg bg-stone-900 border border-stone-700 text-stone-100 text-xs focus:outline-none focus:border-amber-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!directPardnerName.trim()}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-stone-950 font-bold cursor-pointer flex items-center gap-1"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" /> Dispatch
+                    </button>
+                  </div>
+                </form>
+
+                {/* Your Callsign Card */}
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-stone-950/40 border border-stone-800 text-xs">
+                  <div>
+                    <span className="text-[10px] uppercase text-stone-500 font-bold block">Your Frontier Callsign</span>
+                    <span className="font-mono text-amber-300 text-xs font-bold">{selfName}</span>
+                  </div>
+                  <button
+                    onClick={copyProspectorId}
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-stone-800 hover:bg-stone-700 text-stone-300 text-[11px] cursor-pointer"
+                  >
+                    {copiedProspectorId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedProspectorId ? 'Copied' : 'Copy Callsign ID'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Customize Profile & Custom Name */}
             {activeTab === 'customize' && (
               <div className="mt-4 space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-stone-300 mb-1">
-                    Prospector Callsign / Handle:
-                  </label>
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    maxLength={20}
-                    className="w-full px-3 py-2 rounded-xl bg-stone-950 border border-stone-700 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
-                    placeholder="Enter your prospector name..."
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-stone-300">
+                      Prospector Callsign / Custom Moniker:
+                    </label>
+                    <button
+                      type="button"
+                      onClick={rollRandomNickname}
+                      className="flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium cursor-pointer"
+                      title="Roll a famous Old West prospector nickname"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Roll Western Name
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      maxLength={24}
+                      className="w-full px-3 py-2 rounded-xl bg-stone-950 border border-stone-700 text-stone-100 text-sm focus:outline-none focus:border-amber-500 font-medium"
+                      placeholder="Enter your prospector name..."
+                    />
+                  </div>
+                  <p className="text-[10px] text-stone-400 mt-1">
+                    This moniker is permanently saved to your frontier log and displayed over your prospector in 3D.
+                  </p>
                 </div>
 
                 <div>
@@ -824,9 +1165,9 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                   </button>
                   <button
                     onClick={handleSaveProfile}
-                    className="px-4 py-2 text-xs rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold cursor-pointer"
+                    className="px-4 py-2 text-xs rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold cursor-pointer shadow-md flex items-center gap-1.5"
                   >
-                    Save Prospector Identity
+                    <UserCheck className="w-3.5 h-3.5" /> Save Prospector Identity
                   </button>
                 </div>
               </div>

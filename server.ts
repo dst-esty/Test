@@ -87,6 +87,14 @@ async function startServer() {
   const wss = new WebSocketServer({ server });
   const PORT = 3000;
 
+  wss.on("error", (err) => {
+    console.warn("[WSS] Handled WebSocket server error:", err);
+  });
+
+  server.on("error", (err) => {
+    console.warn("[HTTP] Handled HTTP server error:", err);
+  });
+
   // Authoritative in-memory state
   const players = new Map<string, RemotePlayer>();
   const sockets = new Map<string, WebSocket>();
@@ -99,7 +107,11 @@ async function startServer() {
     const data = JSON.stringify(payload);
     for (const [id, client] of sockets.entries()) {
       if (id !== exceptId && client.readyState === WebSocket.OPEN) {
-        client.send(data);
+        try {
+          client.send(data);
+        } catch (err) {
+          console.warn("[WS Broadcast] Client send failed:", id, err);
+        }
       }
     }
   }
@@ -249,19 +261,27 @@ async function startServer() {
     players.set(playerId, newPlayer);
     sockets.set(playerId, ws);
 
+    ws.on("error", (err) => {
+      console.warn(`[WS Client ${playerId}] Handled socket error:`, err);
+    });
+
     // 1. Send Init payload to the connecting player
-    ws.send(JSON.stringify({
-      type: 'init',
-      selfId: playerId,
-      selfData: newPlayer,
-      players: Array.from(players.values()),
-      holes: Array.from(dugHoles.values()),
-      mines: Array.from(builtMines.values()),
-      recentChat: chatMessages.slice(-25),
-      colorPresets: COLOR_PRESETS,
-      universalWeather,
-      universalTimeOfDay,
-    }));
+    try {
+      ws.send(JSON.stringify({
+        type: 'init',
+        selfId: playerId,
+        selfData: newPlayer,
+        players: Array.from(players.values()),
+        holes: Array.from(dugHoles.values()),
+        mines: Array.from(builtMines.values()),
+        recentChat: chatMessages.slice(-25),
+        colorPresets: COLOR_PRESETS,
+        universalWeather,
+        universalTimeOfDay,
+      }));
+    } catch (err) {
+      console.warn(`[WS Client ${playerId}] Failed to send init:`, err);
+    }
 
     // 2. Announce join to everyone else
     broadcast({
@@ -536,6 +556,14 @@ async function startServer() {
     console.log(`Lost Dutchman Multiplayer Server running on http://localhost:${PORT}`);
   });
 }
+
+process.on("uncaughtException", (err) => {
+  console.warn("[Process] Handled uncaught exception:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.warn("[Process] Handled unhandled rejection:", reason);
+});
 
 startServer().catch((err) => {
   console.error("Failed to start server:", err);

@@ -65,9 +65,20 @@ export function testPositionCollision(
   mineBuildingSystem?: MineBuildingSystem | null,
   isAirborne: boolean = false
 ): { blocked: boolean; reason?: string; normal?: { x: number; z: number } } {
+  // 0. Mountain Excavation Adit Tunnel Check:
+  // If moving inside an excavated mountain hole/tunnel corridor, steep slopes, cliff steps, and mountain outcroppings are hollowed out!
+  const isInsideTunnel = Boolean(
+    foliageManager?.mountainHoleManager?.isInsideMountainTunnel(
+      candX,
+      currentGroundY,
+      candZ,
+      0.35
+    )?.inside
+  );
+
   // 1. Boundary & Perimeter Mountains Check
   const distFromCenter = Math.hypot(candX, candZ);
-  if (distFromCenter > PERIMETER_MOUNTAIN_RADIUS) {
+  if (distFromCenter > PERIMETER_MOUNTAIN_RADIUS && !isInsideTunnel) {
     const normDist = distFromCenter > 0.0001 ? distFromCenter : 1;
     return {
       blocked: true,
@@ -77,11 +88,12 @@ export function testPositionCollision(
   }
 
   // 2. Terrain Slope, Hill, and Mountain Cliff Face Check
+  // If player is inside an excavated mountain drift adit, they are walking through the hollowed bedrock!
   const candGroundY = getTerrainHeight(candX, candZ);
   const dh = candGroundY - currentGroundY;
 
   // When moving uphill:
-  if (dh > 0) {
+  if (dh > 0 && !isInsideTunnel) {
     // A sudden vertical elevation step higher than knee height cannot be walked through
     if (dh > MAX_STEP_HEIGHT && !isAirborne) {
       const stepDist = Math.hypot(candX - startX, candZ - startZ);
@@ -140,11 +152,13 @@ export function testPositionCollision(
       PLAYER_COLLISION_RADIUS
     );
     if (fRes.hit) {
-      return {
-        blocked: true,
-        reason: fRes.collider?.type === 'mountain' ? 'mountain_outcrop' : 'boulder',
-        normal: fRes.normal,
-      };
+      if (!(isInsideTunnel && fRes.collider?.type === 'mountain')) {
+        return {
+          blocked: true,
+          reason: fRes.collider?.type === 'mountain' ? 'mountain_outcrop' : 'boulder',
+          normal: fRes.normal,
+        };
+      }
     }
   }
 

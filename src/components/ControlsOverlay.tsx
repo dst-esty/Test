@@ -44,6 +44,7 @@ import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
 import { westernMusic } from '../audio/westernMusic';
 import { InventoryModal } from './InventoryModal';
 import { VirtualJoystick } from './VirtualJoystick';
+import { isMobileDevice } from '../utils/device';
 
 interface ControlsOverlayProps {
   playerState: PlayerState;
@@ -106,6 +107,8 @@ interface ControlsOverlayProps {
   graphicsQuality?: GraphicsQuality;
   fps?: number;
   onCycleGraphicsQuality?: () => void;
+  areGogglesActive?: boolean;
+  onToggleGoggles?: () => void;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
@@ -157,6 +160,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   graphicsQuality = 'balanced',
   fps,
   onCycleGraphicsQuality,
+  areGogglesActive = false,
+  onToggleGoggles,
 }) => {
   const [musicPlaying, setMusicPlaying] = useState(westernMusic.getIsPlaying());
   const [musicMuted, setMusicMuted] = useState(westernMusic.getIsMuted());
@@ -164,10 +169,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const [isExcavationPanelCollapsed, setIsExcavationPanelCollapsed] = useState(true);
   const [isTrenchPanelCollapsed, setIsTrenchPanelCollapsed] = useState(true);
-  const [showTouchControls, setShowTouchControls] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024;
-  });
+  const [isMobile, setIsMobile] = useState<boolean>(() => isMobileDevice());
+  const [showTouchControls, setShowTouchControls] = useState<boolean>(() => isMobileDevice());
 
   // Fullscreen Detection & Mobile Immersive View Handler
   const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
@@ -181,17 +184,15 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
     );
   });
 
-  // Mobile Orientation Detection (Portrait vs Landscape)
+  // Mobile Orientation Detection (Portrait vs Landscape) for genuine mobile devices
   const [isPortraitMobile, setIsPortraitMobile] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    return isTouch && window.innerWidth < 900 && window.innerHeight > window.innerWidth;
+    return isMobileDevice() && window.innerHeight > window.innerWidth;
   });
 
   const [isLandscapeMobile, setIsLandscapeMobile] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    return isTouch && window.innerHeight <= 550 && window.innerWidth > window.innerHeight;
+    return isMobileDevice() && window.innerWidth > window.innerHeight && window.innerHeight <= 600;
   });
 
   const [dismissRotatePrompt, setDismissRotatePrompt] = useState<boolean>(false);
@@ -199,9 +200,12 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   useEffect(() => {
     const handleOrientationCheck = () => {
       if (typeof window === 'undefined') return;
-      const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-      const isPortrait = isTouch && window.innerWidth < 900 && window.innerHeight > window.innerWidth;
-      const isLandscape = isTouch && window.innerHeight <= 550 && window.innerWidth > window.innerHeight;
+      const mobile = isMobileDevice();
+      setIsMobile(mobile);
+      // Automatically activate mobile touch controls if in fact a mobile device
+      setShowTouchControls((prev) => (mobile ? true : prev));
+      const isPortrait = mobile && window.innerHeight > window.innerWidth;
+      const isLandscape = mobile && window.innerWidth > window.innerHeight && window.innerHeight <= 600;
       setIsPortraitMobile(isPortrait);
       setIsLandscapeMobile(isLandscape);
     };
@@ -326,13 +330,16 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       } else if (e.code === 'KeyH') {
         e.preventDefault();
         toggleHud();
+      } else if (e.code === 'KeyG') {
+        e.preventDefault();
+        onToggleGoggles?.();
       } else if (e.code === 'Escape' && isInventoryOpen) {
         setIsInventoryOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isInventoryOpen, toggleHud]);
+  }, [isInventoryOpen, toggleHud, onToggleGoggles]);
 
   useEffect(() => {
     return westernMusic.subscribe(() => {
@@ -641,6 +648,31 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                 })}
               </div>
 
+              {/* Prospector's Inspection Goggles Mode Toggle */}
+              {onToggleGoggles && (
+                <button
+                  onClick={onToggleGoggles}
+                  className={`w-full mt-2 flex items-center justify-between px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold text-[11px] shadow-md ${
+                    areGogglesActive
+                      ? 'border-amber-400 bg-amber-600/90 text-stone-950 shadow-[0_0_12px_rgba(245,158,11,0.5)]'
+                      : 'border-stone-700/70 bg-stone-850 hover:bg-stone-800 text-stone-300 hover:text-amber-300 hover:border-amber-500/50'
+                  }`}
+                  title="Toggle Prospector's Inspection Goggles [G] (Displays subterranean bedrock and shaft diagnostics)"
+                >
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="text-sm">🥽</span>
+                    <span>Prospector Goggles</span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-mono shrink-0 ml-1 ${
+                      areGogglesActive ? 'text-stone-950 font-bold' : 'text-amber-400'
+                    }`}
+                  >
+                    {areGogglesActive ? '[Active]' : '[G]'}
+                  </span>
+                </button>
+              )}
+
               {/* Quick Camp & Campfire Action */}
               {onOpenCamp && (
                 <button
@@ -802,96 +834,116 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             </div>
           )}
 
-          <div className="flex items-center gap-2">
-            {/* Western Music Icon Button - Directly Below Expedition Records */}
-            <button
-              onClick={handleToggleMusic}
-              className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
-                isMusicActive
-                  ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
-                  : 'border-amber-600/40 hover:border-amber-400/80 shadow-black/40 text-stone-500 hover:text-stone-300'
-              }`}
-              title={
-                isMusicActive
-                  ? `Western Music: ${currentTrack.title} (Playing) - Click to silence`
-                  : 'Western Music (Silenced) - Click to play'
-              }
-            >
-              {isMusicActive ? (
-                <Music className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform animate-pulse" />
-              ) : (
-                <div className="relative flex items-center justify-center">
-                  <Music className="w-4 h-4 text-stone-500 group-hover:text-stone-300 transition-colors" />
-                  <span className="absolute w-[18px] h-[1.5px] bg-red-500/80 rotate-45 pointer-events-none rounded-full" />
-                </div>
-              )}
-            </button>
+      {/* Right Vertical Utility Toolbar: Touch Joystick, Fullscreen, FPS, and Western Music */}
+      <div
+        id="utility-controls-stack"
+        className="pointer-events-auto fixed right-2.5 sm:right-4 top-16 sm:top-18 flex flex-col items-center gap-2 select-none z-30"
+        style={{
+          right: 'max(0.6rem, env(safe-area-inset-right))',
+        }}
+      >
+        {/* 1. Touch / Mobile Joystick Controls HUD Toggle Button */}
+        <button
+          id="btn-touch-joystick-toggle"
+          onClick={() => setShowTouchControls((prev) => !prev)}
+          className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+            showTouchControls
+              ? 'border-amber-400 bg-amber-950/40 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
+              : 'border-stone-700/60 text-stone-500 hover:text-stone-300'
+          }`}
+          title={
+            showTouchControls
+              ? 'Touch & Virtual Joystick Controls (Active) - Click to hide'
+              : 'Touch & Virtual Joystick Controls (Hidden) - Click to show'
+          }
+          aria-label="Touch Joystick Controls"
+        >
+          <Smartphone
+            className={`w-4 h-4 ${
+              showTouchControls ? 'text-amber-400' : 'text-stone-500 group-hover:text-stone-300'
+            }`}
+          />
+        </button>
 
-            {/* Touch / Mobile Controls HUD Toggle Button */}
-            <button
-              onClick={() => setShowTouchControls((prev) => !prev)}
-              className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
-                showTouchControls
-                  ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
-                  : 'border-stone-700/60 text-stone-500 hover:text-stone-300'
-              }`}
-              title={
-                showTouchControls
-                  ? 'Touch & Virtual Joystick Controls (Active) - Click to hide'
-                  : 'Touch & Virtual Joystick Controls (Hidden) - Click to show'
-              }
-            >
-              <Smartphone className={`w-4 h-4 ${showTouchControls ? 'text-amber-400' : 'text-stone-500 group-hover:text-stone-300'}`} />
-            </button>
+        {/* 2. Fullscreen Mode Toggle Button */}
+        <button
+          id="btn-fullscreen-toggle"
+          onClick={handleToggleFullscreen}
+          className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+            isFullscreen
+              ? 'border-amber-400 bg-amber-950/40 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
+              : 'border-stone-700/60 text-stone-400 hover:text-stone-200'
+          }`}
+          title={
+            isFullscreen
+              ? 'Exit Fullscreen'
+              : 'Fullscreen Mode (Expands viewport & hides browser bars on mobile)'
+          }
+          aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+        >
+          {isFullscreen ? (
+            <Minimize className="w-4 h-4 text-amber-400" />
+          ) : (
+            <Maximize className="w-4 h-4 text-stone-400 group-hover:text-stone-200" />
+          )}
+        </button>
 
-            {/* Fullscreen Mode Toggle Button */}
-            <button
-              onClick={handleToggleFullscreen}
-              className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
-                isFullscreen
-                  ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
-                  : 'border-stone-700/60 text-stone-400 hover:text-stone-200'
-              }`}
-              title={
-                isFullscreen
-                  ? 'Exit Fullscreen'
-                  : 'Fullscreen Mode (Expands viewport & hides browser bars on mobile)'
-              }
-              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
-            >
-              {isFullscreen ? (
-                <Minimize className="w-4 h-4 text-amber-400" />
-              ) : (
-                <Maximize className="w-4 h-4 text-stone-400 group-hover:text-stone-200" />
-              )}
-            </button>
+        {/* 3. Graphics Quality & FPS Performance Indicator Button */}
+        {onCycleGraphicsQuality && (
+          <button
+            id="btn-fps-quality-toggle"
+            onClick={onCycleGraphicsQuality}
+            className={`group flex flex-col items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+              graphicsQuality === 'performance'
+                ? 'border-emerald-500/80 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.35)]'
+                : graphicsQuality === 'balanced'
+                ? 'border-amber-400/80 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.35)]'
+                : 'border-purple-400/80 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.35)]'
+            }`}
+            title={`Graphics Engine & FPS: ${fps || 60} FPS (${graphicsQuality}) - Click to switch`}
+            aria-label="Graphics Quality & FPS"
+          >
+            <Gauge
+              className={`w-3.5 h-3.5 ${
+                graphicsQuality === 'performance'
+                  ? 'text-emerald-400'
+                  : graphicsQuality === 'balanced'
+                  ? 'text-amber-400'
+                  : 'text-purple-400'
+              } group-hover:rotate-45 transition-transform`}
+            />
+            <span className="text-[7.5px] font-mono font-bold leading-none mt-0.5">
+              {fps ? `${fps}` : '60'}
+            </span>
+          </button>
+        )}
 
-            {/* Graphics Quality & FPS Performance Indicator Button */}
-            {onCycleGraphicsQuality && (
-              <button
-                onClick={onCycleGraphicsQuality}
-                className={`group flex items-center gap-1.5 px-2.5 h-8 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
-                  graphicsQuality === 'performance'
-                    ? 'border-emerald-500/80 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.35)]'
-                    : graphicsQuality === 'balanced'
-                    ? 'border-amber-400/80 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.35)]'
-                    : 'border-purple-400/80 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.35)]'
-                }`}
-                title={`Graphics Engine: ${
-                  graphicsQuality === 'performance'
-                    ? 'Performance Mode (60+ FPS, optimized mobile DPR, fast shadows)'
-                    : graphicsQuality === 'balanced'
-                    ? 'Balanced Mode (Smooth 60 FPS, crisp detail)'
-                    : 'High Mode (Maximum fidelity & full shadow map)'
-                } - Click to switch`}
-              >
-                <Gauge className={`w-3.5 h-3.5 ${graphicsQuality === 'performance' ? 'text-emerald-400' : graphicsQuality === 'balanced' ? 'text-amber-400' : 'text-purple-400'} group-hover:rotate-45 transition-transform`} />
-                <span className="text-[10px] font-mono font-bold tracking-tight">
-                  {fps ? `${fps} FPS` : graphicsQuality === 'performance' ? '60 FPS' : graphicsQuality === 'balanced' ? 'BAL' : 'HIGH'}
-                </span>
-              </button>
-            )}
-          </div>
+        {/* 4. Western Music Icon Button */}
+        <button
+          id="btn-western-music-toggle"
+          onClick={handleToggleMusic}
+          className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+            isMusicActive
+              ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
+              : 'border-amber-600/40 hover:border-amber-400/80 shadow-black/40 text-stone-500 hover:text-stone-300'
+          }`}
+          title={
+            isMusicActive
+              ? `Western Music: ${currentTrack.title} (Playing) - Click to silence`
+              : 'Western Music (Silenced) - Click to play'
+          }
+          aria-label="Western Music"
+        >
+          {isMusicActive ? (
+            <Music className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform animate-pulse" />
+          ) : (
+            <div className="relative flex items-center justify-center">
+              <Music className="w-4 h-4 text-stone-500 group-hover:text-stone-300 transition-colors" />
+              <span className="absolute w-[18px] h-[1.5px] bg-red-500/80 rotate-45 pointer-events-none rounded-full" />
+            </div>
+          )}
+        </button>
+      </div>
 
         {/* Portal Excavation & Mountain Strain Warning Card (Collapsible) */}
         {playerState.portalExcavation && (
@@ -1211,8 +1263,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       </div>
       )}
 
-      {/* Top Right: Weapons & Equipment Status */}
-      <div className="pointer-events-auto absolute top-12 sm:top-4 right-3 sm:right-5 flex flex-col items-end gap-2 z-30">
+      {/* Top Right: Weapons & Equipment Status (placed beside utility rail) */}
+      <div className="pointer-events-auto fixed top-16 sm:top-18 right-14 sm:right-16 flex flex-col items-end gap-2 z-30">
         {hudVisible && (
           <>
             {/* Weapons Info */}
@@ -1262,18 +1314,18 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
 
       {/* Center Interaction Prompt (Touch and Click friendly) */}
       {interactionPrompt && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-12 sm:translate-y-14 pointer-events-auto flex flex-col items-center z-40 max-w-[90vw]">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-16 pointer-events-auto flex flex-col items-center z-40 max-w-[90vw]">
           <button
             onClick={onInteract}
-            className="flex items-center gap-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-stone-950 font-bold px-5 py-3 rounded-full shadow-[0_0_30px_rgba(251,191,36,0.7)] backdrop-blur-md border-2 border-amber-200 transition-all transform hover:scale-105 active:scale-95 animate-pulse cursor-pointer touch-manipulation"
+            className="flex items-center gap-2 bg-stone-950/90 hover:bg-stone-900 text-stone-100 font-medium px-3.5 py-1.5 rounded-full shadow-lg backdrop-blur-md border border-amber-500/60 transition-all hover:scale-105 active:scale-95 cursor-pointer touch-manipulation"
           >
-            <span className="w-7 h-7 rounded-full bg-stone-950 text-amber-300 text-xs flex items-center justify-center font-mono font-black border border-amber-400/60 shrink-0">
+            <span className="w-5 h-5 rounded-full bg-amber-500 text-stone-950 text-xs flex items-center justify-center font-mono font-bold shrink-0">
               E
             </span>
-            <span className="text-xs sm:text-sm font-sans tracking-wide text-stone-950 font-black truncate max-w-[260px] sm:max-w-none">
+            <span className="text-xs font-sans tracking-wide text-stone-200 font-semibold truncate max-w-[260px] sm:max-w-none">
               {interactionPrompt}
             </span>
-            <span className="text-[10px] bg-stone-900/80 text-amber-300 px-2 py-0.5 rounded-full font-mono uppercase tracking-wider shrink-0">
+            <span className="text-[9px] bg-stone-800 text-amber-300 px-1.5 py-0.5 rounded-full font-mono uppercase tracking-wider shrink-0">
               TAP
             </span>
           </button>
@@ -1342,13 +1394,15 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         {playerState.equippedTool === 'builder' && (
           <div className="pointer-events-auto flex items-center gap-3 bg-stone-900/95 backdrop-blur-md px-4 py-2 rounded-2xl border-2 border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.4)] text-xs">
             <div className="flex items-center gap-2">
-              {activeBuildingType === 'campfire' || activeBuildingType === 'prospector_camp' ? (
+              {activeBuildingType === 'campfire' || activeBuildingType === 'prospector_camp' || activeBuildingType === 'frontier_torch' ? (
                 <Flame className="w-4 h-4 text-orange-400 animate-pulse" />
               ) : (
                 <Hammer className="w-4 h-4 text-amber-400" />
               )}
               <span className="text-stone-300">
-                {activeBuildingType === 'campfire' || activeBuildingType === 'prospector_camp'
+                {activeBuildingType === 'frontier_torch'
+                  ? 'Torch:'
+                  : activeBuildingType === 'campfire' || activeBuildingType === 'prospector_camp'
                   ? 'Campsite:'
                   : 'Blueprint:'}
               </span>
@@ -1371,8 +1425,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               <span>Rotate [R]</span>
             </button>
 
-            {/* Remove Change Blueprint when placing campsite/campfire */}
-            {activeBuildingType !== 'campfire' && activeBuildingType !== 'prospector_camp' && onOpenBuilder && (
+            {/* Remove Change Blueprint when placing campsite/campfire/torch */}
+            {activeBuildingType !== 'campfire' && activeBuildingType !== 'prospector_camp' && activeBuildingType !== 'frontier_torch' && onOpenBuilder && (
               <button
                 onClick={onOpenBuilder}
                 className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold rounded-lg text-[11px] cursor-pointer"
@@ -1381,7 +1435,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               </button>
             )}
 
-            {activeBuildingType !== 'campfire' && activeBuildingType !== 'prospector_camp' && onOpenRockDepot && (
+            {activeBuildingType !== 'campfire' && activeBuildingType !== 'prospector_camp' && activeBuildingType !== 'frontier_torch' && onOpenRockDepot && (
               <button
                 onClick={onOpenRockDepot}
                 className="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-amber-300 border border-amber-600/40 rounded-lg text-[11px] font-bold cursor-pointer"
@@ -1400,7 +1454,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             </button>
 
             <span className="text-[10px] text-emerald-400 font-mono hidden sm:inline">
-              [Left-Click] {activeBuildingType === 'timber_portal' ? 'Excavate Portal / Build' : 'Place in 3D'}
+              [Left-Click] {activeBuildingType === 'frontier_torch' ? 'Stake Torch (Place 3-4 in row)' : activeBuildingType === 'timber_portal' ? 'Excavate Portal / Build' : 'Place in 3D'}
             </span>
           </div>
         )}
@@ -1433,53 +1487,6 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       {/* On-Screen Mobile Virtual Controls (Joystick & Action Buttons) */}
       {showTouchControls && (
         <div className="pointer-events-none fixed inset-0 z-25">
-          {/* Mobile Top Quick Fullscreen & Orientation Utility */}
-          <div
-            className="absolute pointer-events-auto select-none z-30 flex items-center gap-2"
-            style={{
-              top: 'max(0.75rem, env(safe-area-inset-top))',
-              right: 'max(3.75rem, env(safe-area-inset-right))',
-            }}
-          >
-            {isLandscapeMobile && (
-              <span className="hidden xs:inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-stone-900/85 border border-amber-500/40 text-[10px] font-mono text-amber-300 backdrop-blur-md shadow-md">
-                <Compass className="w-3 h-3 text-amber-400" />
-                <span>PANORAMA</span>
-              </span>
-            )}
-
-            <button
-              onTouchStart={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleToggleFullscreen();
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleToggleFullscreen();
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border shadow-xl backdrop-blur-md text-[11px] font-mono font-bold transition-all active:scale-95 touch-manipulation cursor-pointer ${
-                isFullscreen
-                  ? 'bg-amber-500 text-stone-950 border-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.6)]'
-                  : 'bg-stone-900/90 text-stone-200 border-stone-700/80 hover:border-amber-400 active:bg-amber-600'
-              }`}
-              title={isFullscreen ? 'Exit Fullscreen' : 'Go Fullscreen on Mobile (Sideways / Landscape Recommended)'}
-              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Go Fullscreen'}
-            >
-              {isFullscreen ? (
-                <>
-                  <Minimize className="w-3.5 h-3.5 text-stone-950" />
-                  <span>EXIT FULL</span>
-                </>
-              ) : (
-                <>
-                  <Maximize className="w-3.5 h-3.5 text-amber-400" />
-                  <span>FULLSCREEN</span>
-                </>
-              )}
-            </button>
-          </div>
-
           {/* Virtual Movement Joystick on bottom-left with safe-area spacing */}
           {onMobileMove && (
             <div
