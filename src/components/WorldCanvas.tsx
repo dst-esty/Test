@@ -38,10 +38,13 @@ import {
 import { territoryClaims } from '../services/territoryClaimService';
 import { generateNoiseTexture, createGoldVeinVoxelMaterials, VoxelShaderUniforms } from '../world/voxelGoldShader';
 import { UndergroundLayersManager } from '../world/undergroundLayers';
+import { MovableRockManager } from '../world/movableRocks';
 import { ShaftSinkingStats } from '../world/undergroundVoxels';
 import { RemoteProspector } from '../world/remoteProspector';
 import { multiplayer } from '../multiplayer/multiplayerService';
 import { DesertHydrologyEngine } from '../world/hydrology';
+import { resolveKinematicMovement } from '../physics/collisionEngine';
+import { MountainDustParticleSystem } from '../world/mountainDustParticles';
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -70,6 +73,7 @@ interface WorldCanvasProps {
   onBuildStructure?: (type: MineStructureType, pos: Vector3D, rotationY: number) => void;
   onOpenDeedModal?: (claim: ClaimInfo) => void;
   onOpenBuilder?: () => void;
+  onOpenCamp?: () => void;
   activeBuildingType?: MineStructureType;
   onRegisterReinforceHandler?: (fn: () => void) => void;
   onRegisterExcavateHandler?: (fn: () => void) => void;
@@ -133,6 +137,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onBuildStructure,
   onOpenDeedModal,
   onOpenBuilder,
+  onOpenCamp,
   activeBuildingType = 'timber_portal',
   onRegisterReinforceHandler,
   onRegisterExcavateHandler,
@@ -257,9 +262,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const fpToolGroupRef = useRef<THREE.Group | null>(null);
   const fpPickGroupRef = useRef<THREE.Group | null>(null);
   const fpShovelGroupRef = useRef<THREE.Group | null>(null);
+  const fpAxeGroupRef = useRef<THREE.Group | null>(null);
+  const fpCarriedRockGroupRef = useRef<THREE.Group | null>(null);
+  const fpCarriedRockMeshRef = useRef<THREE.Mesh | null>(null);
+  const campfireFuelTimer = useRef(0);
 
   // Subsystems
   const foliageManagerRef = useRef<DesertFoliageManager | null>(null);
+  const mountainDustParticlesRef = useRef<MountainDustParticleSystem | null>(null);
+  const movableRockManagerRef = useRef<MovableRockManager | null>(null);
   const miningSystemRef = useRef<MiningSystem | null>(null);
   const mineBuildingRef = useRef<MineBuildingSystem | null>(null);
   const wildlifeManagerRef = useRef<WildlifeManager | null>(null);
@@ -407,9 +418,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const terrain = createTerrainMesh();
     scene.add(terrain);
 
+    // High-Fidelity Mountain Dust, Micro-silt, and Cleavage Particle System
+    const mountainDustParticles = new MountainDustParticleSystem(scene);
+    mountainDustParticlesRef.current = mountainDustParticles;
+
     const foliage = createDesertFoliage(scene);
     goldDepositsRef.current = foliage.goldDeposits;
     foliageManagerRef.current = foliage.manager;
+    foliage.manager.setDustParticleSystem(mountainDustParticles);
 
     const landmarkMeshes = createLandmarkStructures(scene, landmarks);
 
@@ -433,10 +449,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     // Instantiate Granular Mining with Custom GLSL Shaded Voxels
     const miningSystem = new MiningSystem(scene, terrain, getTerrainHeight, customVoxelMaterials);
+    miningSystem.setMountainHoleManager(foliage.manager.mountainHoleManager);
+    miningSystem.setDustParticleSystem(mountainDustParticles);
     miningSystemRef.current = miningSystem;
 
     const mineBuilding = new MineBuildingSystem(scene, getTerrainHeight);
     mineBuildingRef.current = mineBuilding;
+
+    const movableRockManager = new MovableRockManager(scene);
+    movableRockManagerRef.current = movableRockManager;
 
     // Restore existing claim or built structures
     if (playerStateRef.current.activeClaim?.isClaimed) {
@@ -566,6 +587,38 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     shovelGroup.add(shovelTip);
     fpToolGroup.add(shovelGroup);
     fpShovelGroupRef.current = shovelGroup;
+
+    // First-Person Tool: 3. Frontier Timber Felling Axe
+    const axeGroup = new THREE.Group();
+    // Hickory wood haft
+    const axeShaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.016, 0.02, 0.8, 8),
+      new THREE.MeshStandardMaterial({ color: 0x5a3d24, roughness: 0.85 })
+    );
+    axeShaft.rotation.x = -Math.PI / 4;
+
+    // Forged steel axe poll & eye
+    const axeHead = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.16, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.85, roughness: 0.3 })
+    );
+    axeHead.position.set(0, 0.28, -0.28);
+    axeHead.rotation.x = -Math.PI / 4;
+
+    // Razor-sharp cutting blade bit
+    const axeBlade = new THREE.Mesh(
+      new THREE.ConeGeometry(0.09, 0.13, 4),
+      new THREE.MeshStandardMaterial({ color: 0x7c8594, metalness: 0.9, roughness: 0.2 })
+    );
+    axeBlade.position.set(0, 0.35, -0.35);
+    axeBlade.rotation.x = -Math.PI / 4;
+    axeBlade.rotation.y = Math.PI / 4;
+
+    axeGroup.add(axeShaft);
+    axeGroup.add(axeHead);
+    axeGroup.add(axeBlade);
+    fpToolGroup.add(axeGroup);
+    fpAxeGroupRef.current = axeGroup;
 
     // 7. Character Mesh for Third-Person Mode
     const charGroup = new THREE.Group();
@@ -825,12 +878,29 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const raycaster = new THREE.Raycaster(origin, dir, 0.1, 7.5);
         const fRes = foliageManagerRef.current.strikeFoliageOrRock(raycaster, 6.8);
         if (fRes.hit) {
-          soundEngine.playVoxelDig();
+          if (fRes.type === 'outcropping') {
+            soundEngine.playRockChisel();
+          } else {
+            soundEngine.playVoxelDig();
+          }
           if (fRes.goldAwarded && fRes.goldAwarded > 0) {
             soundEngine.playOreChime();
           }
           if (miningSystemRef.current && fRes.hitPoint && fRes.debrisType) {
-            miningSystemRef.current.spawnDigDebris(fRes.hitPoint, fRes.debrisType, 1.4);
+            miningSystemRef.current.spawnDigDebris(
+              fRes.hitPoint,
+              fRes.debrisType,
+              fRes.type === 'outcropping' ? 1.8 : 1.4,
+              fRes.surfaceNormal
+            );
+            if (mountainDustParticlesRef.current && fRes.type === 'outcropping') {
+              mountainDustParticlesRef.current.triggerMountainStrike(
+                fRes.hitPoint,
+                fRes.surfaceNormal || new THREE.Vector3(0, 1, 0),
+                fRes.rockMaterial || 'volcanic_crag',
+                1.35
+              );
+            }
             if (fRes.type === 'gold_deposit' && fRes.goldAwarded) {
               miningSystemRef.current.spawnOreDrop(
                 new THREE.Vector3(fRes.hitPoint.x, fRes.hitPoint.y + 0.4, fRes.hitPoint.z),
@@ -842,6 +912,24 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                 new THREE.Vector3(fRes.hitPoint.x, fRes.hitPoint.y + 0.4, fRes.hitPoint.z),
                 'gold_nugget',
                 fRes.goldAwarded
+              );
+            }
+          }
+
+          // If a boulder or mountain cliff was chipped, drop/eject a real physical rock chunk on the ground
+          if (fRes.spawnPhysicalRock && movableRockManagerRef.current) {
+            if (fRes.spawnPhysicalRock.isChippedFragment) {
+              movableRockManagerRef.current.spawnChippedFragment(
+                fRes.spawnPhysicalRock.position,
+                fRes.spawnPhysicalRock.ejectionDir || new THREE.Vector3(0, 1, 0),
+                fRes.spawnPhysicalRock.color,
+                fRes.spawnPhysicalRock.scale
+              );
+            } else {
+              movableRockManagerRef.current.spawnPlacedRock(
+                fRes.spawnPhysicalRock.position,
+                fRes.spawnPhysicalRock.color,
+                fRes.spawnPhysicalRock.scale
               );
             }
           }
@@ -1182,7 +1270,235 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
     };
 
+    const executeChop = () => {
+      toolSwingProgress.current = 1.0;
+      const cam = cameraRef.current;
+      const lookDir = new THREE.Vector3();
+      if (cam) cam.getWorldDirection(lookDir);
+      else {
+        lookDir.set(Math.sin(playerYaw.current), 0, Math.cos(playerYaw.current));
+      }
+
+      const origin =
+        viewMode === 'third'
+          ? playerPos.current.clone().add(new THREE.Vector3(0, 1.2, 0))
+          : cam
+          ? cam.position.clone()
+          : playerPos.current.clone().add(new THREE.Vector3(0, 1.6, 0));
+
+      const dir = lookDir.clone();
+      if (viewMode === 'third') {
+        dir.y -= 0.35;
+        dir.normalize();
+      }
+
+      if (foliageManagerRef.current) {
+        const raycaster = new THREE.Raycaster(origin, dir, 0.1, 7.5);
+        const fRes = foliageManagerRef.current.strikeFoliageOrRock(raycaster, 6.8, 'axe');
+        if (fRes.hit) {
+          if (fRes.type === 'tree') {
+            soundEngine.playWoodChop();
+          } else {
+            soundEngine.playVoxelDig();
+          }
+
+          if (miningSystemRef.current && fRes.hitPoint) {
+            miningSystemRef.current.spawnDigDebris(fRes.hitPoint, fRes.debrisType || 'wood', 1.5);
+          }
+
+          if ((fRes.woodAwarded && fRes.woodAwarded > 0) || (fRes.blocksDug && fRes.blocksDug > 0)) {
+            setPlayerState((prev) => ({
+              ...prev,
+              woodPlanks: (prev.woodPlanks || 0) + (fRes.woodAwarded || 0),
+              blocksDug: (prev.blocksDug || 0) + (fRes.blocksDug || 0),
+            }));
+          }
+
+          if (fRes.message && onShowBanner) {
+            onShowBanner(fRes.message);
+          }
+          return;
+        }
+      }
+
+      // Air swing sound
+      soundEngine.playWoodChop();
+    };
+
+    const executePickUpRock = () => {
+      const cam = cameraRef.current;
+      const lookDir = new THREE.Vector3();
+      if (cam) cam.getWorldDirection(lookDir);
+      else {
+        lookDir.set(Math.sin(playerYaw.current), 0, Math.cos(playerYaw.current));
+      }
+
+      const origin =
+        viewMode === 'third'
+          ? playerPos.current.clone().add(new THREE.Vector3(0, 1.2, 0))
+          : cam
+          ? cam.position.clone()
+          : playerPos.current.clone().add(new THREE.Vector3(0, 1.6, 0));
+
+      const raycaster = new THREE.Raycaster(origin, lookDir, 0.1, 4.0);
+
+      // 1. Check existing movable rocks
+      if (movableRockManagerRef.current) {
+        const mHit = movableRockManagerRef.current.raycastMovableRock(raycaster, 3.8);
+        if (mHit.hit && mHit.rock) {
+          if (!mHit.canLift) {
+            soundEngine.playHeavyExertion();
+            if (onShowBanner) {
+              onShowBanner(`⚠️ Too heavy to lift! This rock weighs ${mHit.rock.weightLbs} lbs (Human bare-hands limit: 55 lbs). Strike with Pickaxe [4] to break down!`);
+            }
+            return false;
+          }
+          const rock = movableRockManagerRef.current.pickUpRock(mHit.rock.id);
+          if (rock) {
+            soundEngine.playRockPickup();
+            setPlayerState((prev) => ({
+              ...prev,
+              carriedObject: {
+                type: 'rock',
+                name: `${rock.weightLbs} lb Desert Stone`,
+                weightLbs: rock.weightLbs,
+                color: rock.color,
+                scale: rock.scale,
+              },
+            }));
+            if (onShowBanner) onShowBanner(`🪨 Hoisted ${rock.weightLbs} lb Desert Stone into your hands! Throw [L-Click], Place [R-Click / E], or Stow [F].`);
+            return true;
+          }
+        }
+      }
+
+      // 2. Check world instanced boulders
+      if (foliageManagerRef.current) {
+        const bRes = foliageManagerRef.current.pickUpWorldBoulder(raycaster, 3.8);
+        if (bRes && bRes.hit) {
+          if (!bRes.canLift) {
+            soundEngine.playHeavyExertion();
+            if (onShowBanner) {
+              onShowBanner(`⚠️ Too heavy to lift! This boulder weighs ~${bRes.weightLbs.toLocaleString()} lbs (Human limit: 55 lbs). Strike with Pickaxe [4] to chisel manageable stones!`);
+            }
+            return false;
+          }
+          soundEngine.playRockPickup();
+          const scale = bRes.scale || 0.85;
+          const weight = bRes.weightLbs;
+          setPlayerState((prev) => ({
+            ...prev,
+            carriedObject: {
+              type: 'rock',
+              name: `${weight} lb Field Stone`,
+              weightLbs: weight,
+              color: bRes.color || 0x9b583c,
+              scale,
+            },
+          }));
+          if (onShowBanner) onShowBanner(`🪨 Lifted ${weight} lb Field Stone with bare hands! Throw [L-Click], Place [R-Click / E], or Stow [F].`);
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    const executeThrowRock = () => {
+      const carried = playerStateRef.current.carriedObject;
+      if (!carried || !movableRockManagerRef.current) return;
+
+      soundEngine.playRockThrow();
+      toolSwingProgress.current = 1.0;
+
+      const cam = cameraRef.current;
+      const lookDir = new THREE.Vector3();
+      if (cam) cam.getWorldDirection(lookDir);
+      else {
+        lookDir.set(Math.sin(playerYaw.current), 0, Math.cos(playerYaw.current));
+      }
+
+      const spawnPos = cam
+        ? cam.position.clone().add(lookDir.clone().multiplyScalar(0.75)).add(new THREE.Vector3(0, -0.2, 0))
+        : playerPos.current.clone().add(new THREE.Vector3(0, 1.4, 0)).add(lookDir.clone().multiplyScalar(0.75));
+
+      // Ballistic throw speed inversely scaled to rock mass:
+      // A light 10 lb stone is thrown at ~19 m/s; a 50 lb stone is heaved with two hands at ~8 m/s
+      const throwSpeed = Math.max(7.0, 22.0 - (carried.weightLbs * 0.28));
+      const throwVelocity = lookDir.clone().multiplyScalar(throwSpeed);
+      throwVelocity.y += Math.max(1.6, 4.2 - (carried.weightLbs * 0.04));
+
+      movableRockManagerRef.current.spawnThrownRock(
+        spawnPos,
+        throwVelocity,
+        carried.color,
+        carried.scale
+      );
+
+      setPlayerState((prev) => ({
+        ...prev,
+        carriedObject: null,
+      }));
+
+      if (onShowBanner) onShowBanner(`💨 Threw ${carried.name}!`);
+    };
+
+    const executePlaceRock = () => {
+      const carried = playerStateRef.current.carriedObject;
+      if (!carried || !movableRockManagerRef.current) return;
+
+      soundEngine.playRockImpact(0.2);
+
+      const cam = cameraRef.current;
+      const lookDir = new THREE.Vector3();
+      if (cam) cam.getWorldDirection(lookDir);
+      else {
+        lookDir.set(Math.sin(playerYaw.current), 0, Math.cos(playerYaw.current));
+      }
+
+      const placeX = playerPos.current.x + lookDir.x * 1.6;
+      const placeZ = playerPos.current.z + lookDir.z * 1.6;
+      const placeY = getTerrainHeight(placeX, placeZ);
+
+      movableRockManagerRef.current.spawnPlacedRock(
+        new THREE.Vector3(placeX, placeY + carried.scale * 0.2, placeZ),
+        carried.color,
+        carried.scale,
+        playerYaw.current
+      );
+
+      setPlayerState((prev) => ({
+        ...prev,
+        carriedObject: null,
+      }));
+
+      if (onShowBanner) onShowBanner(`🪨 Set down ${carried.name}.`);
+    };
+
+    const executeStowRock = () => {
+      const carried = playerStateRef.current.carriedObject;
+      if (!carried) return;
+
+      soundEngine.playVoxelDig();
+      const nextCount = (playerStateRef.current.blocksDug || 0) + 1;
+      setPlayerState((prev) => ({
+        ...prev,
+        blocksDug: nextCount,
+        carriedObject: null,
+      }));
+
+      if (onShowBanner) onShowBanner(`🎒 Stowed ${carried.name} into backpack (+1 Rock, ${nextCount} total in pack).`);
+    };
+
     const handleActionDig = () => {
+      if (playerStateRef.current.carriedObject) {
+        executeThrowRock();
+        return;
+      }
+      if (playerStateRef.current.equippedTool === 'hands') {
+        executePickUpRock();
+        return;
+      }
       if (
         undergroundLayersRef.current &&
         undergroundLayersRef.current.currentLevel > 0
@@ -1200,6 +1516,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       if (playerStateRef.current.equippedTool === 'shovel') {
         executeShovelDig();
+      } else if (playerStateRef.current.equippedTool === 'axe') {
+        executeChop();
       } else {
         executeDig();
       }
@@ -1660,12 +1978,20 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      const woodCost = blueprint.woodCost || 0;
       if (
         (playerStateRef.current.goldFound || 0) < blueprint.goldCost ||
-        (playerStateRef.current.blocksDug || 0) < blueprint.rockCost
+        (playerStateRef.current.blocksDug || 0) < blueprint.rockCost ||
+        (playerStateRef.current.woodPlanks || 0) < woodCost
       ) {
         if (onShowBanner) {
-          onShowBanner(`Need ${blueprint.goldCost} Gold & ${blueprint.rockCost} Rocks to build ${blueprint.name}!`);
+          if (type === 'campfire') {
+            onShowBanner(`Need ${blueprint.rockCost} Rocks & ${woodCost} Cut Wood Logs to build a Frontier Campfire! Chop trees at springs with Axe [X].`);
+          } else if (type === 'prospector_camp') {
+            onShowBanner(`Need ${blueprint.goldCost} oz Gold, ${blueprint.rockCost} Rocks & ${woodCost} Wood to pitch an Outpost Camp!`);
+          } else {
+            onShowBanner(`Need ${blueprint.goldCost} Gold, ${blueprint.rockCost} Rocks & ${woodCost} Wood to build ${blueprint.name}!`);
+          }
         }
         return;
       }
@@ -1676,11 +2002,19 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         ghostRotationY.current
       );
 
+      // Hide holographic ghost preview immediately
+      if (mineBuildingRef.current) {
+        mineBuildingRef.current.hideGhost();
+      }
+
+      // Automatically revert to pickaxe so the campsite menu/placement ribbon immediately disappears
       setPlayerState((prev) => ({
         ...prev,
         goldFound: Math.max(0, (prev.goldFound || 0) - blueprint.goldCost),
         blocksDug: Math.max(0, (prev.blocksDug || 0) - blueprint.rockCost),
+        woodPlanks: Math.max(0, (prev.woodPlanks || 0) - woodCost),
         builtStructures: [...(prev.builtStructures || []), structure],
+        equippedTool: 'pickaxe',
       }));
 
       if (onBuildStructure) {
@@ -1688,7 +2022,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
 
       if (onShowBanner) {
-        onShowBanner(`${blueprint.name} Constructed on your Claim!`);
+        if (type === 'campfire') {
+          onShowBanner(`🔥 Frontier Campfire Built! Crackling mesquite embers provide light & warmth. Press [E] to rest, brew coffee, and fill canteen.`);
+        } else if (type === 'prospector_camp') {
+          onShowBanner(`⛺ Prospector Outpost Camp Pitched! Canvas tent, bedroll, and campfire ready for wilderness shelter.`);
+        } else {
+          onShowBanner(`${blueprint.name} Constructed on your Claim!`);
+        }
       }
     };
 
@@ -1697,6 +2037,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (isGameOverRef.current) return;
       keysPressed.current[e.code] = true;
       soundEngine.startAmbiance();
+
+      if (e.code === 'Escape') {
+        if (playerStateRef.current.equippedTool === 'builder') {
+          if (mineBuildingRef.current) {
+            mineBuildingRef.current.hideGhost();
+          }
+          setPlayerState((prev) => ({ ...prev, equippedTool: 'pickaxe' }));
+        }
+      }
 
       if (e.code === 'KeyE') {
         checkInteractions(true);
@@ -1714,6 +2063,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (e.code === 'KeyB') {
         if (onOpenBuilder) onOpenBuilder();
       }
+      if (e.code === 'KeyC') {
+        if (onOpenCamp) onOpenCamp();
+      }
       if (e.code === 'KeyT') {
         if (undergroundLayersRef.current && undergroundLayersRef.current.currentLevel > 0) {
           executePlaceUndergroundTimberBent();
@@ -1722,8 +2074,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      if (e.code === 'KeyF') {
+        if (playerStateRef.current.carriedObject) {
+          executeStowRock();
+          return;
+        }
+      }
+
       // Hotkeys for tools
       const toolHotkeys: Record<string, PlayerState['equippedTool']> = {
+        Backquote: 'hands',
         Digit1: 'compass',
         Digit2: 'lantern',
         Digit3: 'shovel',
@@ -1734,6 +2094,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         Digit8: 'binoculars',
         Digit9: 'stake',
         Digit0: 'builder',
+        KeyX: 'axe',
       };
       if (toolHotkeys[e.code]) {
         setPlayerState((prev) => ({
@@ -1792,15 +2153,33 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     };
 
     const handleMouseDown = (e: MouseEvent) => {
-      if (e.button !== 0) return; // Left click only
       if (isUIOpenRef.current || isGameOverRef.current) return;
+
+      if (e.button === 2) {
+        if (playerStateRef.current.carriedObject) {
+          executePlaceRock();
+          return;
+        }
+      }
+
+      if (e.button !== 0) return; // Left click only
 
       safeRequestPointerLock();
       soundEngine.startAmbiance();
 
       toolSwingProgress.current = 1.0; // Trigger physical 3D tool swing animation
 
+      if (playerStateRef.current.carriedObject) {
+        executeThrowRock();
+        return;
+      }
+
       const tool = playerStateRef.current.equippedTool;
+      if (tool === 'hands') {
+        executePickUpRock();
+        return;
+      }
+
       if (
         undergroundLayersRef.current &&
         undergroundLayersRef.current.currentLevel > 0
@@ -1812,6 +2191,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       if (tool === 'shovel') {
         executeShovelDig();
+      } else if (tool === 'axe') {
+        executeChop();
       } else if (tool === 'pickaxe') {
         executeDig();
       } else if (tool === 'rifle') {
@@ -1822,6 +2203,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         executeStakeClaim();
       } else if (tool === 'builder') {
         executeBuildStructure();
+      }
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      if (playerStateRef.current.carriedObject) {
+        executePlaceRock();
       }
     };
 
@@ -1869,6 +2257,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     document.addEventListener('pointerlockerror', handlePointerLockError);
     renderer.domElement.addEventListener('mousedown', handleMouseDown);
+    renderer.domElement.addEventListener('contextmenu', handleContextMenu);
     renderer.domElement.addEventListener('touchstart', handleTouchStart);
     renderer.domElement.addEventListener('touchmove', handleTouchMove);
 
@@ -1889,6 +2278,66 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const checkInteractions = (executeAction = false) => {
       const px = playerPos.current.x;
       const pz = playerPos.current.z;
+
+      // -1. Carried Object (Rock) Placement & Stowing
+      if (playerStateRef.current.carriedObject) {
+        const carried = playerStateRef.current.carriedObject;
+        if (executeAction) {
+          executePlaceRock();
+        } else {
+          onPromptInteract(
+            `🪨 Set Down ${carried.name} [E / Right-Click] | Throw [Left-Click] | Stow [F]`,
+            () => executePlaceRock()
+          );
+        }
+        return;
+      }
+
+      // -1b. Bare Hands Rock Pickup Detection
+      if (playerStateRef.current.equippedTool === 'hands' && !playerStateRef.current.carriedObject) {
+        const cam = cameraRef.current;
+        const lookDir = new THREE.Vector3();
+        if (cam) cam.getWorldDirection(lookDir);
+        else {
+          lookDir.set(Math.sin(playerYaw.current), 0, Math.cos(playerYaw.current));
+        }
+        const origin = cam ? cam.position.clone() : playerPos.current.clone().add(new THREE.Vector3(0, 1.4, 0));
+        const handsRay = new THREE.Raycaster(origin, lookDir, 0.1, 3.8);
+
+        let rockTargeted = false;
+        let canLift = true;
+        let weightLbs = 20;
+
+        if (movableRockManagerRef.current) {
+          const mHit = movableRockManagerRef.current.raycastMovableRock(handsRay, 3.5);
+          if (mHit.hit && mHit.rock) {
+            rockTargeted = true;
+            canLift = mHit.canLift ?? true;
+            weightLbs = mHit.weightLbs ?? mHit.rock.weightLbs;
+          }
+        }
+        if (!rockTargeted && foliageManagerRef.current) {
+          const bHit = foliageManagerRef.current.checkNearbyBoulder(handsRay, 3.5);
+          if (bHit && bHit.hit) {
+            rockTargeted = true;
+            canLift = bHit.canLift;
+            weightLbs = bHit.weightLbs;
+          }
+        }
+
+        if (rockTargeted) {
+          if (executeAction) {
+            executePickUpRock();
+          } else {
+            if (canLift) {
+              onPromptInteract(`🪨 Lift Stone (${weightLbs} lbs) [E / Left-Click]`, () => executePickUpRock());
+            } else {
+              onPromptInteract(`🚫 Boulder Too Heavy (~${weightLbs.toLocaleString()} lbs) — Use Pickaxe [4]`, () => executePickUpRock());
+            }
+          }
+          return;
+        }
+      }
 
       // Geotechnical Excavation Trench check
       const nearbyTrench = getNearbyDugHole(px, pz, 4.8);
@@ -2274,20 +2723,65 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         for (const s of playerStateRef.current.builtStructures) {
           if (s.type === 'campfire' || s.type === 'prospector_camp') {
             const dist = Math.hypot(px - s.position.x, pz - s.position.z);
-            if (dist < 3.4) {
+            if (dist < 4.2) {
+              const fuel = s.fuelHoursRemaining !== undefined ? s.fuelHoursRemaining : 12.0;
+              const isFireLit = s.isLit !== false && fuel > 0;
+              const woodOwned = playerStateRef.current.woodPlanks || 0;
+
+              if (!isFireLit) {
+                const handleRekindle = () => {
+                  if (woodOwned < 1) {
+                    if (onShowBanner) {
+                      onShowBanner(`⚠️ Campfire burned out! Chop cottonwood or mesquite trees near desert springs with Axe [X] for cut wood.`);
+                    }
+                    return;
+                  }
+                  soundEngine.playCampfire();
+                  const newFuel = Math.min(s.maxFuelHours || 24.0, 8.0);
+                  if (mineBuildingRef.current) {
+                    mineBuildingRef.current.updateCampfireVisuals(s.id, true, newFuel);
+                  }
+                  setPlayerState((prev) => ({
+                    ...prev,
+                    woodPlanks: Math.max(0, (prev.woodPlanks || 0) - 1),
+                    builtStructures: (prev.builtStructures || []).map((item) =>
+                      item.id === s.id
+                        ? { ...item, fuelHoursRemaining: newFuel, isLit: true }
+                        : item
+                    ),
+                  }));
+                  if (onShowBanner) onShowBanner(`🔥 Rekindled ${s.name} with 1 Wood Log! Fire blazing (+8h fuel).`);
+                };
+
+                if (executeAction) {
+                  handleRekindle();
+                } else {
+                  if (woodOwned >= 1) {
+                    onPromptInteract(`🪵 Rekindle Campfire with 1 Cut Wood [E] (${woodOwned} logs owned)`, handleRekindle);
+                  } else {
+                    onPromptInteract(`🔥 Campfire Burned Out — Need Cut Wood [Axe: X] [E]`, handleRekindle);
+                  }
+                }
+                return;
+              }
+
+              // Fire is lit: allow resting and warming
               const handleRest = () => {
                 soundEngine.playCampfire();
+                soundEngine.playWaterRefill();
                 setPlayerState((prev) => ({
                   ...prev,
-                  health: Math.min(100, (prev.health || 0) + 30),
-                  hydration: Math.min(100, (prev.hydration || 0) + 20),
+                  health: Math.min(100, (prev.health || 0) + 35),
+                  hydration: Math.min(100, (prev.hydration || 0) + 30),
+                  canteenOunces: 32,
                 }));
-                if (onShowBanner) onShowBanner(`Rested by ${s.name} (+30 Health, refreshed)!`);
+                if (onShowBanner) onShowBanner(`🔥 Rested by ${s.name}! Coffee brewed & canteen filled (${fuel.toFixed(1)}h fuel remaining).`);
               };
+
               if (executeAction) {
                 handleRest();
               } else {
-                onPromptInteract(`Rest & Warm Up at ${s.name} [E]`, handleRest);
+                onPromptInteract(`Rest by Fire & Brew Coffee [E] (${fuel.toFixed(1)}h fuel)`, handleRest);
               }
               return;
             }
@@ -2348,6 +2842,32 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      // 5b. Mountain Excavation Holes (Pickaxe Carved Cavities & Adits)
+      if (foliageManagerRef.current?.mountainHoleManager) {
+        const mtnHole = foliageManagerRef.current.mountainHoleManager.getNearbyHole(playerPos.current, 3.2);
+        if (mtnHole) {
+          const veinText = mtnHole.hasExposedGoldVein ? ' | ✨ Gold Vein Exposed' : '';
+          const label = `⛏️ Mountain Excavation Hole (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Pickaxe to Bore Deeper]`;
+          if (executeAction) {
+            if (mtnHole.hasExposedGoldVein && Math.random() < 0.35) {
+              setPlayerState((prev) => ({
+                ...prev,
+                goldFound: (prev.goldFound || 0) + 1,
+              }));
+              soundEngine.playOreChime();
+              if (onShowBanner) {
+                onShowBanner(`✨ Extracted loose 1 oz Gold Specimen from mountain cavity!`);
+              }
+            } else if (onShowBanner) {
+              onShowBanner(`⛏️ Mountain Hole: -${mtnHole.depth.toFixed(1)}m deep into bedrock. Strike with Pickaxe [3] to carve deeper!`);
+            }
+          } else {
+            onPromptInteract(label, () => checkInteractions(true));
+          }
+          return;
+        }
+      }
+
       if (!executeAction) {
         onClearPrompt();
       }
@@ -2376,42 +2896,74 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // 1. Player Physics & Locomotion (Crisp, Responsive, Ground-Snapped Controls)
       const keys = keysPressed.current;
-      const isSprinting = !isGameOverRef.current && (keys['ShiftLeft'] || keys['ShiftRight']);
-      const moveSpeed = (isSprinting ? 12.0 : 6.5) * delta;
+      const carried = playerStateRef.current.carriedObject;
+      let encumbranceFactor = 1.0;
+      let allowSprint = true;
+
+      if (carried && carried.weightLbs) {
+        // Carrying 50 lbs reduces walking speed by ~30%
+        encumbranceFactor = Math.max(0.68, 1.0 - (carried.weightLbs / 160.0));
+        // You cannot sprint while carrying rocks heavier than 25 lbs
+        if (carried.weightLbs > 25) {
+          allowSprint = false;
+        }
+      }
+
+      const isSprinting = !isGameOverRef.current && allowSprint && (keys['ShiftLeft'] || keys['ShiftRight']);
+      const moveSpeed = (isSprinting ? 12.0 : 6.5) * encumbranceFactor * delta;
 
       const forward = new THREE.Vector3(-Math.sin(playerYaw.current), 0, -Math.cos(playerYaw.current));
       const right = new THREE.Vector3(Math.cos(playerYaw.current), 0, -Math.sin(playerYaw.current));
       const moveDir = new THREE.Vector3();
 
       if (!isGameOverRef.current) {
-        if (keys['KeyW'] || keys['ArrowUp']) moveDir.add(forward);
+        if (keys['KeyW'] || keys['KeyZ'] || keys['ArrowUp']) moveDir.add(forward);
         if (keys['KeyS'] || keys['ArrowDown']) moveDir.sub(forward);
         if (keys['KeyD'] || keys['ArrowRight']) moveDir.add(right);
-        if (keys['KeyA'] || keys['ArrowLeft']) moveDir.sub(right);
+        if (keys['KeyA'] || keys['KeyQ'] || keys['ArrowLeft']) moveDir.sub(right);
       }
 
       const isMoving = moveDir.lengthSq() > 0.001;
       if (isMoving) {
         moveDir.normalize();
-        playerPos.current.x += moveDir.x * moveSpeed;
-        playerPos.current.z += moveDir.z * moveSpeed;
+        const targetDx = moveDir.x * moveSpeed;
+        const targetDz = moveDir.z * moveSpeed;
 
-        // Boundary checks: if underground, constrain to cavern chamber; if surface, world bounds
+        // Boundary & Obstacle checks: if underground, constrain to cavern chamber; if surface, resolve rock/mountain/slope collisions
         const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
         if (isUnderground && undergroundLayersRef.current) {
-          const dx = playerPos.current.x - undergroundLayersRef.current.surfacePos.x;
-          const dz = playerPos.current.z - undergroundLayersRef.current.surfacePos.z;
+          const candX = playerPos.current.x + targetDx;
+          const candZ = playerPos.current.z + targetDz;
+          const dx = candX - undergroundLayersRef.current.surfacePos.x;
+          const dz = candZ - undergroundLayersRef.current.surfacePos.z;
           const dist = Math.hypot(dx, dz);
           const maxRadius = 12.0;
-          if (dist > maxRadius) {
+          if (dist <= maxRadius) {
+            playerPos.current.x = candX;
+            playerPos.current.z = candZ;
+          } else {
             const ratio = maxRadius / dist;
             playerPos.current.x = undergroundLayersRef.current.surfacePos.x + dx * ratio;
             playerPos.current.z = undergroundLayersRef.current.surfacePos.z + dz * ratio;
           }
         } else {
-          // Boundaries check (-190 to 190)
-          playerPos.current.x = Math.max(-190, Math.min(190, playerPos.current.x));
-          playerPos.current.z = Math.max(-190, Math.min(190, playerPos.current.z));
+          // Terrain slope, steep hills, boulders, and mountain outcropping collision resolution with smooth wall sliding
+          const currentGroundY = getTerrainHeight(playerPos.current.x, playerPos.current.z);
+          const colRes = resolveKinematicMovement(
+            playerPos.current.x,
+            playerPos.current.z,
+            targetDx,
+            targetDz,
+            currentGroundY,
+            getTerrainHeight,
+            foliageManagerRef.current,
+            movableRockManagerRef.current,
+            mineBuildingRef.current,
+            !isGrounded.current
+          );
+
+          playerPos.current.x = colRes.x;
+          playerPos.current.z = colRes.z;
         }
 
         // Footstep sounds & Surface Water Splash
@@ -2633,19 +3185,39 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       // First-Person Tool Swing & Idle Breathing Animation
       if (fpToolGroupRef.current) {
         const tool = playerStateRef.current.equippedTool;
-        const isToolVisible = viewMode === 'first' && (tool === 'shovel' || tool === 'pickaxe');
+        const carried = playerStateRef.current.carriedObject;
+        const isToolVisible = viewMode === 'first' && (Boolean(carried) || tool === 'shovel' || tool === 'pickaxe' || tool === 'axe');
         fpToolGroupRef.current.visible = isToolVisible;
 
-        if (fpPickGroupRef.current) fpPickGroupRef.current.visible = tool === 'pickaxe';
-        if (fpShovelGroupRef.current) fpShovelGroupRef.current.visible = tool === 'shovel';
+        if (fpPickGroupRef.current) fpPickGroupRef.current.visible = !carried && tool === 'pickaxe';
+        if (fpShovelGroupRef.current) fpShovelGroupRef.current.visible = !carried && tool === 'shovel';
+        if (fpAxeGroupRef.current) fpAxeGroupRef.current.visible = !carried && tool === 'axe';
+
+        if (fpCarriedRockGroupRef.current) {
+          fpCarriedRockGroupRef.current.visible = Boolean(carried);
+          if (carried && fpCarriedRockMeshRef.current) {
+            fpCarriedRockMeshRef.current.scale.setScalar(carried.scale || 1.0);
+            (fpCarriedRockMeshRef.current.material as THREE.MeshStandardMaterial).color.setHex(carried.color || 0x9b583c);
+          }
+        }
 
         const breathe = Math.sin(now * 0.0022) * 0.006;
-        if (toolSwingProgress.current > 0) {
+        if (carried) {
+          if (toolSwingProgress.current > 0) {
+            toolSwingProgress.current = Math.max(0, toolSwingProgress.current - delta * 4.5);
+            const heave = Math.sin(toolSwingProgress.current * Math.PI);
+            fpToolGroupRef.current.rotation.set(-heave * 0.45, 0, 0);
+            fpToolGroupRef.current.position.set(0, -0.05 + breathe - heave * 0.12, -0.45 - heave * 0.15);
+          } else {
+            fpToolGroupRef.current.rotation.set(0, 0, 0);
+            fpToolGroupRef.current.position.set(0, -0.05 + breathe, -0.45);
+          }
+        } else if (toolSwingProgress.current > 0) {
           toolSwingProgress.current = Math.max(0, toolSwingProgress.current - delta * 4.2);
           const swing = Math.sin(toolSwingProgress.current * Math.PI);
-          fpToolGroupRef.current.rotation.x = -swing * (tool === 'shovel' ? 0.85 : 0.7);
-          fpToolGroupRef.current.rotation.z = -swing * 0.35;
-          fpToolGroupRef.current.position.y = -0.28 - swing * (tool === 'shovel' ? 0.22 : 0.12) + breathe;
+          fpToolGroupRef.current.rotation.x = -swing * (tool === 'shovel' ? 0.85 : tool === 'axe' ? 0.95 : 0.7);
+          fpToolGroupRef.current.rotation.z = -swing * (tool === 'axe' ? 0.45 : 0.35);
+          fpToolGroupRef.current.position.y = -0.28 - swing * (tool === 'shovel' ? 0.22 : tool === 'axe' ? 0.25 : 0.12) + breathe;
         } else {
           fpToolGroupRef.current.rotation.set(0, 0, 0);
           fpToolGroupRef.current.position.set(0.3, -0.28 + breathe, -0.55);
@@ -2671,13 +3243,54 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           const blueprint = STRUCTURE_BLUEPRINTS[type];
           const canAfford =
             playerStateRef.current.goldFound >= blueprint.goldCost &&
-            playerStateRef.current.blocksDug >= blueprint.rockCost;
+            playerStateRef.current.blocksDug >= blueprint.rockCost &&
+            (playerStateRef.current.woodPlanks || 0) >= (blueprint.woodCost || 0);
           mineBuildingRef.current.setGhost(type);
           mineBuildingRef.current.updateGhostPosition(groundHitPoint.current, ghostRotationY.current, canAfford);
         } else {
           mineBuildingRef.current.hideGhost();
         }
         mineBuildingRef.current.update(delta);
+
+        // Campfire Fuel Burn Loop (every 2.5s real-time = 0.10 game hours consumed)
+        campfireFuelTimer.current += delta;
+        if (campfireFuelTimer.current >= 2.5) {
+          const elapsedGameHours = campfireFuelTimer.current * 0.04;
+          campfireFuelTimer.current = 0;
+
+          const structures = playerStateRef.current.builtStructures;
+          if (structures && structures.length > 0) {
+            let stateChanged = false;
+            const updated = structures.map((s) => {
+              if ((s.type === 'campfire' || s.type === 'prospector_camp') && s.isLit !== false) {
+                const currentFuel = s.fuelHoursRemaining !== undefined ? s.fuelHoursRemaining : 12.0;
+                const newFuel = Math.max(0, currentFuel - elapsedGameHours);
+                const isLitNow = newFuel > 0;
+
+                if (mineBuildingRef.current) {
+                  mineBuildingRef.current.updateCampfireVisuals(s.id, isLitNow, newFuel);
+                }
+
+                if (isLitNow !== s.isLit || Math.abs(currentFuel - newFuel) >= 0.08) {
+                  stateChanged = true;
+                  return {
+                    ...s,
+                    fuelHoursRemaining: newFuel,
+                    isLit: isLitNow,
+                  };
+                }
+              }
+              return s;
+            });
+
+            if (stateChanged) {
+              setPlayerState((prev) => ({
+                ...prev,
+                builtStructures: updated,
+              }));
+            }
+          }
+        }
       }
 
       // 3. Update Granular Mining System (Drops, Voxels & Debris)
@@ -2731,6 +3344,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
         });
+      }
+
+      // 3b. Update High-Fidelity Mountain Stone Dust & Cleavage Particle System
+      if (mountainDustParticlesRef.current) {
+        mountainDustParticlesRef.current.update(delta);
       }
 
       // 4. Update Desert Wildlife (Rabbits, Snakes, Bighorn Sheep, Vultures)
@@ -2861,6 +3479,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         hydrologyEngineRef.current.update(delta, weather);
       }
 
+      // 5b-3. Movable Rocks & Ballistics Simulation
+      if (movableRockManagerRef.current) {
+        movableRockManagerRef.current.update(delta, getTerrainHeight, (vol) => {
+          soundEngine.playRockImpact(vol);
+        });
+      }
+
       // 5c. Subterranean Mine Shaft & Granular Mini-Voxel Engine
       if (undergroundLayersRef.current) {
         undergroundLayersRef.current.update(delta, performance.now());
@@ -2951,6 +3576,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       window.removeEventListener('resize', handleResize);
       renderer.domElement.removeEventListener('mousedown', handleMouseDown);
+      renderer.domElement.removeEventListener('contextmenu', handleContextMenu);
       renderer.domElement.removeEventListener('touchstart', handleTouchStart);
       renderer.domElement.removeEventListener('touchmove', handleTouchMove);
       if (container.contains(renderer.domElement)) {
@@ -2980,6 +3606,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       if (foliageManagerRef.current && typeof foliageManagerRef.current.dispose === 'function') {
         foliageManagerRef.current.dispose();
+      }
+      if (mountainDustParticlesRef.current && typeof mountainDustParticlesRef.current.dispose === 'function') {
+        mountainDustParticlesRef.current.dispose();
+      }
+      if (movableRockManagerRef.current && typeof movableRockManagerRef.current.dispose === 'function') {
+        movableRockManagerRef.current.dispose();
       }
       renderer.dispose();
     };

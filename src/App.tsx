@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { WorldCanvas } from './components/WorldCanvas';
 import { ControlsOverlay } from './components/ControlsOverlay';
 import { MapModal } from './components/MapModal';
@@ -12,6 +12,7 @@ import { GuidebookModal } from './components/GuidebookModal';
 import { ClueDialog } from './components/ClueDialog';
 import { VictoryModal } from './components/VictoryModal';
 import { MineBuilderModal } from './components/MineBuilderModal';
+import { CampModal } from './components/CampModal';
 import { ClaimDeedModal } from './components/ClaimDeedModal';
 import { ClaimStakedModal } from './components/ClaimStakedModal';
 import { RockDepotModal } from './components/RockDepotModal';
@@ -38,7 +39,7 @@ export default function App() {
     hydration: 100,
     isSprinting: false,
     isInsideMine: false,
-    equippedTool: 'pickaxe',
+    equippedTool: 'hands',
     ammo: 24,
     dynamite: 6,
     goldFound: 2.0, // 2 oz starting gold from prospecting
@@ -106,6 +107,7 @@ export default function App() {
   const [isGuidebookOpen, setIsGuidebookOpen] = useState(false);
   const [isVictoryOpen, setIsVictoryOpen] = useState(false);
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+  const [isCampModalOpen, setIsCampModalOpen] = useState(false);
   const [isClaimDeedOpen, setIsClaimDeedOpen] = useState(false);
   const [isDepotOpen, setIsDepotOpen] = useState(false);
   const [isTortillaFlatOpen, setIsTortillaFlatOpen] = useState(false);
@@ -133,6 +135,7 @@ export default function App() {
     isGuidebookOpen ||
     isVictoryOpen ||
     isBuilderOpen ||
+    isCampModalOpen ||
     isClaimDeedOpen ||
     isDepotOpen ||
     isTortillaFlatOpen ||
@@ -140,7 +143,6 @@ export default function App() {
     Boolean(activeClueDialog) ||
     Boolean(gameOverDetails);
 
-  // Visual Combat & Notification Feedback
   const [hitMarkerActive, setHitMarkerActive] = useState(false);
   const [damageFlashActive, setDamageFlashActive] = useState(false);
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
@@ -163,6 +165,93 @@ export default function App() {
   // Universal Synchronized Sky & Weather Instance
   const [timeOfDay, setTimeOfDay] = useState<number>(() => multiplayer.getUniversalTimeOfDay());
   const [weather, setWeather] = useState<WeatherType>(() => multiplayer.getUniversalWeather());
+
+  // Nearby active player-built campfire or outpost camp (within 6.5m)
+  const nearbyCamp = useMemo(() => {
+    if (!playerState.builtStructures?.length || !playerState.position) return null;
+    const px = playerState.position.x;
+    const pz = playerState.position.z;
+    return (
+      playerState.builtStructures.find(
+        (s) =>
+          (s.type === 'campfire' || s.type === 'prospector_camp') &&
+          Math.hypot(px - s.position.x, pz - s.position.z) < 6.5
+      ) || null
+    );
+  }, [playerState.builtStructures, playerState.position]);
+
+  const handleRestAtCamp = useCallback(() => {
+    soundEngine.playCampfire();
+    soundEngine.playWaterRefill();
+    setPlayerState((prev) => ({
+      ...prev,
+      health: Math.min(100, (prev.health || 0) + 35),
+      hydration: Math.min(100, (prev.hydration || 0) + 30),
+      canteenOunces: 32,
+    }));
+    showBanner("🔥 Rested by the fire! Warm coffee brewed and canteen filled (+35 Health, +30 Hydration).");
+  }, [showBanner]);
+
+  const handleSleepUntilDawn = useCallback(() => {
+    soundEngine.playCampfire();
+    setTimeOfDay(6.0); // 6:00 AM Sunrise
+    setPlayerState((prev) => {
+      const updatedStructures = (prev.builtStructures || []).map((s) => {
+        if (s.type === 'campfire' || s.type === 'prospector_camp') {
+          const newFuel = Math.max(0, (s.fuelHoursRemaining ?? 12.0) - 8.0);
+          return {
+            ...s,
+            fuelHoursRemaining: newFuel,
+            isLit: newFuel > 0,
+          };
+        }
+        return s;
+      });
+      return {
+        ...prev,
+        health: 100,
+        hydration: 100,
+        canteenOunces: 32,
+        builtStructures: updatedStructures,
+      };
+    });
+    showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Campfire consumed ~8h of wood fuel.");
+  }, [showBanner]);
+
+  const handleStokeCamp = useCallback(() => {
+    if (!nearbyCamp) return;
+    if ((playerState.woodPlanks || 0) < 1) {
+      showBanner("⚠️ No cut wood logs! Harvest trees around springs with an Axe [X] or buy wood.");
+      return;
+    }
+    soundEngine.playCampfire();
+    const addFuel = 8.0;
+    const currentFuel = nearbyCamp.fuelHoursRemaining ?? 0;
+    const maxFuel = nearbyCamp.maxFuelHours || 24.0;
+    const newFuel = Math.min(maxFuel, currentFuel + addFuel);
+
+    setPlayerState((prev) => ({
+      ...prev,
+      woodPlanks: Math.max(0, (prev.woodPlanks || 0) - 1),
+      builtStructures: (prev.builtStructures || []).map((s) =>
+        s.id === nearbyCamp.id
+          ? { ...s, fuelHoursRemaining: newFuel, isLit: true }
+          : s
+      ),
+    }));
+    showBanner(`🪵 Stoked ${nearbyCamp.name} with 1 Cut Wood Log! Fire rekindled (+8h fuel, ${newFuel.toFixed(1)}h total).`);
+  }, [nearbyCamp, playerState.woodPlanks, showBanner]);
+
+  const handleSelectCampStructure = useCallback((type: MineStructureType) => {
+    setActiveBuildingType(type);
+    setPlayerState((prev) => ({ ...prev, equippedTool: 'builder' }));
+    setIsCampModalOpen(false);
+    if (type === 'campfire') {
+      showBanner("🔥 Frontier Campfire Equipped! Aim at ground & Left-Click to place [R to rotate, Esc to cancel].");
+    } else if (type === 'prospector_camp') {
+      showBanner("⛺ Prospector Outpost Camp Equipped! Aim at ground & Left-Click to pitch [R to rotate, Esc to cancel].");
+    }
+  }, [showBanner]);
   const digHandlerRef = useRef<(() => void) | null>(null);
   const reinforceHandlerRef = useRef<(() => void) | null>(null);
   const excavateHandlerRef = useRef<(() => void) | null>(null);
@@ -474,7 +563,7 @@ export default function App() {
       hydration: 100,
       isSprinting: false,
       isInsideMine: false,
-      equippedTool: 'pickaxe',
+      equippedTool: 'hands',
       ammo: 24,
       dynamite: 6,
       goldFound: 0, // Lost all gold on death
@@ -525,6 +614,8 @@ export default function App() {
         setIsDepotOpen(false);
         setClaimPrompt(null);
         setActiveClueDialog(null);
+      } else if (e.code === 'Backquote') {
+        setPlayerState((p) => ({ ...p, equippedTool: 'hands' }));
       } else if (e.code === 'Digit1') {
         setPlayerState((p) => ({ ...p, equippedTool: 'compass' }));
       } else if (e.code === 'Digit2') {
@@ -533,6 +624,8 @@ export default function App() {
         setPlayerState((p) => ({ ...p, equippedTool: 'shovel' }));
       } else if (e.code === 'Digit4') {
         setPlayerState((p) => ({ ...p, equippedTool: 'pickaxe' }));
+      } else if (e.code === 'KeyX') {
+        setPlayerState((p) => ({ ...p, equippedTool: 'axe' }));
       } else if (e.code === 'Digit5') {
         setPlayerState((p) => ({ ...p, equippedTool: 'rifle' }));
       } else if (e.code === 'Digit6') {
@@ -619,11 +712,14 @@ export default function App() {
         }}
         onBuildStructure={(_type, _pos, _rot) => {
           soundEngine.playConstruct();
+          setIsCampModalOpen(false);
+          setIsBuilderOpen(false);
         }}
         onOpenDeedModal={(_claim) => {
           setIsClaimDeedOpen(true);
         }}
         onOpenBuilder={() => setIsBuilderOpen(true)}
+        onOpenCamp={() => setIsCampModalOpen(true)}
         activeBuildingType={activeBuildingType}
         onRegisterReinforceHandler={(fn) => {
           reinforceHandlerRef.current = fn;
@@ -785,13 +881,8 @@ export default function App() {
         onOpenMap={() => setIsMapOpen(true)}
         onOpenJournal={() => setIsJournalOpen(true)}
         onOpenGuidebook={() => setIsGuidebookOpen(true)}
-        onOpenBuilder={() => {
-          if (!playerState.activeClaim?.isClaimed) {
-            showBanner("⚠️ A mine can only be built on a staked claim! Equip Claim Stake [9] to claim territory first.");
-            return;
-          }
-          setIsBuilderOpen(true);
-        }}
+        onOpenBuilder={() => setIsBuilderOpen(true)}
+        onOpenCamp={() => setIsCampModalOpen(true)}
         onOpenClaimDeed={() => setIsClaimDeedOpen(true)}
         activeBuildingType={activeBuildingType}
         onRotateBlueprint={() => {
@@ -1009,6 +1100,19 @@ export default function App() {
         }}
         onPurchaseRocks={handlePurchaseRocks}
         onReinforcePortal={handleReinforcePortal}
+      />
+
+      {/* Wilderness Camp & Campfire Modal */}
+      <CampModal
+        isOpen={isCampModalOpen}
+        onClose={() => setIsCampModalOpen(false)}
+        playerState={playerState}
+        onSelectCampStructure={handleSelectCampStructure}
+        onRestAtCamp={handleRestAtCamp}
+        onSleepUntilDawn={handleSleepUntilDawn}
+        onStokeCamp={handleStokeCamp}
+        nearbyCamp={nearbyCamp}
+        timeOfDay={timeOfDay}
       />
 
       {/* Rock Quarry & Mining Supply Depot Modal */}

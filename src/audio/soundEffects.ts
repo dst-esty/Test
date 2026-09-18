@@ -286,6 +286,69 @@ class SoundEngine {
     osc.stop(t + 0.22);
   }
 
+  public playWoodChop() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // 1. Deep solid wood trunk thud (axe head bite into timber)
+    const trunkOsc = this.ctx.createOscillator();
+    const trunkGain = this.ctx.createGain();
+    trunkOsc.type = 'triangle';
+    trunkOsc.frequency.setValueAtTime(190 + Math.random() * 30, t);
+    trunkOsc.frequency.exponentialRampToValueAtTime(55, t + 0.16);
+
+    trunkGain.gain.setValueAtTime(0.45, t);
+    trunkGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+
+    trunkOsc.connect(trunkGain);
+    trunkGain.connect(this.ctx.destination);
+    trunkOsc.start(t);
+    trunkOsc.stop(t + 0.2);
+
+    // 2. Fibrous timber splinter & wood chip crackle
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.18);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.04));
+    }
+
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1100 + Math.random() * 300, t);
+    filter.Q.setValueAtTime(2.2, t);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.35, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+
+    noiseSource.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.ctx.destination);
+    noiseSource.start(t);
+
+    // 3. Crisp forged axe steel bit ping
+    const ringOsc = this.ctx.createOscillator();
+    const ringGain = this.ctx.createGain();
+    ringOsc.type = 'sine';
+    ringOsc.frequency.setValueAtTime(1450 + Math.random() * 150, t);
+    ringOsc.frequency.exponentialRampToValueAtTime(700, t + 0.08);
+
+    ringGain.gain.setValueAtTime(0.18, t);
+    ringGain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+
+    ringOsc.connect(ringGain);
+    ringGain.connect(this.ctx.destination);
+    ringOsc.start(t);
+    ringOsc.stop(t + 0.1);
+  }
+
   public playShovelDig() {
     if (this.isMuted) return;
     this.init();
@@ -736,6 +799,122 @@ class SoundEngine {
     chime.start(t);
     mallet.stop(t + 0.28);
     chime.stop(t + 0.45);
+  }
+
+  public playRockPickup() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Heavy rustle and mineral stone lift
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(90, t);
+    osc.frequency.exponentialRampToValueAtTime(145, t + 0.12);
+
+    gain.gain.setValueAtTime(0.28, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.16);
+  }
+
+  public playRockThrow() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Whoosh / heave of stone
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(160, t);
+    osc.frequency.exponentialRampToValueAtTime(75, t + 0.18);
+
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.2);
+  }
+
+  public playRockImpact(volume: number = 0.3) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Solid stony thud + rocky clatter
+    const thud = this.ctx.createOscillator();
+    const thudGain = this.ctx.createGain();
+    thud.type = 'triangle';
+    thud.frequency.setValueAtTime(110 + Math.random() * 30, t);
+    thud.frequency.exponentialRampToValueAtTime(40, t + 0.14);
+
+    thudGain.gain.setValueAtTime(Math.min(0.45, volume), t);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+
+    const clatter = this.ctx.createOscillator();
+    const clatterGain = this.ctx.createGain();
+    clatter.type = 'sawtooth';
+    clatter.frequency.setValueAtTime(320 + Math.random() * 80, t + 0.02);
+    clatter.frequency.exponentialRampToValueAtTime(90, t + 0.16);
+
+    clatterGain.gain.setValueAtTime(Math.min(0.2, volume * 0.7), t + 0.02);
+    clatterGain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+
+    thud.connect(thudGain);
+    thudGain.connect(this.ctx.destination);
+    clatter.connect(clatterGain);
+    clatterGain.connect(this.ctx.destination);
+
+    thud.start(t);
+    thud.stop(t + 0.15);
+    clatter.start(t + 0.02);
+    clatter.stop(t + 0.17);
+  }
+
+  public playHeavyExertion() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Low strained breath/grunt + dull rock scrape
+    const grunt = this.ctx.createOscillator();
+    const gruntGain = this.ctx.createGain();
+    grunt.type = 'sine';
+    grunt.frequency.setValueAtTime(95, t);
+    grunt.frequency.linearRampToValueAtTime(75, t + 0.22);
+    gruntGain.gain.setValueAtTime(0.28, t);
+    gruntGain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+
+    const scrape = this.ctx.createOscillator();
+    const scrapeGain = this.ctx.createGain();
+    scrape.type = 'sawtooth';
+    scrape.frequency.setValueAtTime(160, t + 0.04);
+    scrape.frequency.exponentialRampToValueAtTime(60, t + 0.25);
+    scrapeGain.gain.setValueAtTime(0.12, t + 0.04);
+    scrapeGain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+
+    grunt.connect(gruntGain);
+    gruntGain.connect(this.ctx.destination);
+    scrape.connect(scrapeGain);
+    scrapeGain.connect(this.ctx.destination);
+
+    grunt.start(t);
+    grunt.stop(t + 0.28);
+    scrape.start(t + 0.04);
+    scrape.stop(t + 0.25);
   }
 
   public playPlayerHurt() {

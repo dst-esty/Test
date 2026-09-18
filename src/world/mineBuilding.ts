@@ -62,18 +62,20 @@ export const STRUCTURE_BLUEPRINTS: Record<MineStructureType, StructureBlueprint>
     name: 'Frontier Campfire',
     description: 'Stone ring campfire with glowing charcoal embers, mesquite logs, and an iron coffee pot.',
     goldCost: 0,
-    rockCost: 4,
+    rockCost: 3,
+    woodCost: 2,
     dimensions: { width: 2.2, height: 1.2, depth: 2.2 },
-    benefit: 'Provides wilderness night warmth, light, and restores player health.',
+    benefit: 'Provides wilderness night warmth, light, coffee brewing, canteen refills, and repels predators.',
   },
   prospector_camp: {
     type: 'prospector_camp',
     name: 'Prospector Outpost Camp',
     description: 'Expedition canvas wall tent, bedroll, supply crates, lantern pole, and campfire.',
-    goldCost: 2,
-    rockCost: 8,
+    goldCost: 1,
+    rockCost: 6,
+    woodCost: 4,
     dimensions: { width: 4.8, height: 2.8, depth: 4.8 },
-    benefit: 'Wilderness forward operations base providing shelter, resting post, and supply cache.',
+    benefit: 'Wilderness forward expedition base with weather shelter, safe overnight sleep spot, and campfire.',
   },
 };
 
@@ -96,6 +98,15 @@ export class MineBuildingSystem {
   private sheaveWheels: THREE.Mesh[] = [];
   private waterPlanes: THREE.Mesh[] = [];
   private forgeLights: THREE.PointLight[] = [];
+  private campfireNodes: Map<
+    string,
+    {
+      light: THREE.PointLight;
+      ashBedMat: THREE.MeshStandardMaterial;
+      flames: THREE.Group;
+      isLit: boolean;
+    }
+  > = new Map();
 
   // Particle debris systems
   private constructionParticles: {
@@ -820,6 +831,7 @@ export class MineBuildingSystem {
 
   public buildStructure(type: MineStructureType, pos: Vector3D, rotationY = 0): BuiltStructure {
     const blueprint = STRUCTURE_BLUEPRINTS[type];
+    const initialFuel = type === 'campfire' ? 12.0 : type === 'prospector_camp' ? 16.0 : undefined;
     const structure: BuiltStructure = {
       id: `mine_${type}_${Date.now()}`,
       type,
@@ -828,6 +840,9 @@ export class MineBuildingSystem {
       rotationY,
       level: 1,
       createdAt: Date.now(),
+      fuelHoursRemaining: initialFuel,
+      maxFuelHours: 24.0,
+      isLit: initialFuel !== undefined ? true : undefined,
     };
 
     let mesh: THREE.Group;
@@ -1405,15 +1420,13 @@ export class MineBuildingSystem {
     }
 
     // Glowing charcoal ash bed
-    const ashBed = new THREE.Mesh(
-      new THREE.CircleGeometry(0.85, 12),
-      new THREE.MeshStandardMaterial({
-        color: 0x1a0904,
-        emissive: 0xcc3300,
-        emissiveIntensity: 0.85,
-        roughness: 0.9,
-      })
-    );
+    const ashBedMat = new THREE.MeshStandardMaterial({
+      color: 0x1a0904,
+      emissive: 0xcc3300,
+      emissiveIntensity: 0.85,
+      roughness: 0.9,
+    });
+    const ashBed = new THREE.Mesh(new THREE.CircleGeometry(0.85, 12), ashBedMat);
     ashBed.position.set(0, 0.05, 0);
     ashBed.rotation.x = -Math.PI / 2;
     group.add(ashBed);
@@ -1441,10 +1454,39 @@ export class MineBuildingSystem {
     kettle.position.set(0, 0.42, 0);
     group.add(kettle);
 
+    // Dynamic flame cone
+    const flameGroup = new THREE.Group();
+    const flameGeo = new THREE.ConeGeometry(0.22, 0.65, 6);
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0xff6600 });
+    const flame = new THREE.Mesh(flameGeo, flameMat);
+    flame.position.set(0, 0.35, 0);
+    flameGroup.add(flame);
+    group.add(flameGroup);
+
     // Warm glowing campfire light
     const fireLight = new THREE.PointLight(0xff6611, 2.6, 14);
     fireLight.position.set(0, 0.8, 0);
     group.add(fireLight);
+
+    const isLit = _structure.isLit !== false && (_structure.fuelHoursRemaining ?? 12) > 0;
+    if (!isLit) {
+      fireLight.intensity = 0;
+      ashBedMat.emissiveIntensity = 0;
+      ashBedMat.color.setHex(0x242424);
+      flameGroup.visible = false;
+    } else if ((_structure.fuelHoursRemaining ?? 12) <= 4.0) {
+      fireLight.intensity = 0.75;
+      ashBedMat.emissiveIntensity = 0.35;
+      ashBedMat.color.setHex(0x441100);
+      flameGroup.scale.set(0.4, 0.4, 0.4);
+    }
+
+    this.campfireNodes.set(_structure.id, {
+      light: fireLight,
+      ashBedMat,
+      flames: flameGroup,
+      isLit,
+    });
 
     return group;
   }
@@ -1523,6 +1565,7 @@ export class MineBuildingSystem {
     const lanternLight = new THREE.PointLight(0xffb040, 1.8, 10);
     lanternLight.position.copy(campLantern.position);
     group.add(lanternLight);
+    this.forgeLights.push(lanternLight);
 
     return group;
   }
@@ -1640,6 +1683,14 @@ export class MineBuildingSystem {
     // 3. Flicker Forge Fire Light
     this.forgeLights.forEach((light) => {
       light.intensity = 2.4 + Math.sin(Date.now() * 0.012) * 0.7 + Math.random() * 0.4;
+    });
+
+    // 3b. Flicker Lit Campfires & Fuel Embers
+    this.campfireNodes.forEach((node) => {
+      if (node.isLit) {
+        node.light.intensity = 2.3 + Math.sin(Date.now() * 0.015) * 0.5 + Math.random() * 0.3;
+        node.flames.scale.y = 0.85 + Math.sin(Date.now() * 0.02) * 0.25 + Math.random() * 0.15;
+      }
     });
 
     // 4. Update Standard Construction Particles
@@ -1775,6 +1826,55 @@ export class MineBuildingSystem {
       }
     }
     return closest;
+  }
+
+  public updateCampfireVisuals(structureId: string, isLit: boolean, fuelHoursRemaining: number) {
+    const node = this.campfireNodes.get(structureId);
+    if (!node) return;
+    const lit = isLit && fuelHoursRemaining > 0;
+    node.isLit = lit;
+    if (!lit) {
+      node.light.intensity = 0;
+      node.ashBedMat.emissiveIntensity = 0;
+      node.ashBedMat.color.setHex(0x242424);
+      node.flames.visible = false;
+    } else if (fuelHoursRemaining <= 4.0) {
+      node.light.intensity = 0.75;
+      node.ashBedMat.emissiveIntensity = 0.35;
+      node.ashBedMat.color.setHex(0x441100);
+      node.flames.visible = true;
+      node.flames.scale.set(0.4, 0.4, 0.4);
+    } else {
+      node.light.intensity = 2.6;
+      node.ashBedMat.emissiveIntensity = 0.85;
+      node.ashBedMat.color.setHex(0x1a0904);
+      node.flames.visible = true;
+      node.flames.scale.set(1.0, 1.0, 1.0);
+    }
+  }
+
+  public checkCollision(
+    x: number,
+    y: number,
+    z: number,
+    playerRadius: number = 0.42
+  ): { hit: boolean; structure?: BuiltStructure } {
+    for (let i = 0; i < this.builtStructures.length; i++) {
+      const s = this.builtStructures[i];
+      // Campfires or rails can be stepped over / walked past
+      if (s.type === 'campfire' || s.type === 'rail_track') continue;
+      const bp = STRUCTURE_BLUEPRINTS[s.type];
+      const hw = (bp?.dimensions.width || 3.2) * 0.42;
+      const hd = (bp?.dimensions.depth || 3.2) * 0.42;
+      const r = Math.max(hw, hd) + playerRadius;
+      const dx = x - s.position.x;
+      const dz = z - s.position.z;
+      if (Math.abs(dx) > r || Math.abs(dz) > r) continue;
+      if (dx * dx + dz * dz < r * r) {
+        return { hit: true, structure: s };
+      }
+    }
+    return { hit: false };
   }
 
   public dispose() {

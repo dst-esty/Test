@@ -32,6 +32,8 @@ import {
   X,
   Backpack,
   Scroll,
+  Axe,
+  Hand,
 } from 'lucide-react';
 import { MineStructureType, PlayerState } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
@@ -57,6 +59,7 @@ interface ControlsOverlayProps {
   hitMarker?: boolean;
   bannerMessage?: string | null;
   onOpenBuilder?: () => void;
+  onOpenCamp?: () => void;
   onOpenClaimDeed?: () => void;
   activeBuildingType?: MineStructureType;
   onRotateBlueprint?: () => void;
@@ -112,6 +115,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   hitMarker,
   bannerMessage,
   onOpenBuilder,
+  onOpenCamp,
   onOpenClaimDeed,
   activeBuildingType = 'timber_portal',
   onRotateBlueprint,
@@ -169,6 +173,9 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       if (e.code === 'KeyI') {
         e.preventDefault();
         setIsInventoryOpen((prev) => !prev);
+      } else if (e.code === 'KeyC') {
+        e.preventDefault();
+        onOpenCamp?.();
       } else if (e.code === 'KeyH') {
         e.preventDefault();
         toggleHud();
@@ -203,10 +210,12 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   };
 
   const tools: { id: PlayerState['equippedTool']; label: string; icon: React.ReactNode; key: string }[] = [
+    { id: 'hands', label: 'Bare Hands', icon: <Hand className="w-4 h-4" />, key: '~' },
     { id: 'compass', label: 'Compass', icon: <Compass className="w-4 h-4" />, key: '1' },
     { id: 'lantern', label: 'Lantern', icon: <Flashlight className="w-4 h-4" />, key: '2' },
     { id: 'shovel', label: 'Spade Shovel', icon: <Shovel className="w-4 h-4" />, key: '3' },
     { id: 'pickaxe', label: 'Rock Pickaxe', icon: <Pickaxe className="w-4 h-4" />, key: '4' },
+    { id: 'axe', label: 'Felling Axe', icon: <Axe className="w-4 h-4" />, key: 'X' },
     { id: 'rifle', label: 'Rifle', icon: <Crosshair className="w-4 h-4" />, key: '5' },
     { id: 'dynamite', label: 'Dynamite', icon: <Flame className="w-4 h-4" />, key: '6' },
     { id: 'detector', label: 'Detector', icon: <Radio className="w-4 h-4" />, key: '7' },
@@ -429,6 +438,21 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   );
                 })}
               </div>
+
+              {/* Quick Camp & Campfire Action */}
+              {onOpenCamp && (
+                <button
+                  onClick={onOpenCamp}
+                  className="w-full mt-2 flex items-center justify-between px-2.5 py-1.5 rounded-xl border border-orange-600/70 bg-gradient-to-r from-orange-950/70 via-stone-900 to-amber-950/60 hover:border-orange-400 text-orange-200 hover:text-stone-100 transition-all cursor-pointer font-bold text-[11px] shadow-md group"
+                  title="Make Camp & Build Campfire [C]"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Flame className="w-3.5 h-3.5 text-orange-400 group-hover:scale-110 transition-transform animate-pulse" />
+                    <span>Make Camp & Fire</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-orange-400/90 font-bold group-hover:text-amber-300">[C]</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -531,11 +555,11 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                 </button>
               </div>
 
-              {/* Combined Map, Journal & Guidebook Action Buttons */}
-              <div className="grid grid-cols-3 gap-1.5">
+              {/* Combined Map, Journal, Guidebook & Camp Action Buttons */}
+              <div className="grid grid-cols-4 gap-1.5">
                 <button
                   onClick={onOpenMap}
-                  className="flex items-center justify-center gap-1.5 bg-stone-850 hover:bg-amber-600/90 text-amber-200 hover:text-stone-950 border border-amber-700/60 hover:border-amber-300 px-2 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
+                  className="flex items-center justify-center gap-1 bg-stone-850 hover:bg-amber-600/90 text-amber-200 hover:text-stone-950 border border-amber-700/60 hover:border-amber-300 px-1 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
                   title="Open Frontier Survey Map [M]"
                 >
                   <MapIcon className="w-3.5 h-3.5 text-amber-400 group-hover:text-stone-950 transition-colors" />
@@ -545,7 +569,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
 
                 <button
                   onClick={onOpenJournal}
-                  className="flex items-center justify-center gap-1.5 bg-stone-850 hover:bg-amber-600/90 text-amber-200 hover:text-stone-950 border border-amber-700/60 hover:border-amber-300 px-2 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
+                  className="flex items-center justify-center gap-1 bg-stone-850 hover:bg-amber-600/90 text-amber-200 hover:text-stone-950 border border-amber-700/60 hover:border-amber-300 px-1 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
                   title="Open Prospector's Field Journal [J]"
                 >
                   <Scroll className="w-3.5 h-3.5 text-amber-400 group-hover:text-stone-950 transition-colors" />
@@ -555,12 +579,22 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
 
                 <button
                   onClick={onOpenGuidebook}
-                  className="flex items-center justify-center gap-1.5 bg-stone-850 hover:bg-amber-600/90 text-amber-200 hover:text-stone-950 border border-amber-700/60 hover:border-amber-300 px-2 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
+                  className="flex items-center justify-center gap-1 bg-stone-850 hover:bg-amber-600/90 text-amber-200 hover:text-stone-950 border border-amber-700/60 hover:border-amber-300 px-1 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
                   title="Open Prospector's Field Guidebook [G]"
                 >
                   <BookOpen className="w-3.5 h-3.5 text-amber-400 group-hover:text-stone-950 transition-colors" />
                   <span>Guide</span>
                   <span className="text-[9px] text-amber-400/80 group-hover:text-stone-950/80 font-mono">[G]</span>
+                </button>
+
+                <button
+                  onClick={onOpenCamp}
+                  className="flex items-center justify-center gap-1 bg-stone-850 hover:bg-orange-600/90 text-orange-200 hover:text-stone-950 border border-orange-700/60 hover:border-orange-400 px-1 py-2 rounded-xl shadow transition-all cursor-pointer font-bold group text-[11px]"
+                  title="Make Camp & Build Campfire [C]"
+                >
+                  <Flame className="w-3.5 h-3.5 text-orange-400 group-hover:text-stone-950 transition-colors animate-pulse" />
+                  <span>Camp</span>
+                  <span className="text-[9px] text-orange-400/80 group-hover:text-stone-950/80 font-mono">[C]</span>
                 </button>
               </div>
             </div>
@@ -936,6 +970,23 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                 </div>
               </div>
             )}
+
+            {playerState.carriedObject && (
+              <div className="flex items-center gap-2.5 bg-stone-950/95 backdrop-blur-md px-3.5 py-2 rounded-xl border border-amber-500/80 text-amber-100 shadow-2xl font-mono">
+                <span className="text-xl">🪨</span>
+                <div className="flex flex-col text-right">
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">HELD OBJECT</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-500/60 text-amber-300 font-bold">
+                      {playerState.carriedObject.weightLbs} LBS
+                    </span>
+                  </div>
+                  <span className="text-xs text-stone-200">
+                    [L-Click] Throw • [R-Click / E] Place • [F] Stow
+                  </span>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -980,6 +1031,30 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               <div className="w-3 h-3 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,1)] animate-ping" />
               <div className="absolute w-2 h-2 rounded-full bg-amber-300" />
             </div>
+          ) : playerState.equippedTool === 'axe' ? (
+            <div className="relative flex items-center justify-center">
+              <div className="w-7 h-7 rounded-full border border-amber-400/80 border-dashed animate-pulse" />
+              <div className="absolute w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(245,158,11,1)]" />
+              <div className="absolute -bottom-5 text-[9px] font-mono tracking-widest text-amber-300 font-bold whitespace-nowrap drop-shadow">
+                CHOP TIMBER [X]
+              </div>
+            </div>
+          ) : playerState.carriedObject ? (
+            <div className="relative flex items-center justify-center">
+              <div className="w-8 h-8 rounded-full border border-amber-400/80 border-dashed animate-pulse" />
+              <div className="absolute w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(245,158,11,1)]" />
+              <div className="absolute -bottom-5 text-[9px] font-mono tracking-widest text-amber-300 font-bold whitespace-nowrap drop-shadow">
+                THROW [L-CLICK] • PLACE [R-CLICK / E]
+              </div>
+            </div>
+          ) : playerState.equippedTool === 'hands' ? (
+            <div className="relative flex items-center justify-center">
+              <div className="w-5 h-5 rounded-full border border-amber-400/70" />
+              <div className="absolute w-1.5 h-1.5 rounded-full bg-amber-400/90" />
+              <div className="absolute -bottom-5 text-[9px] font-mono tracking-widest text-amber-300/90 font-bold whitespace-nowrap drop-shadow">
+                BARE HANDS [L-CLICK / E TO PICK UP]
+              </div>
+            </div>
           ) : (
             <div className="w-2 h-2 rounded-full bg-amber-200/60 border border-amber-400/80 shadow-[0_0_4px_rgba(251,191,36,0.8)]" />
           )}
@@ -993,40 +1068,62 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         {playerState.equippedTool === 'builder' && (
           <div className="pointer-events-auto flex items-center gap-3 bg-stone-900/95 backdrop-blur-md px-4 py-2 rounded-2xl border-2 border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.4)] text-xs">
             <div className="flex items-center gap-2">
-              <Hammer className="w-4 h-4 text-amber-400" />
-              <span className="text-stone-300">Blueprint:</span>
+              {activeBuildingType === 'campfire' || activeBuildingType === 'prospector_camp' ? (
+                <Flame className="w-4 h-4 text-orange-400 animate-pulse" />
+              ) : (
+                <Hammer className="w-4 h-4 text-amber-400" />
+              )}
+              <span className="text-stone-300">
+                {activeBuildingType === 'campfire' || activeBuildingType === 'prospector_camp'
+                  ? 'Campsite:'
+                  : 'Blueprint:'}
+              </span>
               <span className="font-bold text-amber-200">
                 {STRUCTURE_BLUEPRINTS[activeBuildingType]?.name || 'Structure'}
               </span>
+              {STRUCTURE_BLUEPRINTS[activeBuildingType]?.woodCost ? (
+                <span className="text-[10px] text-emerald-300 font-mono">
+                  🪵 {STRUCTURE_BLUEPRINTS[activeBuildingType].woodCost}w
+                </span>
+              ) : null}
             </div>
 
             <button
               onClick={onRotateBlueprint}
-              className="flex items-center gap-1 px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-amber-300 rounded-lg border border-amber-600/40 text-[11px]"
+              className="flex items-center gap-1 px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-amber-300 rounded-lg border border-amber-600/40 text-[11px] cursor-pointer"
               title="Rotate structure 45 degrees"
             >
               <RotateCw className="w-3.5 h-3.5" />
               <span>Rotate [R]</span>
             </button>
 
-            {onOpenBuilder && (
+            {/* Remove Change Blueprint when placing campsite/campfire */}
+            {activeBuildingType !== 'campfire' && activeBuildingType !== 'prospector_camp' && onOpenBuilder && (
               <button
                 onClick={onOpenBuilder}
-                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold rounded-lg text-[11px]"
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold rounded-lg text-[11px] cursor-pointer"
               >
                 Change Blueprint [B]
               </button>
             )}
 
-            {onOpenRockDepot && (
+            {activeBuildingType !== 'campfire' && activeBuildingType !== 'prospector_camp' && onOpenRockDepot && (
               <button
                 onClick={onOpenRockDepot}
-                className="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-amber-300 border border-amber-600/40 rounded-lg text-[11px] font-bold"
+                className="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-amber-300 border border-amber-600/40 rounded-lg text-[11px] font-bold cursor-pointer"
                 title="Open Rock & Mining Supply Depot"
               >
                 🛒 Buy Rocks
               </button>
             )}
+
+            <button
+              onClick={() => onSelectTool('pickaxe')}
+              className="px-2 py-1 bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-stone-100 border border-stone-600/50 rounded-lg text-[11px] cursor-pointer"
+              title="Cancel placement [Esc]"
+            >
+              Cancel [Esc]
+            </button>
 
             <span className="text-[10px] text-emerald-400 font-mono hidden sm:inline">
               [Left-Click] {activeBuildingType === 'timber_portal' ? 'Excavate Portal / Build' : 'Place in 3D'}

@@ -4,6 +4,8 @@ import { soundEngine } from '../audio/soundEffects';
 import { createGoldVeinVoxelMaterials, generateNoiseTexture } from './voxelGoldShader';
 import { digHoleInTerrain } from './terrain';
 import { createRealisticOreSpecimen } from './realisticSpecimens';
+import { MountainHoleManager } from './mountainHoles';
+import { MountainDustParticleSystem } from './mountainDustParticles';
 
 export interface VoxelInstanceData {
   x: number;
@@ -50,6 +52,8 @@ export class MiningSystem {
   private oreGroup: THREE.Group = new THREE.Group();
 
   public readonly blockSize = 0.55;
+  public mountainHoleManager?: MountainHoleManager;
+  public dustParticleSystem?: MountainDustParticleSystem;
 
   constructor(
     scene: THREE.Scene,
@@ -70,6 +74,14 @@ export class MiningSystem {
 
   public setTerrainMesh(mesh: THREE.Mesh) {
     this.terrainMesh = mesh;
+  }
+
+  public setMountainHoleManager(mgr: MountainHoleManager) {
+    this.mountainHoleManager = mgr;
+  }
+
+  public setDustParticleSystem(ps: MountainDustParticleSystem) {
+    this.dustParticleSystem = ps;
   }
 
   public getInstancedMeshes(): Map<VoxelType, THREE.InstancedMesh> {
@@ -310,7 +322,39 @@ export class MiningSystem {
     slumpDamage?: number;
     slumpFatal?: boolean;
   } {
-    // A. Check for instanced voxel hit
+    // A. Check for direct strike on existing mountain hole
+    if (this.mountainHoleManager) {
+      const mtnHit = this.mountainHoleManager.raycastMountainHoles(raycaster, 6.5);
+      if (mtnHit.hit && mtnHit.hole) {
+        const res = this.mountainHoleManager.digMountainHole(
+          mtnHit.hole.position,
+          mtnHit.hole.normal,
+          mtnHit.hole.rockColor,
+          mtnHit.hole.rockType,
+          'pickaxe'
+        );
+        soundEngine.playRockChisel();
+        this.spawnDigDebris(res.hitPoint, res.debrisType, 1.6);
+        this.claim.blocksDug += res.rocksAwarded;
+        if (res.goldAwarded > 0) {
+          this.spawnOreDrop(
+            new THREE.Vector3(res.hitPoint.x, res.hitPoint.y + 0.4, res.hitPoint.z),
+            'quartz_gold',
+            res.goldAwarded
+          );
+          soundEngine.playOreChime();
+        }
+        return {
+          hit: true,
+          type: 'quartz_gold',
+          goldAwarded: res.goldAwarded,
+          hitPoint: res.hitPoint,
+          message: res.message,
+        };
+      }
+    }
+
+    // A2. Check for instanced voxel hit
     const activeMeshes = Array.from(this.instancedMeshes.values());
     const voxelHits = raycaster.intersectObjects(activeMeshes, false);
 
@@ -371,10 +415,14 @@ export class MiningSystem {
 
     // B. Check for direct terrain hit or fallback ground excavation
     let targetPoint: THREE.Vector3 | null = null;
+    let hitNormal: THREE.Vector3 | null = null;
     if (this.terrainMesh) {
       const terrainHits = raycaster.intersectObject(this.terrainMesh, false);
       if (terrainHits.length > 0 && terrainHits[0].distance <= 6.5) {
         targetPoint = terrainHits[0].point;
+        if (terrainHits[0].face) {
+          hitNormal = terrainHits[0].face.normal.clone();
+        }
       }
     }
 
@@ -388,8 +436,26 @@ export class MiningSystem {
     }
 
     if (targetPoint) {
+      // If striking a steep mountain cliff face, carve a visible 3D hole into the mountain rock!
+      let mountainHoleMsg = '';
+      let mtnGold = 0;
+      if (hitNormal && hitNormal.y < 0.76 && this.mountainHoleManager) {
+        const mRes = this.mountainHoleManager.digMountainHole(
+          targetPoint,
+          hitNormal,
+          0x7c3820,
+          'granite',
+          'pickaxe'
+        );
+        mountainHoleMsg = mRes.message;
+        mtnGold = mRes.goldAwarded;
+      }
+
       // Progressively excavate into real subterranean geological rock strata!
       const digResult = digHoleInTerrain(targetPoint.x, targetPoint.z, 0.65, 2.0, 'pickaxe');
+      if (mtnGold > 0) {
+        digResult.goldAwarded = (digResult.goldAwarded || 0) + mtnGold;
+      }
 
       if (digResult.slumpOccurred) {
         soundEngine.playTrenchSlump();
@@ -397,7 +463,7 @@ export class MiningSystem {
       }
 
       soundEngine.playVoxelDig();
-      this.spawnDigDebris(targetPoint, digResult.layer.debrisType, 1.25);
+      this.spawnDigDebris(targetPoint, digResult.layer.debrisType, 1.25, hitNormal || new THREE.Vector3(0, 1, 0));
       this.claim.blocksDug += digResult.rocksAwarded;
 
       if (digResult.goldAwarded > 0) {
@@ -415,7 +481,7 @@ export class MiningSystem {
         type: digResult.layer.rockType,
         goldAwarded: digResult.goldAwarded,
         hitPoint: targetPoint,
-        message: digResult.strataMessage,
+        message: mountainHoleMsg || digResult.strataMessage,
         slumpOccurred: digResult.slumpOccurred,
         slumpDamage: digResult.slumpDamage,
         slumpFatal: digResult.slumpFatal,
@@ -508,7 +574,24 @@ export class MiningSystem {
   }
 
   // 6. Spawn multi-tier friable rock & sand debris (macro cleavage shards, micro sand grit, atmospheric dust billows)
-  public spawnDigDebris(pos: THREE.Vector3, type: DebrisType, speedMult: number = 1.0) {
+  public spawnDigDebris(pos: THREE.Vector3, type: DebrisType, speedMult: number = 1.0, surfaceNormal?: THREE.Vector3) {
+    if (this.dustParticleSystem) {
+      const debrisToMaterialMap: Record<DebrisType, string> = {
+        sandstone: 'sandstone',
+        granite: 'granite',
+        quartz_gold: 'quartz_gold',
+        quartz: 'quartz',
+        calcite: 'caliche',
+        dirt: 'dirt',
+        silver_ore: 'gneiss',
+        cactus: 'dirt',
+        wood: 'dirt',
+      };
+      const rockMat = debrisToMaterialMap[type] || 'sandstone';
+      const normal = surfaceNormal || new THREE.Vector3(0, 1, 0);
+      this.dustParticleSystem.triggerMountainStrike(pos, normal, rockMat, speedMult);
+    }
+
     const strataColors: Record<DebrisType, { macro: number; grit: number; dust: number }> = {
       sandstone: { macro: 0xc87d46, grit: 0xba6e38, dust: 0xd48750 },
       granite: { macro: 0x5a504a, grit: 0x48423c, dust: 0x6e6660 },

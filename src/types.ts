@@ -147,6 +147,9 @@ export interface BuiltStructure {
   level: number;
   createdAt: number;
   lastUsedAt?: number;
+  fuelHoursRemaining?: number; // In game hours (e.g. 12-16 hrs max per day/night without stoking)
+  maxFuelHours?: number;
+  isLit?: boolean;
 }
 
 export interface StructureBlueprint {
@@ -155,6 +158,7 @@ export interface StructureBlueprint {
   description: string;
   goldCost: number;
   rockCost: number;
+  woodCost?: number;
   dimensions: { width: number; height: number; depth: number };
   benefit: string;
 }
@@ -168,16 +172,25 @@ export interface PlayerState {
   isSprinting: boolean;
   isInsideMine: boolean;
   equippedTool:
+    | 'hands'
     | 'compass'
     | 'lantern'
     | 'shovel'
     | 'pickaxe'
+    | 'axe'
     | 'rifle'
     | 'dynamite'
     | 'detector'
     | 'binoculars'
     | 'stake'
     | 'builder';
+  carriedObject?: {
+    type: 'rock' | 'gold_ore';
+    name: string;
+    weightLbs: number;
+    color: number;
+    scale: number;
+  } | null;
   ammo: number;
   dynamite: number;
   goldFound: number; // ounces

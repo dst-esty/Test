@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from './terrain';
 import { DebrisType } from '../types';
+import { MountainHoleManager } from './mountainHoles';
+import { MountainDustParticleSystem } from './mountainDustParticles';
 
 export interface GoldDeposit {
   id: string;
@@ -10,10 +12,28 @@ export interface GoldDeposit {
   mesh: THREE.Group;
 }
 
+export interface HarvestableTree {
+  id: string;
+  name: string;
+  springName: string;
+  position: THREE.Vector3;
+  group: THREE.Group;
+  trunkMesh: THREE.Mesh;
+  crownMesh: THREE.Mesh;
+  stumpMesh: THREE.Mesh;
+  maxHealth: number;
+  health: number;
+  isFelled: boolean;
+  woodPerChop: number;
+  felledBonusWood: number;
+}
+
 export interface StrikeFoliageResult {
   hit: boolean;
-  type?: 'boulder' | 'outcropping' | 'gold_deposit' | 'saguaro' | 'barrel' | 'prickly' | 'cholla' | 'scrub';
+  type?: 'tree' | 'boulder' | 'outcropping' | 'gold_deposit' | 'saguaro' | 'barrel' | 'prickly' | 'cholla' | 'scrub';
   hitPoint?: THREE.Vector3;
+  surfaceNormal?: THREE.Vector3;
+  rockMaterial?: string;
   debrisType?: DebrisType;
   goldAwarded?: number;
   blocksDug?: number;
@@ -21,6 +41,25 @@ export interface StrikeFoliageResult {
   hydrationAwarded?: number;
   message?: string;
   depositId?: string;
+  spawnPhysicalRock?: {
+    position: THREE.Vector3;
+    color: number;
+    scale: number;
+    weightLbs: number;
+    ejectionDir?: THREE.Vector3;
+    isChippedFragment?: boolean;
+  };
+}
+
+/**
+ * Calculates realistic weight of desert field stones and giant boulders.
+ * Scaled volumetrically based on 3-axis dimensions:
+ * Scree cobble (~0.5m) is ~9-15 lbs; field stone (~0.7m) is ~25-32 lbs;
+ * Human limit is 55 lbs (~0.9m); giant boulders (1.2m - 2.8m) weigh 130 to 1,600+ lbs!
+ */
+export function calculateInstancedBoulderWeight(scaleX: number, scaleY: number, scaleZ: number): number {
+  const avgDim = (scaleX + scaleY + scaleZ) / 3.0;
+  return Math.max(6, Math.round(75 * Math.pow(avgDim, 3)));
 }
 
 export interface ExplodeFoliageResult {
@@ -398,8 +437,22 @@ function createNeedleSpireGeometry(): THREE.BufferGeometry {
   return geo;
 }
 
+export interface WorldRockCollider {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  height: number;
+  type: 'boulder' | 'mountain' | 'cactus';
+  meshIdx?: number;
+  instanceId?: number;
+  active: boolean;
+}
+
 export class DesertFoliageManager {
   public goldDeposits: GoldDeposit[] = [];
+  public springTrees: HarvestableTree[] = [];
   public interactiveMeshes: THREE.Object3D[] = [];
   public saguaroGroup: THREE.Group = new THREE.Group();
   public barrelMesh!: THREE.InstancedMesh;
@@ -411,13 +464,24 @@ export class DesertFoliageManager {
   public chollaMesh!: THREE.InstancedMesh;
   public outcroppingMesh!: THREE.InstancedMesh;
   public outcroppingMeshes: THREE.InstancedMesh[] = [];
+  public boulderHitsMap: Map<string, number> = new Map();
+  public rockColliders: WorldRockCollider[] = [];
+  public mountainHoleManager: MountainHoleManager;
+  public dustParticleSystem?: MountainDustParticleSystem;
 
   private scene: THREE.Scene;
   private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, dustParticles?: MountainDustParticleSystem) {
     this.scene = scene;
+    this.dustParticleSystem = dustParticles;
+    this.mountainHoleManager = new MountainHoleManager(this.scene, dustParticles);
     this.init();
+  }
+
+  public setDustParticleSystem(ps: MountainDustParticleSystem) {
+    this.dustParticleSystem = ps;
+    this.mountainHoleManager.setDustParticleSystem(ps);
   }
 
   private init() {
@@ -488,6 +552,20 @@ export class DesertFoliageManager {
 
       singleCactus.rotation.y = Math.random() * Math.PI * 2;
       this.saguaroGroup.add(singleCactus);
+
+      // Register solid physical trunk collider for large saguaro cacti
+      if (scale >= 0.75) {
+        this.rockColliders.push({
+          id: `saguaro_${i}`,
+          x,
+          y,
+          z,
+          radius: 0.45 * scale,
+          height: 5.5 * scale,
+          type: 'cactus',
+          active: true,
+        });
+      }
     }
     this.scene.add(this.saguaroGroup);
 
@@ -587,6 +665,24 @@ export class DesertFoliageManager {
         // Manganese desert varnish, terracotta red sandstone, buff tan, or salt-and-pepper granite
         const randColor = DESERT_ROCK_PALETTES[Math.floor(Math.random() * DESERT_ROCK_PALETTES.length)];
         mesh.setColorAt(rCount, randColor);
+
+        // Register solid physical rock collider for medium and large boulders
+        const bRadius = Math.max(dummy.scale.x, dummy.scale.z) * 0.95;
+        const bHeight = dummy.scale.y * 1.6;
+        if (bRadius >= 0.52) {
+          this.rockColliders.push({
+            id: `boulder_${archIdx}_${rCount}`,
+            x: rx,
+            y: ry,
+            z: rz,
+            radius: bRadius,
+            height: bHeight,
+            type: 'boulder',
+            meshIdx: archIdx,
+            instanceId: rCount,
+            active: true,
+          });
+        }
 
         rCount++;
       }
@@ -829,7 +925,31 @@ export class DesertFoliageManager {
         dummy.scale.set(sx, sy, sz);
         dummy.rotation.set((Math.random() - 0.5) * 0.12, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.12);
         dummy.updateMatrix();
-        mesh.setMatrixAt(ocCount++, dummy.matrix);
+        mesh.setMatrixAt(ocCount, dummy.matrix);
+
+        // Register solid physical mountain outcropping collider
+        const baseRadiusMap: Record<string, number> = {
+          volcanic_crag: 4.8,
+          stepped_mesa: 6.2,
+          fault_monocline: 4.2,
+          canyon_spire: 3.8,
+        };
+        const baseRad = baseRadiusMap[arch.name] || 4.5;
+        const oRadius = baseRad * ((sx + sz) * 0.5);
+        this.rockColliders.push({
+          id: `outcrop_${archIdx}_${ocCount}`,
+          x: ox,
+          y: oy,
+          z: oz,
+          radius: oRadius,
+          height: arch.baseHeight * sy,
+          type: 'mountain',
+          meshIdx: archIdx,
+          instanceId: ocCount,
+          active: true,
+        });
+
+        ocCount++;
       }
 
       mesh.count = ocCount;
@@ -887,12 +1007,265 @@ export class DesertFoliageManager {
         mesh: goldGroup,
       });
     });
+
+    // ==========================================
+    // 9. Riparian Desert Trees Around Springs
+    // ==========================================
+    this.initSpringTrees();
   }
 
   /**
-   * Strike foliage, boulders, cacti, or quartz deposits with pickaxe, shovel, or rifle
+   * Generates harvestable native trees (Cottonwoods, Mesquites, Desert Willows)
+   * exclusively around desert springs and tinajas.
    */
-  public strikeFoliageOrRock(raycaster: THREE.Raycaster, maxDist: number = 6.5): StrikeFoliageResult {
+  private initSpringTrees() {
+    const springLocations = [
+      { id: 'hieroglyphic', name: 'Hieroglyphic Oasis Spring', x: -70, z: -20, treeCount: 8, poolRadius: 5.5 },
+      { id: 'tortilla', name: 'Tortilla Creek Spring & Wash', x: -15, z: -145, treeCount: 7, poolRadius: 6.5 },
+      { id: 'needle', name: "Weaver's Needle Basin Tinaja", x: 68, z: 32, treeCount: 6, poolRadius: 4.5 },
+      { id: 'peralta', name: 'Peralta Canyon Tinaja', x: -35, z: 75, treeCount: 6, poolRadius: 4.0 },
+    ];
+
+    const barkMatCottonwood = new THREE.MeshStandardMaterial({
+      color: 0x483a2b,
+      roughness: 0.95,
+      bumpScale: 0.08,
+    });
+    const barkMatMesquite = new THREE.MeshStandardMaterial({
+      color: 0x2b1d14,
+      roughness: 0.96,
+      bumpScale: 0.08,
+    });
+    const crownMatCottonwood = new THREE.MeshStandardMaterial({
+      color: 0x4d6c2a,
+      roughness: 0.8,
+    });
+    const crownMatMesquite = new THREE.MeshStandardMaterial({
+      color: 0x364e22,
+      roughness: 0.85,
+    });
+    const stumpMat = new THREE.MeshStandardMaterial({
+      color: 0x8a6d4d,
+      roughness: 0.9,
+    });
+
+    const trunkGeo = new THREE.CylinderGeometry(0.32, 0.52, 4.4, 8);
+    const crownGeo = new THREE.DodecahedronGeometry(2.4, 1);
+    const stumpGeo = new THREE.CylinderGeometry(0.52, 0.62, 0.65, 8);
+
+    springLocations.forEach((spring) => {
+      for (let i = 0; i < spring.treeCount; i++) {
+        const angle = (i / spring.treeCount) * Math.PI * 2 + (Math.sin(i * 3.7) * 0.4);
+        const dist = spring.poolRadius + 2.4 + (i % 3) * 2.6;
+        const tx = spring.x + Math.cos(angle) * dist;
+        const tz = spring.z + Math.sin(angle) * dist;
+        const ty = getTerrainHeight(tx, tz);
+
+        const isCottonwood = i % 2 === 0;
+        const treeType = isCottonwood ? 'Riparian Cottonwood Tree' : 'Velvet Mesquite Tree';
+        const barkMat = isCottonwood ? barkMatCottonwood : barkMatMesquite;
+        const crownMat = isCottonwood ? crownMatCottonwood : crownMatMesquite;
+
+        const treeGroup = new THREE.Group();
+        treeGroup.position.set(tx, ty, tz);
+
+        const scale = 0.85 + ((i * 17) % 35) * 0.01;
+        treeGroup.scale.set(scale, scale, scale);
+
+        // Trunk
+        const trunk = new THREE.Mesh(trunkGeo, barkMat);
+        trunk.position.y = 2.2;
+        trunk.castShadow = true;
+        trunk.receiveShadow = true;
+        treeGroup.add(trunk);
+
+        // Foliage Crown
+        const crown = new THREE.Mesh(crownGeo, crownMat);
+        crown.position.y = 5.2;
+        crown.castShadow = true;
+        treeGroup.add(crown);
+
+        // Cut Stump (hidden initially, shown when felled)
+        const stump = new THREE.Mesh(stumpGeo, stumpMat);
+        stump.position.y = 0.32;
+        stump.castShadow = true;
+        stump.receiveShadow = true;
+        stump.visible = false;
+        treeGroup.add(stump);
+
+        this.scene.add(treeGroup);
+        this.interactiveMeshes.push(treeGroup);
+
+        this.springTrees.push({
+          id: `tree_${spring.id}_${i}`,
+          name: treeType,
+          springName: spring.name,
+          position: new THREE.Vector3(tx, ty, tz),
+          group: treeGroup,
+          trunkMesh: trunk,
+          crownMesh: crown,
+          stumpMesh: stump,
+          maxHealth: 3,
+          health: 3,
+          isFelled: false,
+          woodPerChop: 2,
+          felledBonusWood: 4,
+        });
+      }
+    });
+  }
+
+  /**
+   * Deactivate collider when boulder is mined, picked up, or blasted
+   */
+  public deactivateRockCollider(meshIdx: number, instanceId: number): void {
+    for (let i = 0; i < this.rockColliders.length; i++) {
+      const c = this.rockColliders[i];
+      if (c.meshIdx === meshIdx && c.instanceId === instanceId && c.active) {
+        c.active = false;
+        break;
+      }
+    }
+  }
+
+  /**
+   * Checks horizontal distance and vertical overlap with all physical boulders, mountain outcroppings, and cacti
+   */
+  public checkObstacleCollision(
+    x: number,
+    y: number,
+    z: number,
+    playerRadius: number = 0.42
+  ): { hit: boolean; collider?: WorldRockCollider; normal?: { x: number; z: number } } {
+    for (let i = 0; i < this.rockColliders.length; i++) {
+      const c = this.rockColliders[i];
+      if (!c.active) continue;
+      const combinedRadius = c.radius + playerRadius;
+      const dx = x - c.x;
+      if (Math.abs(dx) > combinedRadius) continue;
+      const dz = z - c.z;
+      if (Math.abs(dz) > combinedRadius) continue;
+
+      const distSq = dx * dx + dz * dz;
+      if (distSq < combinedRadius * combinedRadius) {
+        // Vertical check: is player within elevation range of this obstacle?
+        if (y >= c.y - 1.0 && y <= c.y + c.height + 0.6) {
+          const dist = Math.sqrt(distSq);
+          return {
+            hit: true,
+            collider: c,
+            normal: {
+              x: dist > 0.0001 ? dx / dist : 1,
+              z: dist > 0.0001 ? dz / dist : 0,
+            },
+          };
+        }
+      }
+    }
+    return { hit: false };
+  }
+
+  /**
+   * Regrow felled trees (e.g. overnight or after sleeping at camp)
+   */
+  public regrowFelledTrees() {
+    for (const tree of this.springTrees) {
+      if (tree.isFelled) {
+        tree.isFelled = false;
+        tree.health = tree.maxHealth;
+        tree.trunkMesh.visible = true;
+        tree.crownMesh.visible = true;
+        tree.stumpMesh.visible = false;
+        tree.group.scale.set(1, 1, 1);
+      }
+    }
+  }
+
+  /**
+   * Strike foliage, boulders, cacti, spring trees, or quartz deposits with axe, pickaxe, shovel, or rifle
+   */
+  public strikeFoliageOrRock(
+    raycaster: THREE.Raycaster,
+    maxDist: number = 6.5,
+    equippedTool?: string
+  ): StrikeFoliageResult {
+    // -1. Check Active Excavated Mountain Holes (Direct Pickaxe Bore Strikes)
+    const holeHit = this.mountainHoleManager.raycastMountainHoles(raycaster, maxDist);
+    if (holeHit.hit && holeHit.hole) {
+      const hole = holeHit.hole;
+      const holeRes = this.mountainHoleManager.digMountainHole(
+        hole.position,
+        hole.normal,
+        hole.rockColor,
+        hole.rockType,
+        equippedTool || 'pickaxe'
+      );
+      const holeMaterial = hole.hasExposedGoldVein ? 'quartz_gold' : hole.rockType;
+      return {
+        hit: true,
+        type: 'outcropping',
+        hitPoint: holeRes.hitPoint,
+        surfaceNormal: hole.normal.clone(),
+        rockMaterial: holeMaterial,
+        debrisType: holeRes.debrisType,
+        blocksDug: holeRes.rocksAwarded,
+        goldAwarded: holeRes.goldAwarded,
+        spawnPhysicalRock: {
+          position: holeRes.hitPoint.clone().add(hole.normal.clone().multiplyScalar(0.2)),
+          color: hole.rockColor,
+          scale: 0.48,
+          weightLbs: 12,
+          ejectionDir: hole.normal,
+          isChippedFragment: true,
+        },
+        message: holeRes.message,
+      };
+    }
+
+    // 0. Check Spring Riparian Trees (Specially harvestable with Frontier Axe)
+    for (const tree of this.springTrees) {
+      if (tree.isFelled) continue;
+      const trunkHits = raycaster.intersectObject(tree.trunkMesh, false);
+      const crownHits = trunkHits.length === 0 ? raycaster.intersectObject(tree.crownMesh, false) : [];
+      const hit = trunkHits[0] || crownHits[0];
+      if (hit && hit.distance <= maxDist) {
+        const isAxe = equippedTool === 'axe';
+        const chopDamage = isAxe ? 1.0 : 0.4;
+        tree.health -= chopDamage;
+
+        // Tree tilt recoil
+        tree.group.rotation.z = (Math.random() - 0.5) * 0.12;
+        setTimeout(() => {
+          if (tree.group) tree.group.rotation.z = 0;
+        }, 120);
+
+        const woodYield = isAxe ? tree.woodPerChop : 1;
+        let bonusWood = 0;
+        let message = `🪓 Chopped ${tree.name} (+${woodYield} Cut Wood Log${woodYield > 1 ? 's' : ''})`;
+        if (!isAxe) {
+          message += ' [💡 Equip Felling Axe (X) for maximum timber yield!]';
+        }
+
+        if (tree.health <= 0) {
+          tree.isFelled = true;
+          bonusWood = tree.felledBonusWood;
+          tree.trunkMesh.visible = false;
+          tree.crownMesh.visible = false;
+          tree.stumpMesh.visible = true;
+          message = `🪓 Felled ${tree.name}! Harvested +${woodYield + bonusWood} Cut Wood Logs for campfire fuel & timber!`;
+        }
+
+        return {
+          hit: true,
+          type: 'tree',
+          hitPoint: hit.point.clone(),
+          debrisType: 'wood',
+          woodAwarded: woodYield + bonusWood,
+          message,
+        };
+      }
+    }
+
     // 1. Check Gold Quartz Deposits
     const unminedDeposits = this.goldDeposits.filter((d) => !d.mined && d.mesh.visible);
     for (const gd of unminedDeposits) {
@@ -901,10 +1274,17 @@ export class DesertFoliageManager {
         gd.mined = true;
         gd.mesh.scale.set(0, 0, 0);
         gd.mesh.visible = false;
+        const hitPoint = hits[0].point.clone();
+        const normal = hits[0].face ? hits[0].face.normal.clone().normalize() : new THREE.Vector3(0, 1, 0);
+        if (this.dustParticleSystem) {
+          this.dustParticleSystem.triggerMountainStrike(hitPoint, normal, 'quartz_gold', 1.3);
+        }
         return {
           hit: true,
           type: 'gold_deposit',
-          hitPoint: hits[0].point.clone(),
+          hitPoint,
+          surfaceNormal: normal,
+          rockMaterial: 'quartz_gold',
           debrisType: 'quartz_gold',
           goldAwarded: gd.ounces,
           depositId: gd.id,
@@ -914,7 +1294,8 @@ export class DesertFoliageManager {
     }
 
     // 2. Check Desert Boulders & Rock Formations
-    for (const bMesh of this.boulderMeshes) {
+    for (let meshIdx = 0; meshIdx < this.boulderMeshes.length; meshIdx++) {
+      const bMesh = this.boulderMeshes[meshIdx];
       const boulderHits = raycaster.intersectObject(bMesh, false);
       if (boulderHits.length > 0 && boulderHits[0].distance <= maxDist && boulderHits[0].instanceId !== undefined) {
         const id = boulderHits[0].instanceId;
@@ -924,28 +1305,91 @@ export class DesertFoliageManager {
         scale.setFromMatrixScale(matrix);
 
         if (scale.x > 0.05) {
-          bMesh.setMatrixAt(id, this.zeroMatrix);
-          bMesh.instanceMatrix.needsUpdate = true;
+          const weightLbs = calculateInstancedBoulderWeight(scale.x, scale.y, scale.z);
+          const boulderKey = `${meshIdx}_${id}`;
+          const currentHits = (this.boulderHitsMap.get(boulderKey) || 0) + 1;
+          const maxHitsNeeded = weightLbs > 150 ? 4 : weightLbs > 55 ? 3 : 2;
+
+          let color = 0x8f4327;
+          if (bMesh.instanceColor) {
+            const col = new THREE.Color();
+            bMesh.getColorAt(id, col);
+            color = col.getHex();
+          }
 
           const goldRoll = Math.random() < 0.35 ? 1 : 0;
-          return {
-            hit: true,
-            type: 'boulder',
-            hitPoint: boulderHits[0].point.clone(),
-            debrisType: 'granite',
-            blocksDug: 2,
-            goldAwarded: goldRoll,
-            message:
-              goldRoll > 0
-                ? '💥 Shattered Desert Stone! (+2 Quarry Rocks, +1 oz Placer Gold)'
-                : '💥 Shattered Desert Stone! (+2 Quarry Rocks for Building)',
-          };
+          const hitPoint = boulderHits[0].point.clone();
+          const normal = boulderHits[0].face ? boulderHits[0].face.normal.clone() : new THREE.Vector3(0, 1, 0);
+          const chunkScale = Number((0.46 + Math.random() * 0.12).toFixed(2));
+          const chunkWeight = Math.max(8, Math.round(65 * Math.pow(chunkScale, 3))); // 8-15 lbs
+
+          if (this.dustParticleSystem) {
+            this.dustParticleSystem.triggerMountainStrike(hitPoint, normal, 'sandstone', 0.95);
+          }
+
+          if (currentHits < maxHitsNeeded) {
+            // Chipping away at large boulder!
+            this.boulderHitsMap.set(boulderKey, currentHits);
+            return {
+              hit: true,
+              type: 'boulder',
+              hitPoint,
+              surfaceNormal: normal,
+              rockMaterial: 'sandstone',
+              debrisType: 'granite',
+              blocksDug: 1,
+              goldAwarded: goldRoll,
+              spawnPhysicalRock: {
+                position: hitPoint.clone().add(normal.clone().multiplyScalar(0.2)),
+                color,
+                scale: chunkScale,
+                weightLbs: chunkWeight,
+                ejectionDir: normal,
+                isChippedFragment: true,
+              },
+              message: `⛏️ Chipped ${chunkWeight} lb stone from ${weightLbs.toLocaleString()} lb Boulder [${currentHits}/${maxHitsNeeded} strikes]! (+1 Building Stone)`,
+            };
+          } else {
+            // Final strike breaks the remaining core
+            this.boulderHitsMap.delete(boulderKey);
+            bMesh.setMatrixAt(id, this.zeroMatrix);
+            bMesh.instanceMatrix.needsUpdate = true;
+            this.deactivateRockCollider(meshIdx, id);
+
+            return {
+              hit: true,
+              type: 'boulder',
+              hitPoint,
+              surfaceNormal: normal,
+              rockMaterial: 'sandstone',
+              debrisType: 'granite',
+              blocksDug: 2,
+              goldAwarded: goldRoll,
+              spawnPhysicalRock: {
+                position: hitPoint.clone().add(new THREE.Vector3(0, 0.25, 0)),
+                color,
+                scale: 0.68,
+                weightLbs: 20,
+                ejectionDir: new THREE.Vector3(0, 1, 0),
+                isChippedFragment: true,
+              },
+              message:
+                goldRoll > 0
+                  ? `💥 Shattered remaining core of ${weightLbs.toLocaleString()} lb Boulder! (+2 Quarry Rocks, +1 oz Gold)!`
+                  : `💥 Shattered remaining core of ${weightLbs.toLocaleString()} lb Boulder! (+2 Quarry Rocks)!`,
+            };
+          }
         }
       }
     }
 
-    // 3. Check Monumental Outcroppings & Canyon Crags
-    for (const ocMesh of this.outcroppingMeshes) {
+    // 3. Check Monumental Mountain Outcroppings & Canyon Crags
+    // Authentic Geological Law: Mountain cliffs are permanent bedrock monoliths (thousands of tons).
+    // A prospector's pickaxe bores deep excavation cavities, test adits, and exposes glittering veins in the rock!
+    const archetypeNames = ['volcanic_crag', 'stepped_mesa', 'fault_monocline', 'canyon_spire'];
+    for (let meshIdx = 0; meshIdx < this.outcroppingMeshes.length; meshIdx++) {
+      const ocMesh = this.outcroppingMeshes[meshIdx];
+      const archetypeRock = archetypeNames[meshIdx] || 'volcanic_crag';
       const ocHits = raycaster.intersectObject(ocMesh, false);
       if (ocHits.length > 0 && ocHits[0].distance <= maxDist && ocHits[0].instanceId !== undefined) {
         const id = ocHits[0].instanceId;
@@ -955,16 +1399,54 @@ export class DesertFoliageManager {
         scale.setFromMatrixScale(matrix);
 
         if (scale.x > 0.05) {
-          ocMesh.setMatrixAt(id, this.zeroMatrix);
-          ocMesh.instanceMatrix.needsUpdate = true;
+          const hitPoint = ocHits[0].point.clone();
+          const localNormal = ocHits[0].face ? ocHits[0].face.normal.clone() : new THREE.Vector3(0, 0, 1);
+          // Transform local normal to world space
+          const normal = localNormal.clone().transformDirection(matrix).normalize();
+
+          let rockColor = 0x7c3820;
+          if (ocMesh.instanceColor) {
+            const col = new THREE.Color();
+            ocMesh.getColorAt(id, col);
+            rockColor = col.getHex();
+          }
+
+          // Carve or deepen a real, visible physical 3D hole into the mountain rock face!
+          const holeRes = this.mountainHoleManager.digMountainHole(
+            hitPoint,
+            normal,
+            rockColor,
+            archetypeRock,
+            equippedTool || 'pickaxe'
+          );
+
+          // Trigger particle system with exact material intensity
+          if (this.dustParticleSystem) {
+            this.dustParticleSystem.triggerMountainStrike(hitPoint, normal, archetypeRock, 1.15);
+          }
+
+          const chunkScale = Number((0.44 + Math.random() * 0.14).toFixed(2));
+          const chunkWeight = Math.max(8, Math.round(65 * Math.pow(chunkScale, 3)));
+          const spawnPos = hitPoint.clone().add(normal.clone().multiplyScalar(0.25));
+
           return {
             hit: true,
             type: 'outcropping',
-            hitPoint: ocHits[0].point.clone(),
-            debrisType: 'sandstone',
-            blocksDug: 3,
-            goldAwarded: Math.random() < 0.35 ? 1 : 0,
-            message: '⛏️ Excavated Rock Outcropping! (+3 Building Stones)',
+            hitPoint,
+            surfaceNormal: normal,
+            rockMaterial: archetypeRock,
+            debrisType: holeRes.debrisType,
+            blocksDug: holeRes.rocksAwarded,
+            goldAwarded: holeRes.goldAwarded,
+            spawnPhysicalRock: {
+              position: spawnPos,
+              color: rockColor,
+              scale: chunkScale,
+              weightLbs: chunkWeight,
+              ejectionDir: normal,
+              isChippedFragment: true,
+            },
+            message: holeRes.message,
           };
         }
       }
@@ -1077,6 +1559,110 @@ export class DesertFoliageManager {
   }
 
   /**
+   * Check if the player is looking at an instanced desert boulder within reach with bare hands.
+   * Calculates volumetric weight and determines if it is liftable by human hands (<= 55 lbs).
+   */
+  public checkNearbyBoulder(raycaster: THREE.Raycaster, maxDist: number = 3.5): {
+    hit: boolean;
+    hitPoint?: THREE.Vector3;
+    distance?: number;
+    weightLbs: number;
+    canLift: boolean;
+    scale: number;
+  } | null {
+    for (const bMesh of this.boulderMeshes) {
+      const boulderHits = raycaster.intersectObject(bMesh, false);
+      if (boulderHits.length > 0 && boulderHits[0].distance <= maxDist && boulderHits[0].instanceId !== undefined) {
+        const id = boulderHits[0].instanceId;
+        const matrix = new THREE.Matrix4();
+        bMesh.getMatrixAt(id, matrix);
+        const scale = new THREE.Vector3();
+        scale.setFromMatrixScale(matrix);
+        if (scale.x > 0.05) {
+          const avgScale = (scale.x + scale.y + scale.z) / 3.0;
+          const weightLbs = calculateInstancedBoulderWeight(scale.x, scale.y, scale.z);
+          const canLift = weightLbs <= 55;
+          return {
+            hit: true,
+            hitPoint: boulderHits[0].point.clone(),
+            distance: boulderHits[0].distance,
+            weightLbs,
+            canLift,
+            scale: avgScale,
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Pick up an instanced desert boulder with bare hands.
+   * If the rock is within human lifting limits (<= 55 lbs), it is removed from the world.
+   * If it exceeds 55 lbs, it remains anchored and returns canLift: false.
+   */
+  public pickUpWorldBoulder(raycaster: THREE.Raycaster, maxDist: number = 3.5): {
+    hit: boolean;
+    canLift: boolean;
+    weightLbs: number;
+    position?: THREE.Vector3;
+    color?: number;
+    scale?: number;
+  } | null {
+    for (const bMesh of this.boulderMeshes) {
+      const boulderHits = raycaster.intersectObject(bMesh, false);
+      if (boulderHits.length > 0 && boulderHits[0].distance <= maxDist && boulderHits[0].instanceId !== undefined) {
+        const id = boulderHits[0].instanceId;
+        const matrix = new THREE.Matrix4();
+        bMesh.getMatrixAt(id, matrix);
+        const scale = new THREE.Vector3();
+        scale.setFromMatrixScale(matrix);
+
+        if (scale.x > 0.05) {
+          const avgScale = (scale.x + scale.y + scale.z) / 3.0;
+          const weightLbs = calculateInstancedBoulderWeight(scale.x, scale.y, scale.z);
+          const canLift = weightLbs <= 55;
+
+          // If too heavy, do NOT hide or delete from world!
+          if (!canLift) {
+            return {
+              hit: true,
+              canLift: false,
+              weightLbs,
+              scale: avgScale,
+            };
+          }
+
+          const pos = new THREE.Vector3();
+          pos.setFromMatrixPosition(matrix);
+
+          let color = 0x8f4327;
+          if (bMesh.instanceColor) {
+            const col = new THREE.Color();
+            bMesh.getColorAt(id, col);
+            color = col.getHex();
+          }
+
+          // Hide this instance
+          bMesh.setMatrixAt(id, this.zeroMatrix);
+          bMesh.instanceMatrix.needsUpdate = true;
+          this.deactivateRockCollider(this.boulderMeshes.indexOf(bMesh), id);
+
+          return {
+            hit: true,
+            canLift: true,
+            weightLbs,
+            position: pos,
+            color,
+            scale: Math.min(0.95, Math.max(0.45, avgScale * 0.85)),
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * Blast destruction of foliage, cacti, boulders and quartz veins from dynamite detonations
    */
   public explodeFoliageAt(center: THREE.Vector3, radius: number = 4.8): ExplodeFoliageResult {
@@ -1110,6 +1696,7 @@ export class DesertFoliageManager {
           if (pos.distanceTo(center) <= radius) {
             bMesh.setMatrixAt(i, this.zeroMatrix);
             bMesh.instanceMatrix.needsUpdate = true;
+            this.deactivateRockCollider(this.boulderMeshes.indexOf(bMesh), i);
             rocksBlasted += 2;
             if (Math.random() < 0.35) goldBlasted += 1;
             destroyedPoints.push({ pos: pos.clone(), type: 'granite' });
@@ -1129,10 +1716,19 @@ export class DesertFoliageManager {
         if (scale.x > 0.05) {
           pos.setFromMatrixPosition(matrix);
           if (pos.distanceTo(center) <= radius * 1.3) {
-            ocMesh.setMatrixAt(i, this.zeroMatrix);
-            ocMesh.instanceMatrix.needsUpdate = true;
+            // Mountain monoliths are permanent bedrock: dynamite dislodges quarry stones and blasts a deep visible hole
             rocksBlasted += 3;
+            if (Math.random() < 0.35) goldBlasted += 1;
             destroyedPoints.push({ pos: pos.clone(), type: 'sandstone' });
+
+            const blastNormal = center.clone().sub(pos).normalize();
+            this.mountainHoleManager.digMountainHole(
+              center,
+              blastNormal.lengthSq() > 0.1 ? blastNormal : new THREE.Vector3(0, 1, 0),
+              0x7c3820,
+              'volcanic_crag',
+              'dynamite'
+            );
           }
         }
       }
@@ -1247,6 +1843,7 @@ export class DesertFoliageManager {
     for (const gd of this.goldDeposits) {
       this.scene.remove(gd.mesh);
     }
+    this.mountainHoleManager.dispose();
   }
 }
 
