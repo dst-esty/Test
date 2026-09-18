@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BuiltStructure, ClaimInfo, MineStructureType, PortalExcavationState, StructureBlueprint, Vector3D } from '../types';
+import { BuiltStructure, ClaimInfo, MineStructureType, PortalExcavationState, StructureBlueprint, TerritoryClaim, Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
 
 export const STRUCTURE_BLUEPRINTS: Record<MineStructureType, StructureBlueprint> = {
@@ -283,6 +283,113 @@ export class MineBuildingSystem {
     soundEngine.playHammerStake();
 
     return claim;
+  }
+
+  // Synchronize all persistent territory claims across the Superstition Mountains
+  public syncTerritoryClaims(claims: TerritoryClaim[], localProspectorId?: string) {
+    this.claimGroup.clear();
+
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0x4a3222,
+      roughness: 0.92,
+      metalness: 0.05,
+    });
+    const stoneMat = new THREE.MeshStandardMaterial({
+      color: 0x7a6352,
+      roughness: 0.95,
+      metalness: 0.02,
+    });
+    const brassMat = new THREE.MeshStandardMaterial({
+      color: 0xe6b840,
+      metalness: 0.88,
+      roughness: 0.28,
+    });
+
+    claims.forEach((claim) => {
+      const isOwner = localProspectorId && claim.ownerId === localProspectorId;
+      const ribbonColor = isOwner ? 0xffd23f : 0xef4444; // Yellow for player, red warning for rival prospector
+      const ribbonMat = new THREE.MeshStandardMaterial({
+        color: ribbonColor,
+        roughness: 0.4,
+        emissive: isOwner ? 0x554400 : 0x440000,
+        emissiveIntensity: 0.5,
+      });
+
+      const cx = claim.x;
+      const cz = claim.z;
+      const cy = this.getTerrainHeight(cx, cz);
+      const half = (claim.radius || 40) / 2;
+
+      // Central Monument Cairn
+      const monument = new THREE.Group();
+      monument.position.set(cx, cy, cz);
+
+      for (let i = 0; i < 8; i++) {
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.4 + Math.random() * 0.25, 0), stoneMat);
+        const angle = (i / 8) * Math.PI * 2;
+        const r = 0.65;
+        rock.position.set(Math.cos(angle) * r, 0.3, Math.sin(angle) * r);
+        monument.add(rock);
+      }
+
+      const centerPost = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.8, 0.3), woodMat);
+      centerPost.position.y = 1.4;
+      monument.add(centerPost);
+
+      const noticePlate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.05), brassMat);
+      noticePlate.position.set(0, 1.8, 0.18);
+      monument.add(noticePlate);
+
+      // Pennant flag
+      const flagGeo = new THREE.BufferGeometry();
+      const flagVertices = new Float32Array([
+        0, 2.6, 0,
+        0.9, 2.3, 0.1,
+        0, 2.0, 0,
+      ]);
+      flagGeo.setAttribute('position', new THREE.BufferAttribute(flagVertices, 3));
+      flagGeo.computeVertexNormals();
+      monument.add(new THREE.Mesh(flagGeo, ribbonMat));
+
+      this.claimGroup.add(monument);
+
+      // Four corner survey stakes & perimeter cords
+      const corners = [
+        { x: cx - half, z: cz - half },
+        { x: cx + half, z: cz - half },
+        { x: cx + half, z: cz + half },
+        { x: cx - half, z: cz + half },
+      ];
+
+      const cornerPoints: THREE.Vector3[] = [];
+      corners.forEach((c) => {
+        const cornerY = this.getTerrainHeight(c.x, c.z);
+        const stakeGroup = new THREE.Group();
+        stakeGroup.position.set(c.x, cornerY, c.z);
+
+        const cornerStake = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 2.0, 6), woodMat);
+        cornerStake.position.y = 1.0;
+        stakeGroup.add(cornerStake);
+
+        const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.15, 0.04), ribbonMat);
+        ribbon.position.set(0.15, 1.7, 0);
+        stakeGroup.add(ribbon);
+
+        this.claimGroup.add(stakeGroup);
+        cornerPoints.push(new THREE.Vector3(c.x, cornerY + 1.1, c.z));
+      });
+
+      const lineMat = new THREE.LineBasicMaterial({
+        color: ribbonColor,
+        linewidth: 2,
+      });
+      for (let i = 0; i < 4; i++) {
+        const p1 = cornerPoints[i];
+        const p2 = cornerPoints[(i + 1) % 4];
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+        this.claimGroup.add(new THREE.Line(lineGeo, lineMat));
+      }
+    });
   }
 
   // ==========================================

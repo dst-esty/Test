@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidClaim(data) {
+      return data.keys().hasAll(['id', 'name', 'ownerId', 'ownerName', 'x', 'z', 'radius', 'stakedAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 64
+        && data.ownerId is string && data.ownerId.size() <= 64
+        && data.ownerName is string && data.ownerName.size() <= 64
+        && data.x is number
+        && data.z is number
+        && data.radius is number
+        && data.stakedAt is number;
+    }
+
+    function isValidInfringement(data) {
+      return data.keys().hasAll(['id', 'claimId', 'claimName', 'claimOwnerId', 'jumperId', 'jumperName', 'action', 'x', 'z', 'timestamp'])
+        && data.id is string && data.id.size() <= 128
+        && data.claimId is string && data.claimId.size() <= 128
+        && data.claimName is string && data.claimName.size() <= 64
+        && data.claimOwnerId is string && data.claimOwnerId.size() <= 64
+        && data.jumperId is string && data.jumperId.size() <= 64
+        && data.jumperName is string && data.jumperName.size() <= 64
+        && data.action in ['wildcat_shaft', 'claim_jump_ore', 'boundary_dig']
+        && data.x is number
+        && data.z is number
+        && data.timestamp is number;
+    }
+
+    // Territory Claims collection
+    match /territory_claims/{claimId} {
+      // Anyone can view registered claims to see boundaries on map & in 3D
+      allow get, list: if true;
+
+      // Staking a claim: validate data format
+      allow create: if isValidId(claimId) && isValidClaim(request.resource.data);
+
+      // Updating claim stats (gold extracted, blocks dug) or owner updates
+      allow update: if isValidId(claimId)
+        && isValidClaim(request.resource.data)
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.x == resource.data.x
+        && request.resource.data.z == resource.data.z
+        && request.resource.data.ownerId == resource.data.ownerId;
+
+      // Deleting claim: owner can abandon claim
+      allow delete: if isValidId(claimId);
+    }
+
+    // Claim Infringements collection (real-time telegraph notices)
+    match /claim_infringements/{infringementId} {
+      allow get, list: if true;
+      allow create: if isValidId(infringementId) && isValidInfringement(request.resource.data);
+      allow update, delete: if isValidId(infringementId);
+    }
+  }
+}

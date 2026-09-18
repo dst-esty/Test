@@ -1,0 +1,135 @@
+{
+  "entities": {
+    "TerritoryClaim": {
+      "title": "TerritoryClaim",
+      "description": "A legally staked mineral territory claim with coordinates, owner info, and yield stats",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique claim identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Prospector-given territory claim name",
+          "maxLength": 64
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Unique prospector owner ID",
+          "maxLength": 64
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of claim deed holder",
+          "maxLength": 64
+        },
+        "x": {
+          "type": "number",
+          "description": "Center X world coordinate"
+        },
+        "z": {
+          "type": "number",
+          "description": "Center Z world coordinate"
+        },
+        "radius": {
+          "type": "number",
+          "description": "Claim radius perimeter in meters"
+        },
+        "stakedAt": {
+          "type": "number",
+          "description": "Epoch timestamp when claim was legally driven"
+        },
+        "extractedGold": {
+          "type": "number",
+          "description": "Accumulated ounces of gold extracted from this claim"
+        },
+        "blocksDug": {
+          "type": "number",
+          "description": "Total excavated ground blocks within claim boundary"
+        },
+        "isWildcatOrigin": {
+          "type": "boolean",
+          "description": "Whether this claim was established after a wildcatting operation"
+        }
+      },
+      "required": ["id", "name", "ownerId", "ownerName", "x", "z", "radius", "stakedAt"]
+    },
+    "ClaimInfringement": {
+      "title": "ClaimInfringement",
+      "description": "Real-time dispatch when an unauthorized prospector or wildcatter digs or builds on another player's claimed territory",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique infringement record ID"
+        },
+        "claimId": {
+          "type": "string",
+          "description": "Target claim identifier"
+        },
+        "claimName": {
+          "type": "string",
+          "description": "Name of deeded claim being trespassed upon",
+          "maxLength": 64
+        },
+        "claimOwnerId": {
+          "type": "string",
+          "description": "Deed owner prospector ID",
+          "maxLength": 64
+        },
+        "claimOwnerName": {
+          "type": "string",
+          "description": "Deed owner display name",
+          "maxLength": 64
+        },
+        "jumperId": {
+          "type": "string",
+          "description": "Prospector ID of the wildcatter / claim jumper",
+          "maxLength": 64
+        },
+        "jumperName": {
+          "type": "string",
+          "description": "Display name of the wildcatter / claim jumper",
+          "maxLength": 64
+        },
+        "action": {
+          "type": "string",
+          "description": "Type of claim violation",
+          "enum": ["wildcat_shaft", "claim_jump_ore", "boundary_dig"]
+        },
+        "x": {
+          "type": "number",
+          "description": "World X position of violation"
+        },
+        "y": {
+          "type": "number",
+          "description": "World Y position of violation"
+        },
+        "z": {
+          "type": "number",
+          "description": "World Z position of violation"
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Epoch timestamp of infringement event"
+        },
+        "resolved": {
+          "type": "boolean",
+          "description": "Whether this infringement dispute has been settled or contested"
+        }
+      },
+      "required": ["id", "claimId", "claimName", "claimOwnerId", "jumperId", "jumperName", "action", "x", "z", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/territory_claims/{claimId}": {
+      "schema": "TerritoryClaim",
+      "description": "Persistent territory claims registered across the Superstition Mountains"
+    },
+    "/claim_infringements/{infringementId}": {
+      "schema": "ClaimInfringement",
+      "description": "Active claim jumping and wildcatting alerts for claim deed holders"
+    }
+  }
+}

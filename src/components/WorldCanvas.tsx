@@ -33,12 +33,15 @@ import {
   GameOverDetails,
   RoomDirection,
   WaterTableState,
+  TerritoryClaim,
 } from '../types';
+import { territoryClaims } from '../services/territoryClaimService';
 import { generateNoiseTexture, createGoldVeinVoxelMaterials, VoxelShaderUniforms } from '../world/voxelGoldShader';
 import { UndergroundLayersManager } from '../world/undergroundLayers';
 import { ShaftSinkingStats } from '../world/undergroundVoxels';
 import { RemoteProspector } from '../world/remoteProspector';
 import { multiplayer } from '../multiplayer/multiplayerService';
+import { DesertHydrologyEngine } from '../world/hydrology';
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -262,6 +265,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const wildlifeManagerRef = useRef<WildlifeManager | null>(null);
   const combatManagerRef = useRef<CombatManager | null>(null);
   const atmosphereManagerRef = useRef<AtmosphereManager | null>(null);
+  const hydrologyEngineRef = useRef<DesertHydrologyEngine | null>(null);
   const undergroundLayersRef = useRef<UndergroundLayersManager | null>(null);
   const voxelUniformsRef = useRef<VoxelShaderUniforms[]>([]);
   const voxelTimeRef = useRef<{ value: number }>({ value: 0 });
@@ -457,6 +461,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const atmosphereManager = new AtmosphereManager(scene);
     atmosphereManagerRef.current = atmosphereManager;
     atmosphereManager.updateAtmosphere(timeOfDay, weather, sunLight, hemiLight);
+
+    const hydrologyEngine = new DesertHydrologyEngine(scene);
+    hydrologyEngineRef.current = hydrologyEngine;
+    hydrologyEngine.onFlashFloodWarning = (msg: string) => {
+      soundEngine.playFlashFloodRoar();
+      if (onShowBanner) onShowBanner(msg);
+    };
+    hydrologyEngine.onFlashFloodReceded = () => {
+      if (onShowBanner) onShowBanner('🌊 Flash flood runoff has receded into the gravel wash. Heavy placer gold deposits exposed!');
+    };
 
     // Initialize Subterranean Mine Shaft & Geological Strata System
     const undergroundLayers = new UndergroundLayersManager(scene);
@@ -2221,6 +2235,40 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         return;
       }
 
+      // 3b-2. Sonoran Natural Tinajas, Springs, and Arroyo Wash Channels
+      if (hydrologyEngineRef.current) {
+        const waterInfo = hydrologyEngineRef.current.queryWaterAtPosition(px, pz);
+        if (waterInfo.hasWater && waterInfo.canDrink) {
+          const handleWaterInteract = () => {
+            soundEngine.playWaterRefill();
+            soundEngine.playWaterSplash();
+            const isDirty = waterInfo.waterQuality === 'stagnant_alkali' || waterInfo.waterQuality === 'flood_silt';
+            const healthDelta = isDirty ? -5 : 5;
+            const hydrationGain = isDirty ? 35 : 55;
+            setPlayerState((prev) => ({
+              ...prev,
+              hydration: Math.min(100, (prev.hydration || 0) + hydrationGain),
+              health: Math.min(100, Math.max(10, (prev.health || 100) + healthDelta)),
+              canteenOunces: 32,
+            }));
+            if (onShowBanner) {
+              if (isDirty) {
+                onShowBanner(`⚠️ Drank from silty ${waterInfo.sourceName} (+${hydrationGain}% Hydration, -5 Health). Canteen Refilled!`);
+              } else {
+                onShowBanner(`💧 Refreshed at ${waterInfo.sourceName}! Canteen Filled (32 oz), +${hydrationGain}% Hydration.`);
+              }
+            }
+          };
+
+          if (executeAction) {
+            handleWaterInteract();
+          } else {
+            onPromptInteract(`Drink & Fill Canteen at ${waterInfo.sourceName} [E]`, handleWaterInteract);
+          }
+          return;
+        }
+      }
+
       // 3c. Player-Built Campfires & Prospector Camps
       if (playerStateRef.current.builtStructures?.length) {
         for (const s of playerStateRef.current.builtStructures) {
@@ -2366,19 +2414,26 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           playerPos.current.z = Math.max(-190, Math.min(190, playerPos.current.z));
         }
 
-        // Footstep sounds
+        // Footstep sounds & Surface Water Splash
         if (isGrounded.current) {
           stepTimer.current += delta * (isSprinting ? 2.8 : 1.8);
           if (stepTimer.current > 1.0) {
             stepTimer.current = 0;
-            soundEngine.playFootstep();
+            const inSurfaceWater = !isUnderground && hydrologyEngineRef.current?.queryWaterAtPosition(playerPos.current.x, playerPos.current.z).hasWater;
+            if (inSurfaceWater) {
+              soundEngine.playWaterSplash();
+            } else {
+              soundEngine.playFootstep();
+            }
           }
         }
 
         // Hydration drain - balanced rate so the player does not become dehydrated too quickly
         setPlayerState((prev) => {
           if (isGameOverRef.current) return prev;
-          const drainRate = (isSprinting ? 0.35 : 0.12) * delta;
+          const isRaining = weather === 'storm' || weather === 'light_rain';
+          const rainRelief = isRaining ? 0.2 : 1.0;
+          const drainRate = (isSprinting ? 0.35 : 0.12) * delta * rainRelief;
           const nextHydration = Math.max(0, prev.hydration - drainRate);
           let nextHealth = prev.health;
 
@@ -2799,6 +2854,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           sunLightRef.current || undefined,
           hemiLightRef.current || undefined
         );
+      }
+
+      // 5b-2. Sonoran Desert Hydrology, Water Table & Arroyos
+      if (hydrologyEngineRef.current) {
+        hydrologyEngineRef.current.update(delta, weather);
       }
 
       // 5c. Subterranean Mine Shaft & Granular Mini-Voxel Engine

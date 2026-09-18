@@ -22,6 +22,40 @@ export interface ClaimInfo {
   size: number;
   extractedGold: number;
   blocksDug: number;
+  ownerId?: string;
+  ownerName?: string;
+  stakedAt?: number;
+  isWildcatOrigin?: boolean;
+}
+
+export interface TerritoryClaim {
+  id: string;
+  name: string;
+  ownerId: string;
+  ownerName: string;
+  x: number;
+  z: number;
+  radius: number;
+  stakedAt: number;
+  extractedGold: number;
+  blocksDug: number;
+  isWildcatOrigin?: boolean;
+}
+
+export interface ClaimInfringement {
+  id: string;
+  claimId: string;
+  claimName: string;
+  claimOwnerId: string;
+  claimOwnerName: string;
+  jumperId: string;
+  jumperName: string;
+  action: 'wildcat_shaft' | 'claim_jump_ore' | 'boundary_dig';
+  x: number;
+  y: number;
+  z: number;
+  timestamp: number;
+  resolved?: boolean;
 }
 
 export interface MiningOreDrop {
@@ -154,6 +188,7 @@ export interface PlayerState {
   bullionBars?: number; // smelted bars
   builtStructures?: BuiltStructure[];
   activeClaim: ClaimInfo | null;
+  isWildcatter?: boolean;
   portalExcavation?: PortalExcavationState;
   discoveredLandmarks: string[];
   collectedClues: string[];
@@ -166,6 +201,7 @@ export interface PlayerState {
   isSwimming?: boolean;
   cornishPumpActive?: boolean;
   excavatedRoomsCount?: number;
+  canteenOunces?: number; // 0 to 32 oz for desert hydration
 }
 
 export type RoomDirection = 'north' | 'south' | 'east' | 'west' | 'crosscut';
