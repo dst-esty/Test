@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BuiltStructure, ClaimInfo, MineStructureType, PortalExcavationState, StructureBlueprint, TerritoryClaim, Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
+import { MountainDustParticleSystem } from './mountainDustParticles';
 
 export const STRUCTURE_BLUEPRINTS: Record<MineStructureType, StructureBlueprint> = {
   timber_portal: {
@@ -148,6 +149,8 @@ export class MineBuildingSystem {
     maxLife: number;
   }[] = [];
 
+  public dustParticleSystem?: MountainDustParticleSystem;
+
   constructor(scene: THREE.Scene, getTerrainHeight: (x: number, z: number) => number) {
     this.scene = scene;
     this.getTerrainHeight = getTerrainHeight;
@@ -157,6 +160,10 @@ export class MineBuildingSystem {
     this.scene.add(this.excavationSiteGroup);
     this.scene.add(this.ghostGroup);
     this.scene.add(this.particlesGroup);
+  }
+
+  public setDustParticleSystem(ps: MountainDustParticleSystem) {
+    this.dustParticleSystem = ps;
   }
 
   // ==========================================
@@ -611,6 +618,18 @@ export class MineBuildingSystem {
 
     this.spawnExcavationParticles(particleCenter, 30);
 
+    // High-Fidelity Mountain Bedrock Dust Cloud & Stone Cleavage Spalls
+    if (this.dustParticleSystem) {
+      const normal = new THREE.Vector3(Math.sin(pe.rotationY), 0.18, Math.cos(pe.rotationY)).normalize();
+      this.dustParticleSystem.triggerMountainStrike(
+        particleCenter,
+        normal,
+        'sandstone',
+        1.5,
+        pe.position.y
+      );
+    }
+
     // Guaranteed masonry rock harvest
     const rocksDug = 1 + (Math.random() < 0.45 ? 1 : 0);
 
@@ -682,6 +701,16 @@ export class MineBuildingSystem {
 
     // Billowing dust puff
     this.spawnDustPlumes(center, 4);
+
+    if (this.dustParticleSystem) {
+      this.dustParticleSystem.triggerMountainStrike(
+        center,
+        new THREE.Vector3(0, -1, 0),
+        'sandstone',
+        1.3,
+        center.y - 1.8
+      );
+    }
   }
 
   // Reinforce portal with permanent squared pine timber sets and masonry walls

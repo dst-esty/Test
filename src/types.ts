@@ -58,6 +58,19 @@ export interface ClaimInfringement {
   resolved?: boolean;
 }
 
+export type PardnerStatus = 'none' | 'pending_sent' | 'pending_received' | 'pardner';
+
+export interface Friendship {
+  id: string;
+  senderId: string;
+  senderName: string;
+  receiverId: string;
+  receiverName: string;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: number;
+  updatedAt?: number;
+}
+
 export interface MiningOreDrop {
   id: string;
   position: Vector3D;
@@ -216,6 +229,8 @@ export interface PlayerState {
   excavatedRoomsCount?: number;
   canteenOunces?: number; // 0 to 32 oz for desert hydration
 }
+
+export type GraphicsQuality = 'performance' | 'balanced' | 'high';
 
 export type RoomDirection = 'north' | 'south' | 'east' | 'west' | 'crosscut';
 

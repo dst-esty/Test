@@ -22,7 +22,7 @@ import { GameOverModal } from './components/GameOverModal';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
 import { soundEngine } from './audio/soundEffects';
 import { westernMusic } from './audio/westernMusic';
-import { ClaimInfo, ClueItem, Landmark, MineStructureType, PlayerState, Vector3D, WeatherType, MineLayerData, GameOverDetails, MultiplayerPlayer, MultiplayerChatMessage, RoomDirection, WaterTableState } from './types';
+import { ClaimInfo, ClueItem, Landmark, MineStructureType, PlayerState, Vector3D, WeatherType, MineLayerData, GameOverDetails, MultiplayerPlayer, MultiplayerChatMessage, RoomDirection, WaterTableState, GraphicsQuality } from './types';
 import { MultiplayerHUD } from './components/MultiplayerHUD';
 import { ShaftSinkingGauge } from './components/ShaftSinkingGauge';
 import { ShaftSinkingStats } from './world/undergroundVoxels';
@@ -117,6 +117,10 @@ export default function App() {
   const [payDirtAlert, setPayDirtAlert] = useState<{ ounces: number } | null>(null);
   const payDirtTimerRef = useRef<NodeJS.Timeout | null>(null);
   const restartHandlerRef = useRef<(() => void) | null>(null);
+  const mobileActionHandlerRef = useRef<(() => void) | null>(null);
+  const mobileJumpHandlerRef = useRef<(() => void) | null>(null);
+  const mobileInteractHandlerRef = useRef<(() => void) | null>(null);
+  const mobileMoveHandlerRef = useRef<((move: { forward: number; right: number }) => void) | null>(null);
   const playerStateRef = useRef<PlayerState>(playerState);
 
   useEffect(() => {
@@ -161,6 +165,40 @@ export default function App() {
     setBannerMessage(msg);
     setTimeout(() => setBannerMessage(null), 4500);
   }, []);
+
+  // Graphics Quality & Frame Pacing Engine (Performance / Balanced / High)
+  const [graphicsQuality, setGraphicsQuality] = useState<GraphicsQuality>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('prospector_graphics_quality') as GraphicsQuality | null;
+      if (saved && (saved === 'performance' || saved === 'balanced' || saved === 'high')) {
+        return saved;
+      }
+      const isMobile =
+        window.innerWidth <= 840 ||
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent);
+      return isMobile ? 'performance' : 'balanced';
+    }
+    return 'balanced';
+  });
+  const [currentFps, setCurrentFps] = useState<number>(60);
+
+  const handleCycleGraphicsQuality = useCallback(() => {
+    setGraphicsQuality((prev) => {
+      const next: GraphicsQuality =
+        prev === 'performance' ? 'balanced' : prev === 'balanced' ? 'high' : 'performance';
+      try {
+        localStorage.setItem('prospector_graphics_quality', next);
+      } catch {}
+      const label =
+        next === 'performance'
+          ? '⚡ Fast 60+ FPS Mode (Mobile optimized, 1.0 DPR, fast shadows)'
+          : next === 'balanced'
+          ? '⚖️ Balanced 60 FPS Mode (Smooth 60 FPS, crisp detail)'
+          : '🌟 High Fidelity Mode (Full shadow maps & highest resolution)';
+      showBanner(label);
+      return next;
+    });
+  }, [showBanner]);
 
   // Universal Synchronized Sky & Weather Instance
   const [timeOfDay, setTimeOfDay] = useState<number>(() => multiplayer.getUniversalTimeOfDay());
@@ -780,7 +818,21 @@ export default function App() {
         onRegisterPlaceTimberHandler={(fn) => {
           placeTimberHandlerRef.current = fn;
         }}
+        onRegisterMobileActionHandler={(fn) => {
+          mobileActionHandlerRef.current = fn;
+        }}
+        onRegisterMobileJumpHandler={(fn) => {
+          mobileJumpHandlerRef.current = fn;
+        }}
+        onRegisterMobileInteractHandler={(fn) => {
+          mobileInteractHandlerRef.current = fn;
+        }}
+        onRegisterMobileMoveHandler={(fn) => {
+          mobileMoveHandlerRef.current = fn;
+        }}
         onOpenTortillaFlat={() => setIsTortillaFlatOpen(true)}
+        graphicsQuality={graphicsQuality}
+        onFpsUpdate={setCurrentFps}
       />
 
       {/* Mini-Voxel Shaft Sinking & Bedrock Strata Gauge */}
@@ -953,6 +1005,25 @@ export default function App() {
         onShoreTrench={() => {
           if (shoreHandlerRef.current) shoreHandlerRef.current();
         }}
+        onMobileAction={() => {
+          if (mobileActionHandlerRef.current) mobileActionHandlerRef.current();
+        }}
+        onMobileJump={() => {
+          if (mobileJumpHandlerRef.current) mobileJumpHandlerRef.current();
+        }}
+        onMobileMove={(move) => {
+          if (mobileMoveHandlerRef.current) mobileMoveHandlerRef.current(move);
+        }}
+        onMobileInteract={() => {
+          if (mobileInteractHandlerRef.current) {
+            mobileInteractHandlerRef.current();
+          } else if (activeInteractAction) {
+            activeInteractAction();
+          }
+        }}
+        graphicsQuality={graphicsQuality}
+        fps={currentFps}
+        onCycleGraphicsQuality={handleCycleGraphicsQuality}
       />
 
       {/* Welcome & Expedition Briefing Modal */}

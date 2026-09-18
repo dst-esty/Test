@@ -38,6 +38,17 @@ service cloud.firestore {
         && data.timestamp is number;
     }
 
+    function isValidFriendship(data) {
+      return data.keys().hasAll(['id', 'senderId', 'senderName', 'receiverId', 'receiverName', 'status', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.senderId is string && data.senderId.size() <= 64
+        && data.senderName is string && data.senderName.size() <= 64
+        && data.receiverId is string && data.receiverId.size() <= 64
+        && data.receiverName is string && data.receiverName.size() <= 64
+        && data.status in ['pending', 'accepted', 'declined']
+        && data.createdAt is number;
+    }
+
     // Territory Claims collection
     match /territory_claims/{claimId} {
       // Anyone can view registered claims to see boundaries on map & in 3D
@@ -63,6 +74,14 @@ service cloud.firestore {
       allow get, list: if true;
       allow create: if isValidId(infringementId) && isValidInfringement(request.resource.data);
       allow update, delete: if isValidId(infringementId);
+    }
+
+    // Friendships collection (Pardners & Alliances)
+    match /friendships/{friendshipId} {
+      allow get, list: if true;
+      allow create: if isValidId(friendshipId) && isValidFriendship(request.resource.data);
+      allow update: if isValidId(friendshipId) && isValidFriendship(request.resource.data);
+      allow delete: if isValidId(friendshipId);
     }
   }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Compass,
   Flashlight,
@@ -34,11 +34,16 @@ import {
   Scroll,
   Axe,
   Hand,
+  Smartphone,
+  Maximize,
+  Minimize,
+  Gauge,
 } from 'lucide-react';
-import { MineStructureType, PlayerState } from '../types';
+import { MineStructureType, PlayerState, GraphicsQuality } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
 import { westernMusic } from '../audio/westernMusic';
 import { InventoryModal } from './InventoryModal';
+import { VirtualJoystick } from './VirtualJoystick';
 
 interface ControlsOverlayProps {
   playerState: PlayerState;
@@ -94,6 +99,13 @@ interface ControlsOverlayProps {
   onStakePayDirt?: () => void;
   timeOfDay?: number;
   nearestLandmark?: { name: string; dist: number } | null;
+  onMobileAction?: () => void;
+  onMobileJump?: () => void;
+  onMobileMove?: (move: { forward: number; right: number }) => void;
+  onMobileInteract?: () => void;
+  graphicsQuality?: GraphicsQuality;
+  fps?: number;
+  onCycleGraphicsQuality?: () => void;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
@@ -138,6 +150,13 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   unreadTelegraphCount = 0,
   timeOfDay = 12,
   nearestLandmark,
+  onMobileAction,
+  onMobileJump,
+  onMobileMove,
+  onMobileInteract,
+  graphicsQuality = 'balanced',
+  fps,
+  onCycleGraphicsQuality,
 }) => {
   const [musicPlaying, setMusicPlaying] = useState(westernMusic.getIsPlaying());
   const [musicMuted, setMusicMuted] = useState(westernMusic.getIsMuted());
@@ -145,6 +164,134 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const [isExcavationPanelCollapsed, setIsExcavationPanelCollapsed] = useState(true);
   const [isTrenchPanelCollapsed, setIsTrenchPanelCollapsed] = useState(true);
+  const [showTouchControls, setShowTouchControls] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024;
+  });
+
+  // Fullscreen Detection & Mobile Immersive View Handler
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
+    if (typeof document === 'undefined') return false;
+    const doc = document as any;
+    return !!(
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement
+    );
+  });
+
+  // Mobile Orientation Detection (Portrait vs Landscape)
+  const [isPortraitMobile, setIsPortraitMobile] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    return isTouch && window.innerWidth < 900 && window.innerHeight > window.innerWidth;
+  });
+
+  const [isLandscapeMobile, setIsLandscapeMobile] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    return isTouch && window.innerHeight <= 550 && window.innerWidth > window.innerHeight;
+  });
+
+  const [dismissRotatePrompt, setDismissRotatePrompt] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleOrientationCheck = () => {
+      if (typeof window === 'undefined') return;
+      const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      const isPortrait = isTouch && window.innerWidth < 900 && window.innerHeight > window.innerWidth;
+      const isLandscape = isTouch && window.innerHeight <= 550 && window.innerWidth > window.innerHeight;
+      setIsPortraitMobile(isPortrait);
+      setIsLandscapeMobile(isLandscape);
+    };
+
+    window.addEventListener('resize', handleOrientationCheck);
+    window.addEventListener('orientationchange', handleOrientationCheck);
+    return () => {
+      window.removeEventListener('resize', handleOrientationCheck);
+      window.removeEventListener('orientationchange', handleOrientationCheck);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const doc = document as any;
+      const isFull = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+      setIsFullscreen(isFull);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
+
+  const handleToggleFullscreen = useCallback(() => {
+    const doc = document as any;
+    const docEl = document.documentElement as any;
+
+    const isFull = !!(
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement
+    );
+
+    if (!isFull) {
+      if (docEl.requestFullscreen) {
+        docEl.requestFullscreen().catch(() => {});
+      } else if (docEl.webkitRequestFullscreen) {
+        docEl.webkitRequestFullscreen();
+      } else if (docEl.mozRequestFullScreen) {
+        docEl.mozRequestFullScreen();
+      } else if (docEl.msRequestFullscreen) {
+        docEl.msRequestFullscreen();
+      }
+      // Attempt orientation lock if on mobile device (best-effort, gracefully ignored if unsupported)
+      if (screen?.orientation && typeof (screen.orientation as any).lock === 'function') {
+        try {
+          (screen.orientation as any).lock('landscape').catch(() => {});
+        } catch {
+          // ignore orientation lock rejection
+        }
+      }
+    } else {
+      if (doc.exitFullscreen) {
+        doc.exitFullscreen().catch(() => {});
+      } else if (doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen();
+      } else if (doc.mozCancelFullScreen) {
+        doc.mozCancelFullScreen();
+      } else if (doc.msExitFullscreen) {
+        doc.msExitFullscreen();
+      }
+      if (screen?.orientation && typeof (screen.orientation as any).unlock === 'function') {
+        try {
+          (screen.orientation as any).unlock();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }, []);
+
+  const handleEnterLandscapeFullscreen = useCallback(() => {
+    handleToggleFullscreen();
+    setDismissRotatePrompt(true);
+  }, [handleToggleFullscreen]);
   
   // HUD Visibility (controlled or internal fallback)
   const [internalHudVisible, setInternalHudVisible] = useState(true);
@@ -225,10 +372,65 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   ];
 
   return (
-    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 sm:p-5 select-none z-20">
+    <div
+      className="absolute inset-0 pointer-events-none flex flex-col justify-between p-2.5 sm:p-5 select-none z-20"
+      style={{
+        paddingTop: 'max(0.6rem, env(safe-area-inset-top))',
+        paddingLeft: 'max(0.75rem, env(safe-area-inset-left))',
+        paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
+        paddingBottom: 'max(0.6rem, env(safe-area-inset-bottom))',
+      }}
+    >
       {/* Damage Flash Red Vignette */}
       {damageFlash && (
         <div className="absolute inset-0 bg-red-600/30 pointer-events-none transition-opacity duration-150 animate-pulse border-8 border-red-600" />
+      )}
+
+      {/* Turn Phone Sideways (Landscape) Tip for Mobile Viewers */}
+      {isPortraitMobile && !dismissRotatePrompt && (
+        <div className="fixed inset-x-3 bottom-24 sm:bottom-28 z-50 pointer-events-auto flex justify-center animate-in fade-in slide-in-from-bottom-3 duration-300">
+          <div className="w-full max-w-sm bg-stone-950/95 backdrop-blur-md text-amber-100 border-2 border-amber-500/80 rounded-2xl p-3.5 shadow-[0_10px_35px_rgba(0,0,0,0.85)] flex flex-col gap-2.5">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-600/20 border border-amber-500/40 text-amber-400 shrink-0">
+                  <RotateCw className="w-5 h-5 animate-spin" style={{ animationDuration: '6s' }} />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-amber-300 font-serif tracking-wide">
+                    Turn Phone Sideways
+                  </h4>
+                  <p className="text-[11px] text-stone-300 leading-snug mt-0.5">
+                    Rotating horizontally unlocks full panoramic canyon view and ergonomic dual-thumb controls!
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setDismissRotatePrompt(true)}
+                className="text-stone-400 hover:text-stone-100 p-1 rounded-full hover:bg-stone-850 transition-colors"
+                title="Dismiss"
+                aria-label="Dismiss rotation prompt"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1 border-t border-stone-800">
+              <button
+                onClick={handleEnterLandscapeFullscreen}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-stone-950 font-bold text-xs shadow-lg active:scale-95 transition-all cursor-pointer"
+              >
+                <Maximize className="w-3.5 h-3.5" />
+                <span>Go Landscape & Fullscreen</span>
+              </button>
+              <button
+                onClick={() => setDismissRotatePrompt(true)}
+                className="px-3 py-2 rounded-xl bg-stone-900 hover:bg-stone-850 border border-stone-700/70 text-stone-300 text-xs font-mono transition-colors cursor-pointer"
+              >
+                Keep Portrait
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Discovery / Action Banner Notification */}
@@ -600,29 +802,96 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             </div>
           )}
 
-          {/* Western Music Icon Button - Directly Below Expedition Records */}
-          <button
-            onClick={handleToggleMusic}
-            className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
-              isMusicActive
-                ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
-                : 'border-amber-600/40 hover:border-amber-400/80 shadow-black/40 text-stone-500 hover:text-stone-300'
-            }`}
-            title={
-              isMusicActive
-                ? `Western Music: ${currentTrack.title} (Playing - Shuffling Behind the Scenes) - Click to silence`
-                : 'Western Music (Silenced) - Click to play'
-            }
-          >
-            {isMusicActive ? (
-              <Music className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform animate-pulse" />
-            ) : (
-              <div className="relative flex items-center justify-center">
-                <Music className="w-4 h-4 text-stone-500 group-hover:text-stone-300 transition-colors" />
-                <span className="absolute w-[18px] h-[1.5px] bg-red-500/80 rotate-45 pointer-events-none rounded-full" />
-              </div>
+          <div className="flex items-center gap-2">
+            {/* Western Music Icon Button - Directly Below Expedition Records */}
+            <button
+              onClick={handleToggleMusic}
+              className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+                isMusicActive
+                  ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
+                  : 'border-amber-600/40 hover:border-amber-400/80 shadow-black/40 text-stone-500 hover:text-stone-300'
+              }`}
+              title={
+                isMusicActive
+                  ? `Western Music: ${currentTrack.title} (Playing) - Click to silence`
+                  : 'Western Music (Silenced) - Click to play'
+              }
+            >
+              {isMusicActive ? (
+                <Music className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform animate-pulse" />
+              ) : (
+                <div className="relative flex items-center justify-center">
+                  <Music className="w-4 h-4 text-stone-500 group-hover:text-stone-300 transition-colors" />
+                  <span className="absolute w-[18px] h-[1.5px] bg-red-500/80 rotate-45 pointer-events-none rounded-full" />
+                </div>
+              )}
+            </button>
+
+            {/* Touch / Mobile Controls HUD Toggle Button */}
+            <button
+              onClick={() => setShowTouchControls((prev) => !prev)}
+              className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+                showTouchControls
+                  ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
+                  : 'border-stone-700/60 text-stone-500 hover:text-stone-300'
+              }`}
+              title={
+                showTouchControls
+                  ? 'Touch & Virtual Joystick Controls (Active) - Click to hide'
+                  : 'Touch & Virtual Joystick Controls (Hidden) - Click to show'
+              }
+            >
+              <Smartphone className={`w-4 h-4 ${showTouchControls ? 'text-amber-400' : 'text-stone-500 group-hover:text-stone-300'}`} />
+            </button>
+
+            {/* Fullscreen Mode Toggle Button */}
+            <button
+              onClick={handleToggleFullscreen}
+              className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+                isFullscreen
+                  ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
+                  : 'border-stone-700/60 text-stone-400 hover:text-stone-200'
+              }`}
+              title={
+                isFullscreen
+                  ? 'Exit Fullscreen'
+                  : 'Fullscreen Mode (Expands viewport & hides browser bars on mobile)'
+              }
+              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+            >
+              {isFullscreen ? (
+                <Minimize className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Maximize className="w-4 h-4 text-stone-400 group-hover:text-stone-200" />
+              )}
+            </button>
+
+            {/* Graphics Quality & FPS Performance Indicator Button */}
+            {onCycleGraphicsQuality && (
+              <button
+                onClick={onCycleGraphicsQuality}
+                className={`group flex items-center gap-1.5 px-2.5 h-8 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
+                  graphicsQuality === 'performance'
+                    ? 'border-emerald-500/80 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.35)]'
+                    : graphicsQuality === 'balanced'
+                    ? 'border-amber-400/80 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.35)]'
+                    : 'border-purple-400/80 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.35)]'
+                }`}
+                title={`Graphics Engine: ${
+                  graphicsQuality === 'performance'
+                    ? 'Performance Mode (60+ FPS, optimized mobile DPR, fast shadows)'
+                    : graphicsQuality === 'balanced'
+                    ? 'Balanced Mode (Smooth 60 FPS, crisp detail)'
+                    : 'High Mode (Maximum fidelity & full shadow map)'
+                } - Click to switch`}
+              >
+                <Gauge className={`w-3.5 h-3.5 ${graphicsQuality === 'performance' ? 'text-emerald-400' : graphicsQuality === 'balanced' ? 'text-amber-400' : 'text-purple-400'} group-hover:rotate-45 transition-transform`} />
+                <span className="text-[10px] font-mono font-bold tracking-tight">
+                  {fps ? `${fps} FPS` : graphicsQuality === 'performance' ? '60 FPS' : graphicsQuality === 'balanced' ? 'BAL' : 'HIGH'}
+                </span>
+              </button>
             )}
-          </button>
+          </div>
 
         {/* Portal Excavation & Mountain Strain Warning Card (Collapsible) */}
         {playerState.portalExcavation && (
@@ -991,17 +1260,22 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         )}
       </div>
 
-      {/* Center Interaction Prompt */}
+      {/* Center Interaction Prompt (Touch and Click friendly) */}
       {interactionPrompt && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-12 pointer-events-auto flex flex-col items-center z-30">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-12 sm:translate-y-14 pointer-events-auto flex flex-col items-center z-40 max-w-[90vw]">
           <button
             onClick={onInteract}
-            className="flex items-center gap-2 bg-amber-500/95 hover:bg-amber-400 text-stone-950 font-bold px-5 py-2.5 rounded-full shadow-[0_0_25px_rgba(251,191,36,0.6)] backdrop-blur-sm border border-amber-300 transition transform hover:scale-105 active:scale-95 animate-pulse"
+            className="flex items-center gap-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-stone-950 font-bold px-5 py-3 rounded-full shadow-[0_0_30px_rgba(251,191,36,0.7)] backdrop-blur-md border-2 border-amber-200 transition-all transform hover:scale-105 active:scale-95 animate-pulse cursor-pointer touch-manipulation"
           >
-            <span className="w-6 h-6 rounded-full bg-stone-900 text-amber-300 text-xs flex items-center justify-center font-mono">
+            <span className="w-7 h-7 rounded-full bg-stone-950 text-amber-300 text-xs flex items-center justify-center font-mono font-black border border-amber-400/60 shrink-0">
               E
             </span>
-            <span className="text-sm">{interactionPrompt}</span>
+            <span className="text-xs sm:text-sm font-sans tracking-wide text-stone-950 font-black truncate max-w-[260px] sm:max-w-none">
+              {interactionPrompt}
+            </span>
+            <span className="text-[10px] bg-stone-900/80 text-amber-300 px-2 py-0.5 rounded-full font-mono uppercase tracking-wider shrink-0">
+              TAP
+            </span>
           </button>
         </div>
       )}
@@ -1155,6 +1429,181 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         onOpenRockDepot={onOpenRockDepot}
         onSelectTool={onSelectTool}
       />
+
+      {/* On-Screen Mobile Virtual Controls (Joystick & Action Buttons) */}
+      {showTouchControls && (
+        <div className="pointer-events-none fixed inset-0 z-25">
+          {/* Mobile Top Quick Fullscreen & Orientation Utility */}
+          <div
+            className="absolute pointer-events-auto select-none z-30 flex items-center gap-2"
+            style={{
+              top: 'max(0.75rem, env(safe-area-inset-top))',
+              right: 'max(3.75rem, env(safe-area-inset-right))',
+            }}
+          >
+            {isLandscapeMobile && (
+              <span className="hidden xs:inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-stone-900/85 border border-amber-500/40 text-[10px] font-mono text-amber-300 backdrop-blur-md shadow-md">
+                <Compass className="w-3 h-3 text-amber-400" />
+                <span>PANORAMA</span>
+              </span>
+            )}
+
+            <button
+              onTouchStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleToggleFullscreen();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleToggleFullscreen();
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border shadow-xl backdrop-blur-md text-[11px] font-mono font-bold transition-all active:scale-95 touch-manipulation cursor-pointer ${
+                isFullscreen
+                  ? 'bg-amber-500 text-stone-950 border-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.6)]'
+                  : 'bg-stone-900/90 text-stone-200 border-stone-700/80 hover:border-amber-400 active:bg-amber-600'
+              }`}
+              title={isFullscreen ? 'Exit Fullscreen' : 'Go Fullscreen on Mobile (Sideways / Landscape Recommended)'}
+              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Go Fullscreen'}
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize className="w-3.5 h-3.5 text-stone-950" />
+                  <span>EXIT FULL</span>
+                </>
+              ) : (
+                <>
+                  <Maximize className="w-3.5 h-3.5 text-amber-400" />
+                  <span>FULLSCREEN</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Virtual Movement Joystick on bottom-left with safe-area spacing */}
+          {onMobileMove && (
+            <div
+              className="absolute pointer-events-auto select-none"
+              style={{
+                left: 'max(1.25rem, env(safe-area-inset-left))',
+                bottom: 'max(1.25rem, env(safe-area-inset-bottom))',
+              }}
+            >
+              <VirtualJoystick onMove={onMobileMove} />
+            </div>
+          )}
+
+          {/* Action, Jump & Interact Touch Buttons on bottom-right - horizontal cluster in landscape! */}
+          <div
+            className="absolute flex flex-col landscape:flex-row items-end landscape:items-end gap-2.5 sm:gap-3 pointer-events-auto select-none"
+            style={{
+              right: 'max(1.25rem, env(safe-area-inset-right))',
+              bottom: 'max(1.25rem, env(safe-area-inset-bottom))',
+            }}
+          >
+            {/* Mobile Interact / Use Button */}
+            {(onMobileInteract || onInteract) && (
+              <button
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (onMobileInteract) onMobileInteract();
+                  else if (onInteract) onInteract();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onMobileInteract) onMobileInteract();
+                  else if (onInteract) onInteract();
+                }}
+                className={`w-13 h-13 landscape:w-12 landscape:h-12 rounded-full border-2 shadow-xl backdrop-blur-md flex flex-col items-center justify-center transition-all active:scale-95 touch-manipulation cursor-pointer ${
+                  interactionPrompt
+                    ? 'bg-amber-500 text-stone-950 border-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.9)] animate-pulse'
+                    : 'bg-stone-900/85 text-stone-200 border-stone-600 active:bg-amber-600/90 active:border-amber-300'
+                }`}
+                title="Interact / Examine / Enter [E]"
+                aria-label="Interact"
+              >
+                <span className="text-base leading-none">✋</span>
+                <span className="text-[9px] font-mono font-bold tracking-wider uppercase mt-0.5">USE [E]</span>
+              </button>
+            )}
+
+            {/* Mobile Jump Button */}
+            {onMobileJump && (
+              <button
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onMobileJump();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMobileJump();
+                }}
+                className="w-13 h-13 landscape:w-12 landscape:h-12 rounded-full bg-stone-900/85 active:bg-amber-600/90 border-2 border-stone-600 active:border-amber-300 shadow-xl backdrop-blur-md flex flex-col items-center justify-center text-stone-200 active:text-stone-950 transition-all active:scale-95 touch-manipulation cursor-pointer"
+                title="Jump [Space]"
+                aria-label="Jump"
+              >
+                <span className="text-base leading-none">⬆️</span>
+                <span className="text-[9px] font-mono font-bold tracking-wider uppercase mt-0.5">JUMP</span>
+              </button>
+            )}
+
+            {/* Primary Action Button (Dig / Mine / Shoot / Chop / Throw / Use) */}
+            {onMobileAction && (
+              <button
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onMobileAction();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMobileAction();
+                }}
+                className="w-16 h-16 landscape:w-15 landscape:h-15 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 active:from-amber-400 active:to-amber-200 border-2 border-amber-200 text-stone-950 shadow-[0_0_25px_rgba(245,158,11,0.7)] backdrop-blur-md flex flex-col items-center justify-center transition-all active:scale-90 touch-manipulation cursor-pointer font-black"
+                title={`Use ${playerState.equippedTool} [Action]`}
+                aria-label="Action"
+              >
+                <span className="text-xl leading-none">
+                  {playerState.carriedObject
+                    ? '💨'
+                    : playerState.equippedTool === 'shovel'
+                    ? '⛏️'
+                    : playerState.equippedTool === 'pickaxe'
+                    ? '⛏️'
+                    : playerState.equippedTool === 'axe'
+                    ? '🪓'
+                    : playerState.equippedTool === 'rifle'
+                    ? '🎯'
+                    : playerState.equippedTool === 'dynamite'
+                    ? '🧨'
+                    : playerState.equippedTool === 'hands'
+                    ? '✋'
+                    : '⚡'}
+                </span>
+                <span className="text-[10px] font-mono tracking-wider uppercase mt-0.5">
+                  {playerState.carriedObject
+                    ? 'THROW'
+                    : playerState.equippedTool === 'shovel'
+                    ? 'DIG'
+                    : playerState.equippedTool === 'pickaxe'
+                    ? 'MINE'
+                    : playerState.equippedTool === 'axe'
+                    ? 'CHOP'
+                    : playerState.equippedTool === 'rifle'
+                    ? 'FIRE'
+                    : playerState.equippedTool === 'dynamite'
+                    ? 'IGNITE'
+                    : playerState.equippedTool === 'hands'
+                    ? 'LIFT'
+                    : 'USE'}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

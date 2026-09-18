@@ -529,24 +529,24 @@ export class DesertFoliageManager {
       if (hasLeftArm) {
         const armH = new THREE.Mesh(armHorizontalGeo, saguaroMat);
         armH.position.set(-0.9, 0.6, 0);
-        armH.castShadow = true;
+        armH.castShadow = false;
         singleCactus.add(armH);
 
         const armV = new THREE.Mesh(armVerticalGeo, saguaroMat);
         armV.position.set(-1.5, 1.8, 0);
-        armV.castShadow = true;
+        armV.castShadow = false;
         singleCactus.add(armV);
       }
 
       if (hasRightArm) {
         const armH = new THREE.Mesh(armHorizontalGeo, saguaroMat);
         armH.position.set(0.9, 1.2, 0);
-        armH.castShadow = true;
+        armH.castShadow = false;
         singleCactus.add(armH);
 
         const armV = new THREE.Mesh(armVerticalGeo, saguaroMat);
         armV.position.set(1.5, 2.3, 0);
-        armV.castShadow = true;
+        armV.castShadow = false;
         singleCactus.add(armV);
       }
 
@@ -1125,6 +1125,34 @@ export class DesertFoliageManager {
         c.active = false;
         break;
       }
+    }
+  }
+
+  /**
+   * Dynamically adjusts shadows and fidelity on environmental foliage based on graphics quality.
+   */
+  public setGraphicsQuality(quality: 'performance' | 'balanced' | 'high') {
+    const isPerf = quality === 'performance';
+
+    if (this.barrelMesh) {
+      this.barrelMesh.castShadow = !isPerf;
+    }
+    if (this.boulderMeshes) {
+      this.boulderMeshes.forEach((mesh) => {
+        mesh.castShadow = !isPerf;
+      });
+    }
+    if (this.saguaroGroup) {
+      this.saguaroGroup.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          (child as THREE.Mesh).castShadow = !isPerf;
+        }
+      });
+    }
+    if (this.outcroppingMeshes) {
+      this.outcroppingMeshes.forEach((mesh) => {
+        mesh.castShadow = !isPerf;
+      });
     }
   }
 

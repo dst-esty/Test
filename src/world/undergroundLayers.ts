@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { MineLayerData, Vector3D, RoomDirection, ExcavatedRoom, WaterTableState } from '../types';
 import { soundEngine } from '../audio/soundEffects';
 import { UndergroundVoxelEngine } from './undergroundVoxels';
+import { MountainDustParticleSystem } from './mountainDustParticles';
+import { MountainHoleManager, MountainHole } from './mountainHoles';
 
 export const PREGENERATED_MINE_LAYERS: Omit<MineLayerData, 'unlocked' | 'digProgress' | 'currentHits'>[] = [
   {
@@ -204,10 +206,14 @@ export class UndergroundLayersManager {
   private waterDripTimer = 0;
 
   public voxelEngine: UndergroundVoxelEngine;
+  public dustParticleSystem?: MountainDustParticleSystem;
+  public holeManager?: MountainHoleManager;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, dustParticles?: MountainDustParticleSystem, holeManager?: MountainHoleManager) {
     this.scene = scene;
-    this.voxelEngine = new UndergroundVoxelEngine(this.scene);
+    this.dustParticleSystem = dustParticles;
+    this.holeManager = holeManager || new MountainHoleManager(this.scene, dustParticles);
+    this.voxelEngine = new UndergroundVoxelEngine(this.scene, dustParticles);
     this.mainGroup.add(this.layersGroup);
     this.mainGroup.add(this.roomsGroup);
     this.mainGroup.add(this.shaftGroup);
@@ -216,6 +222,15 @@ export class UndergroundLayersManager {
     this.scene.add(this.mainGroup);
 
     this.initLayersData();
+  }
+
+  public setHoleManager(hm: MountainHoleManager) {
+    this.holeManager = hm;
+  }
+
+  public setDustParticleSystem(ps: MountainDustParticleSystem) {
+    this.dustParticleSystem = ps;
+    this.voxelEngine.setDustParticleSystem(ps);
   }
 
   private initLayersData() {
@@ -927,6 +942,22 @@ export class UndergroundLayersManager {
       : new THREE.Vector3(this.surfacePos.x, this.surfaceY - layer.depthMeters + 0.5, this.surfacePos.z);
     this.spawnDigDebris(hitPos);
 
+    if (this.dustParticleSystem) {
+      const currentStratum = layer.strata.toLowerCase();
+      let strataMat = 'caliche';
+      if (currentStratum.includes('sandstone')) strataMat = 'sandstone';
+      else if (currentStratum.includes('granite') || currentStratum.includes('granodiorite')) strataMat = 'granite';
+      else if (currentStratum.includes('basalt')) strataMat = 'basalt';
+      else if (currentStratum.includes('schist') || currentStratum.includes('diorite')) strataMat = 'volcanic_crag';
+      this.dustParticleSystem.triggerMountainStrike(
+        hitPos,
+        new THREE.Vector3(0, 1, 0),
+        strataMat,
+        tool === 'dynamite' ? 2.4 : tool === 'shovel' ? 0.75 : 1.3,
+        hitPos.y - 0.25
+      );
+    }
+
     const currentHits = (this.shaftExcavationHits[activeLevel] || 0) + 1;
     this.shaftExcavationHits[activeLevel] = currentHits;
 
@@ -1130,6 +1161,29 @@ export class UndergroundLayersManager {
 
     if (playerPos) {
       this.spawnDigDebris(new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z));
+
+      if (this.dustParticleSystem) {
+        const dirMap: Record<RoomDirection, THREE.Vector3> = {
+          north: new THREE.Vector3(0, 0, 1),
+          south: new THREE.Vector3(0, 0, -1),
+          east: new THREE.Vector3(-1, 0, 0),
+          west: new THREE.Vector3(1, 0, 0),
+          crosscut: new THREE.Vector3(0.707, 0, 0.707),
+        };
+        const faceNormal = dirMap[direction] || new THREE.Vector3(0, 1, 0);
+        const facePoint = new THREE.Vector3(
+          playerPos.x - faceNormal.x * 1.5,
+          playerPos.y + 1.2,
+          playerPos.z - faceNormal.z * 1.5
+        );
+        this.dustParticleSystem.triggerMountainStrike(
+          facePoint,
+          faceNormal,
+          this.currentLevel >= 4 ? 'basalt' : this.currentLevel >= 3 ? 'granite' : 'sandstone',
+          tool === 'dynamite' ? 2.5 : 1.25,
+          playerPos.y
+        );
+      }
     }
 
     const progress = Math.min(100, Math.round((room.currentHits / room.hitsNeeded) * 100));
@@ -1355,6 +1409,72 @@ export class UndergroundLayersManager {
     return null;
   }
 
+  /**
+   * Raycasts directly against active subterranean cavern wall meshes or existing cavern holes.
+   */
+  public raycastCavernWall(
+    raycaster: THREE.Raycaster,
+    maxDistance = 6.0
+  ): {
+    hit: boolean;
+    point?: THREE.Vector3;
+    normal?: THREE.Vector3;
+    mesh?: THREE.Mesh;
+    distance?: number;
+    existingHole?: MountainHole;
+  } {
+    if (this.currentLevel === 0) return { hit: false };
+
+    // 1. First test existing excavated holes in the cavern
+    if (this.holeManager) {
+      const holeHit = this.holeManager.raycastMountainHoles(raycaster, maxDistance);
+      if (holeHit.hit && holeHit.point) {
+        const wallNormal = new THREE.Vector3(
+          this.surfacePos.x - holeHit.point.x,
+          0.12,
+          this.surfacePos.z - holeHit.point.z
+        ).normalize();
+        return {
+          hit: true,
+          point: holeHit.point,
+          normal: wallNormal,
+          distance: holeHit.distance,
+          existingHole: holeHit.hole,
+        };
+      }
+    }
+
+    // 2. Test intersection with cavern perimeter wall meshes
+    if (this.cavernWallMeshes.length > 0) {
+      const hits = raycaster.intersectObjects(this.cavernWallMeshes, false);
+      if (hits.length > 0 && hits[0].distance <= maxDistance) {
+        const hit = hits[0];
+        // Calculate inward normal from wall face pointing into cavern towards player
+        let normal = hit.face?.normal?.clone();
+        if (normal) {
+          normal.transformDirection(hit.object.matrixWorld);
+        } else {
+          normal = new THREE.Vector3(
+            this.surfacePos.x - hit.point.x,
+            0.12,
+            this.surfacePos.z - hit.point.z
+          ).normalize();
+        }
+        if (normal.lengthSq() < 0.01) normal.set(0, 1, 0);
+
+        return {
+          hit: true,
+          point: hit.point,
+          normal,
+          mesh: hit.object as THREE.Mesh,
+          distance: hit.distance,
+        };
+      }
+    }
+
+    return { hit: false };
+  }
+
   // Get floor elevation for locomotion when underground (dynamically follows voxel pit sinking)
   public getFloorElevationForPosition(x: number, z: number, currentLevel: number): number {
     if (currentLevel === 0) return this.surfaceY;
@@ -1389,9 +1509,11 @@ export class UndergroundLayersManager {
   }
 
   // Strike continuous organic cavern bedrock face at any 0-360° heading
+  // Carves true volumetric 3D excavation holes into the subterranean chamber rock wall!
   public strikeCavernWall(
     hitPoint: THREE.Vector3,
-    tool: string = 'pickaxe'
+    tool: string = 'pickaxe',
+    customNormal?: THREE.Vector3
   ): {
     success: boolean;
     heading: number;
@@ -1400,6 +1522,8 @@ export class UndergroundLayersManager {
     oreYield: number;
     oreType: string;
     message: string;
+    hole?: MountainHole;
+    depthReached?: number;
   } {
     const isDynamite = tool === 'dynamite';
     const dx = hitPoint.x - this.surfacePos.x;
@@ -1411,31 +1535,74 @@ export class UndergroundLayersManager {
     const dirIdx = Math.round(compassHeading / 45) % 8;
     const compassLabel = `${compassHeading.toString().padStart(3, '0')}° ${dirs[dirIdx]}`;
 
-    // Authentic geological host rock strata
+    // Authentic geological host rock strata & wall color
     let rockType = 'Peralta Red Sandstone';
+    let wallColorHex = 0x8a4528;
+    let particleMatType = 'sandstone';
+
     if (this.currentLevel === 1) {
       rockType = 'Desert Dacite & Sandstone';
+      wallColorHex = 0x846854;
+      particleMatType = 'caliche';
     } else if (this.currentLevel === 2) {
       rockType = 'Peralta Hematite Sandstone & Schist';
+      wallColorHex = 0x6e3c28;
+      particleMatType = 'sandstone';
     } else if (this.currentLevel === 3) {
       rockType = 'Precambrian Granodiorite Bedrock';
+      wallColorHex = 0x48423f;
+      particleMatType = 'granite';
     } else if (this.currentLevel === 4) {
       rockType = 'Superstition Basalt Caldera';
+      wallColorHex = 0x222226;
+      particleMatType = 'basalt';
     } else if (this.currentLevel >= 5) {
       rockType = 'Deep Chlorite Schist & Diorite';
+      wallColorHex = 0x1f2e24;
+      particleMatType = 'volcanic_crag';
     }
 
-    // Rare hydrothermal quartz vein hit detection (~5% probability or near vein coordinates)
-    const veinNoise = Math.sin(angleRad * 5.0) * Math.cos(hitPoint.y * 1.8);
-    const struckVein = veinNoise > 0.82;
-    let oreYield = 0;
-    let oreType = 'none';
+    // Calculate normal vector pointing out from the wall face into the cavern
+    const wallNormal = customNormal?.clone() || new THREE.Vector3(
+      this.surfacePos.x - hitPoint.x,
+      0.18,
+      this.surfacePos.z - hitPoint.z
+    ).normalize();
+    if (wallNormal.lengthSq() < 0.01) wallNormal.set(0, 1, 0);
 
-    if (struckVein) {
+    // Procedural volumetric hole excavation inside the mine!
+    let createdHole: MountainHole | undefined;
+    let holeDepth = 0.42;
+    let holeResult: { goldAwarded: number; message: string } | null = null;
+
+    if (this.holeManager) {
+      const digRes = this.holeManager.digMountainHole(
+        hitPoint,
+        wallNormal,
+        wallColorHex,
+        particleMatType,
+        tool
+      );
+      createdHole = digRes.hole;
+      holeDepth = digRes.depthReached;
+      holeResult = {
+        goldAwarded: digRes.goldAwarded,
+        message: digRes.message,
+      };
+    }
+
+    // Rare hydrothermal quartz vein hit detection (~8% probability or bonus with depth)
+    const veinNoise = Math.sin(angleRad * 5.0) * Math.cos(hitPoint.y * 1.8);
+    const struckVein = veinNoise > 0.82 || (createdHole?.hasExposedGoldVein ?? false);
+    let oreYield = holeResult?.goldAwarded || 0;
+    let oreType = struckVein ? (this.currentLevel >= 4 ? 'Electrum Wire Gold' : 'Native Wire Gold') : 'none';
+
+    if (struckVein && oreYield === 0) {
       oreYield = Number((1.5 + Math.random() * (this.currentLevel * 2.2)).toFixed(1));
-      oreType = this.currentLevel >= 4 ? 'Electrum Wire Gold' : 'Native Wire Gold';
       soundEngine.playOreChime();
       soundEngine.playDiscovery();
+    } else if (oreYield > 0) {
+      soundEngine.playOreChime();
     }
 
     if (isDynamite) {
@@ -1447,9 +1614,22 @@ export class UndergroundLayersManager {
       this.spawnDigDebris(hitPoint);
     }
 
-    let message = `⛏️ Chiseled ${compassLabel} Face: Solid ${rockType} host rock.`;
-    if (struckVein) {
-      message = `🪙 Struck Hydrothermal Quartz Vein at ${compassLabel}! Yielded +${oreYield} oz ${oreType}!`;
+    if (this.dustParticleSystem) {
+      const particleMat = struckVein ? 'quartz_gold' : particleMatType;
+      this.dustParticleSystem.triggerMountainStrike(
+        hitPoint,
+        wallNormal,
+        particleMat,
+        isDynamite ? 2.6 : 1.35,
+        hitPoint.y - 0.45
+      );
+    }
+
+    let message = `⛏️ Chiseled ${compassLabel} Cavern Wall (-${holeDepth.toFixed(1)}m): Solid ${rockType} host rock.`;
+    if (struckVein && oreYield > 0) {
+      message = `🪙 Struck Hydrothermal Quartz Vein in Cavern Wall at ${compassLabel} (-${holeDepth.toFixed(1)}m)! Yielded +${oreYield} oz ${oreType}!`;
+    } else if (holeResult?.message) {
+      message = holeResult.message;
     }
 
     return {
@@ -1460,6 +1640,8 @@ export class UndergroundLayersManager {
       oreYield,
       oreType,
       message,
+      hole: createdHole,
+      depthReached: holeDepth,
     };
   }
 

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
 import { createGoldVeinStandardMaterial, generateNoiseTexture } from './voxelGoldShader';
+import { MountainDustParticleSystem } from './mountainDustParticles';
 
 export type SubterraneanVoxelType =
   | 'sandstone'
@@ -110,9 +111,11 @@ export class UndergroundVoxelEngine {
   public goldMinedInLevel = 0;
   public initialFloorVoxelCount = 0;
   private timberCribbingSetsCreated = 0;
+  public dustParticleSystem?: MountainDustParticleSystem;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, dustParticles?: MountainDustParticleSystem) {
     this.scene = scene;
+    this.dustParticleSystem = dustParticles;
     this.noiseTexture = generateNoiseTexture(256);
 
     // Initialize mineral and rock materials with custom shader & procedural detail
@@ -142,6 +145,10 @@ export class UndergroundVoxelEngine {
     this.group.add(this.targetBoxMesh);
     this.group.add(this.cornerGlowMesh);
     this.scene.add(this.group);
+  }
+
+  public setDustParticleSystem(ps: MountainDustParticleSystem) {
+    this.dustParticleSystem = ps;
   }
 
   private setupCornerBrackets(vs: number) {
@@ -591,6 +598,22 @@ export class UndergroundVoxelEngine {
 
     this.spawnVoxelDebris(voxel.worldPos, voxel.type, isDynamite ? 24 : 8);
 
+    // High-Fidelity Subterranean Dust Cloud, Mineral Silt & Cleavage Particles
+    if (this.dustParticleSystem) {
+      const strikeNormal = voxel.isFloor
+        ? new THREE.Vector3(0, 1, 0)
+        : new THREE.Vector3(this.shaftCenter.x - voxel.worldPos.x, 0.15, this.shaftCenter.z - voxel.worldPos.z).normalize();
+      if (strikeNormal.lengthSq() < 0.01) strikeNormal.set(0, 1, 0);
+
+      this.dustParticleSystem.triggerMountainStrike(
+        voxel.worldPos,
+        strikeNormal,
+        voxel.type,
+        isDynamite ? 2.6 : isShovel ? 0.75 : 1.35,
+        this.shaftCenter.y
+      );
+    }
+
     let totalOre = 0;
     let voxelsCleared = 0;
 
@@ -638,6 +661,18 @@ export class UndergroundVoxelEngine {
             }
 
             this.spawnVoxelDebris(other.worldPos, other.type, 4);
+
+            if (this.dustParticleSystem) {
+              const otherNormal = new THREE.Vector3(other.worldPos.x - voxel.worldPos.x, 0.2, other.worldPos.z - voxel.worldPos.z).normalize();
+              if (otherNormal.lengthSq() < 0.01) otherNormal.set(0, 1, 0);
+              this.dustParticleSystem.triggerMountainStrike(
+                other.worldPos,
+                otherNormal,
+                other.type,
+                isDynamite ? 1.4 : 0.6,
+                this.shaftCenter.y
+              );
+            }
           }
         }
       }

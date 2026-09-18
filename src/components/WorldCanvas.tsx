@@ -34,6 +34,7 @@ import {
   RoomDirection,
   WaterTableState,
   TerritoryClaim,
+  GraphicsQuality,
 } from '../types';
 import { territoryClaims } from '../services/territoryClaimService';
 import { generateNoiseTexture, createGoldVeinVoxelMaterials, VoxelShaderUniforms } from '../world/voxelGoldShader';
@@ -108,7 +109,27 @@ interface WorldCanvasProps {
   onRegisterStrikeVoxelHandler?: (fn: () => void) => void;
   onRegisterPlaceTimberHandler?: (fn: () => void) => void;
   onOpenTortillaFlat?: () => void;
+  onRegisterMobileActionHandler?: (fn: () => void) => void;
+  onRegisterMobileJumpHandler?: (fn: () => void) => void;
+  onRegisterMobileInteractHandler?: (fn: () => void) => void;
+  onRegisterMobileMoveHandler?: (fn: (move: { forward: number; right: number }) => void) => void;
+  graphicsQuality?: GraphicsQuality;
+  onFpsUpdate?: (fps: number) => void;
 }
+
+const getTargetPixelRatio = (quality: GraphicsQuality) => {
+  const isMobile =
+    typeof window !== 'undefined' &&
+    (window.innerWidth <= 840 || /Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent));
+  const rawDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+  if (quality === 'performance') {
+    return Math.min(rawDpr, isMobile ? 0.92 : 1.05);
+  } else if (quality === 'balanced') {
+    return Math.min(rawDpr, isMobile ? 1.0 : 1.35);
+  } else {
+    return Math.min(rawDpr, 1.8);
+  }
+};
 
 export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   playerState,
@@ -158,6 +179,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onRegisterStrikeVoxelHandler,
   onRegisterPlaceTimberHandler,
   onOpenTortillaFlat,
+  onRegisterMobileActionHandler,
+  onRegisterMobileJumpHandler,
+  onRegisterMobileInteractHandler,
+  onRegisterMobileMoveHandler,
+  graphicsQuality = 'balanced',
+  onFpsUpdate,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const isUIOpenRef = useRef(isUIOpen);
@@ -301,6 +328,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
   // Input states
   const keysPressed = useRef<{ [key: string]: boolean }>({});
+  const virtualJoystickInput = useRef<{ forward: number; right: number }>({ forward: 0, right: 0 });
   const isPointerLocked = useRef<boolean>(false);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
   const stepTimer = useRef<number>(0);
@@ -321,6 +349,55 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const oxygenLevelRef = useRef<number>(100);
   const drowningTimerRef = useRef<number>(0);
   const lastWaterSyncTime = useRef<number>(0);
+
+  // High-performance graphics and frame pacing refs
+  const qualityRef = useRef<GraphicsQuality>(graphicsQuality);
+  qualityRef.current = graphicsQuality;
+
+  const currentDprRef = useRef<number>(1.0);
+  const fpsTrackerRef = useRef<{ frames: number; time: number; lowFpsCount: number }>({
+    frames: 0,
+    time: 0,
+    lowFpsCount: 0,
+  });
+  const lastHudSyncTime = useRef<number>(0);
+  const lastSentPos = useRef<THREE.Vector3>(new THREE.Vector3());
+  const lastSentYaw = useRef<number>(0);
+  const lastSentPitch = useRef<number>(0);
+  const lastMultiplayerSyncTime = useRef<number>(0);
+  const interactionCheckTick = useRef<number>(0);
+
+  // Dynamic quality adjustment without rebuilding scene
+  useEffect(() => {
+    if (!rendererRef.current) return;
+    const targetDpr = getTargetPixelRatio(graphicsQuality);
+    currentDprRef.current = targetDpr;
+    rendererRef.current.setPixelRatio(targetDpr);
+
+    if (foliageManagerRef.current) {
+      foliageManagerRef.current.setGraphicsQuality(graphicsQuality);
+    }
+
+    if (sunLightRef.current && rendererRef.current) {
+      const isPerf = graphicsQuality === 'performance';
+      if (isPerf) {
+        sunLightRef.current.shadow.mapSize.width = 1024;
+        sunLightRef.current.shadow.mapSize.height = 1024;
+        rendererRef.current.shadowMap.type = THREE.BasicShadowMap;
+      } else if (graphicsQuality === 'balanced') {
+        sunLightRef.current.shadow.mapSize.width = 1024;
+        sunLightRef.current.shadow.mapSize.height = 1024;
+        rendererRef.current.shadowMap.type = THREE.PCFShadowMap;
+      } else {
+        sunLightRef.current.shadow.mapSize.width = 2048;
+        sunLightRef.current.shadow.mapSize.height = 2048;
+        rendererRef.current.shadowMap.type = THREE.PCFSoftShadowMap;
+      }
+      sunLightRef.current.shadow.map?.dispose();
+      sunLightRef.current.shadow.map = null as any;
+      rendererRef.current.shadowMap.needsUpdate = true;
+    }
+  }, [graphicsQuality]);
 
   // Sync external position changes (e.g. fast travel or mine teleport)
   useEffect(() => {
@@ -364,22 +441,36 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const camera = new THREE.PerspectiveCamera(65, width / height, 0.2, 800);
     cameraRef.current = camera;
 
-    // 3. Renderer Setup (Hardware Accelerated WebGL2 Pipeline)
+    // 3. Renderer Setup (Hardware Accelerated WebGL2 Pipeline with Adaptive Mobile Performance)
+    const isMobile =
+      typeof window !== 'undefined' &&
+      (window.innerWidth <= 840 || /Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent));
+    const initQuality = qualityRef.current;
+    const isPerf = initQuality === 'performance';
+
     const renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: !isMobile || initQuality === 'high',
       powerPreference: 'high-performance',
-      precision: 'highp',
+      precision: isMobile ? 'mediump' : 'highp',
       stencil: false,
       depth: true,
       alpha: false,
     });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+    const initialDpr = getTargetPixelRatio(initQuality);
+    currentDprRef.current = initialDpr;
+    renderer.setPixelRatio(initialDpr);
+
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = isPerf
+      ? THREE.BasicShadowMap
+      : initQuality === 'high'
+      ? THREE.PCFSoftShadowMap
+      : THREE.PCFShadowMap;
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
@@ -395,17 +486,19 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     const sunLight = new THREE.DirectionalLight(0xfff3d6, 1.8);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
+    const shadowRes = isPerf ? 1024 : initQuality === 'high' ? 2048 : 1024;
+    sunLight.shadow.mapSize.width = shadowRes;
+    sunLight.shadow.mapSize.height = shadowRes;
     sunLight.shadow.camera.near = 10;
-    sunLight.shadow.camera.far = 400;
-    sunLight.shadow.camera.left = -120;
-    sunLight.shadow.camera.right = 120;
-    sunLight.shadow.camera.top = 120;
-    sunLight.shadow.camera.bottom = -120;
-    sunLight.shadow.bias = -0.0002;
+    sunLight.shadow.camera.far = 380;
+    const sCam = isPerf ? 85 : 120;
+    sunLight.shadow.camera.left = -sCam;
+    sunLight.shadow.camera.right = sCam;
+    sunLight.shadow.camera.top = sCam;
+    sunLight.shadow.camera.bottom = -sCam;
+    sunLight.shadow.bias = -0.0003;
     sunLight.shadow.normalBias = 0.025;
-    sunLight.shadow.radius = 2.5;
+    sunLight.shadow.radius = isPerf ? 1.0 : 2.5;
     scene.add(sunLight);
     sunLightRef.current = sunLight;
 
@@ -426,6 +519,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     goldDepositsRef.current = foliage.goldDeposits;
     foliageManagerRef.current = foliage.manager;
     foliage.manager.setDustParticleSystem(mountainDustParticles);
+    foliage.manager.setGraphicsQuality(initQuality);
 
     const landmarkMeshes = createLandmarkStructures(scene, landmarks);
 
@@ -454,6 +548,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     miningSystemRef.current = miningSystem;
 
     const mineBuilding = new MineBuildingSystem(scene, getTerrainHeight);
+    mineBuilding.setDustParticleSystem(mountainDustParticles);
     mineBuildingRef.current = mineBuilding;
 
     const movableRockManager = new MovableRockManager(scene);
@@ -494,7 +589,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     };
 
     // Initialize Subterranean Mine Shaft & Geological Strata System
-    const undergroundLayers = new UndergroundLayersManager(scene);
+    const undergroundLayers = new UndergroundLayersManager(scene, mountainDustParticles, foliage.manager.mountainHoleManager);
+    undergroundLayers.setDustParticleSystem(mountainDustParticles);
+    if (foliage.manager.mountainHoleManager) {
+      undergroundLayers.setHoleManager(foliage.manager.mountainHoleManager);
+    }
     undergroundLayersRef.current = undergroundLayers;
 
     const mineStructure = playerStateRef.current.builtStructures?.find(
@@ -1632,15 +1731,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           onShowBanner(res.message);
         }
       } else if (uLayers.currentLevel > 0) {
-        // Continuous organic cavern wall strike!
+        // Continuous organic cavern wall strike with true volumetric mountain hole excavation!
         const camDir = new THREE.Vector3();
         camera.getWorldDirection(camDir);
-        const wallHit = new THREE.Vector3(
-          playerPos.current.x + camDir.x * 4.5,
-          playerPos.current.y + camDir.y * 4.5,
-          playerPos.current.z + camDir.z * 4.5
-        );
-        const wallRes = uLayers.strikeCavernWall(wallHit, activeTool);
+        const origin = camera.position.clone();
+        const wallRay = new THREE.Raycaster(origin, camDir, 0.1, 7.5);
+        const cavernHit = uLayers.raycastCavernWall(wallRay, 6.0);
+
+        const wallHit = cavernHit.hit && cavernHit.point
+          ? cavernHit.point
+          : new THREE.Vector3(
+              playerPos.current.x + camDir.x * 4.5,
+              playerPos.current.y + camDir.y * 4.5,
+              playerPos.current.z + camDir.z * 4.5
+            );
+
+        const wallRes = uLayers.strikeCavernWall(wallHit, activeTool, cavernHit.normal);
         if (wallRes.oreYield > 0) {
           setPlayerState((prev) => ({
             ...prev,
@@ -2152,21 +2258,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
     };
 
-    const handleMouseDown = (e: MouseEvent) => {
+    const executePrimaryAction = () => {
       if (isUIOpenRef.current || isGameOverRef.current) return;
-
-      if (e.button === 2) {
-        if (playerStateRef.current.carriedObject) {
-          executePlaceRock();
-          return;
-        }
-      }
-
-      if (e.button !== 0) return; // Left click only
-
-      safeRequestPointerLock();
       soundEngine.startAmbiance();
-
       toolSwingProgress.current = 1.0; // Trigger physical 3D tool swing animation
 
       if (playerStateRef.current.carriedObject) {
@@ -2206,6 +2300,46 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
     };
 
+    const handleMouseDown = (e: MouseEvent) => {
+      if (isUIOpenRef.current || isGameOverRef.current) return;
+
+      if (e.button === 2) {
+        if (playerStateRef.current.carriedObject) {
+          executePlaceRock();
+          return;
+        }
+      }
+
+      if (e.button !== 0) return; // Left click only
+
+      safeRequestPointerLock();
+      executePrimaryAction();
+    };
+
+    const executeJumpAction = () => {
+      if (isGameOverRef.current) return;
+      if (isGrounded.current) {
+        verticalVelocity.current = 7.5;
+        isGrounded.current = false;
+        soundEngine.playJump();
+      }
+    };
+
+    if (onRegisterMobileActionHandler) {
+      onRegisterMobileActionHandler(executePrimaryAction);
+    }
+    if (onRegisterMobileJumpHandler) {
+      onRegisterMobileJumpHandler(executeJumpAction);
+    }
+    if (onRegisterMobileInteractHandler) {
+      onRegisterMobileInteractHandler(() => checkInteractions(true));
+    }
+    if (onRegisterMobileMoveHandler) {
+      onRegisterMobileMoveHandler((move) => {
+        virtualJoystickInput.current = move;
+      });
+    }
+
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
       if (playerStateRef.current.carriedObject) {
@@ -2226,28 +2360,55 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       isLockPending.current = false;
     };
 
-    // Mobile / Touch controls
+    // Mobile / Touch controls (Drag-to-look camera tracking)
+    let lookTouchId: number | null = null;
     let lastTouchX = 0;
     let lastTouchY = 0;
+
     const handleTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 1) {
-        lastTouchX = e.touches[0].clientX;
-        lastTouchY = e.touches[0].clientY;
-      }
       soundEngine.startAmbiance();
+      // Find a touch that isn't on an interactive HUD button or in the bottom-left joystick area
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        // If lookTouchId is already tracked, skip
+        if (lookTouchId !== null) continue;
+        
+        // Check if touch is in bottom-left quarter (reserved for joystick)
+        const isBottomLeft = touch.clientX < window.innerWidth * 0.45 && touch.clientY > window.innerHeight * 0.5;
+        if (!isBottomLeft) {
+          lookTouchId = touch.identifier;
+          lastTouchX = touch.clientX;
+          lastTouchY = touch.clientY;
+          break;
+        }
+      }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 1) {
-        const deltaX = e.touches[0].clientX - lastTouchX;
-        const deltaY = e.touches[0].clientY - lastTouchY;
-        lastTouchX = e.touches[0].clientX;
-        lastTouchY = e.touches[0].clientY;
+      if (lookTouchId === null) return;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === lookTouchId) {
+          const deltaX = touch.clientX - lastTouchX;
+          const deltaY = touch.clientY - lastTouchY;
+          lastTouchX = touch.clientX;
+          lastTouchY = touch.clientY;
 
-        const sensitivity = 0.004;
-        playerYaw.current -= deltaX * sensitivity;
-        playerPitch.current -= deltaY * sensitivity;
-        playerPitch.current = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, playerPitch.current));
+          const sensitivity = 0.005;
+          playerYaw.current -= deltaX * sensitivity;
+          playerPitch.current -= deltaY * sensitivity;
+          playerPitch.current = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, playerPitch.current));
+          break;
+        }
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === lookTouchId) {
+          lookTouchId = null;
+          break;
+        }
       }
     };
 
@@ -2260,17 +2421,34 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     renderer.domElement.addEventListener('contextmenu', handleContextMenu);
     renderer.domElement.addEventListener('touchstart', handleTouchStart);
     renderer.domElement.addEventListener('touchmove', handleTouchMove);
+    renderer.domElement.addEventListener('touchend', handleTouchEnd);
+    renderer.domElement.addEventListener('touchcancel', handleTouchEnd);
 
-    // Resize Handler
+    // Resize & Orientation Handler
     const handleResize = () => {
       if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
-      const w = containerRef.current.clientWidth;
-      const h = containerRef.current.clientHeight;
+      const w = containerRef.current.clientWidth || window.innerWidth;
+      const h = containerRef.current.clientHeight || window.innerHeight;
+      if (w === 0 || h === 0) return;
       cameraRef.current.aspect = w / h;
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(w, h);
     };
     window.addEventListener('resize', handleResize);
+    const onOrientationChange = () => {
+      handleResize();
+      setTimeout(handleResize, 100);
+      setTimeout(handleResize, 350);
+    };
+    window.addEventListener('orientationchange', onOrientationChange);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        handleResize();
+      });
+      resizeObserver.observe(containerRef.current);
+    }
 
     // ==========================================
     // Interaction Check Function
@@ -2473,6 +2651,33 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                 executeTraverseShaft(uLayers.currentLevel - 1);
               } else {
                 onPromptInteract(`Climb Shaft Ladder to Layer ${uLayers.currentLevel - 1} [E]`, () => executeTraverseShaft(uLayers.currentLevel - 1));
+              }
+              return;
+            }
+          }
+
+          // Check if looking at cavern bedrock wall or existing excavated hole
+          if (cameraRef.current) {
+            const cam = cameraRef.current;
+            const lookDir = new THREE.Vector3();
+            cam.getWorldDirection(lookDir);
+            const wallRay = new THREE.Raycaster(cam.position, lookDir, 0.1, 6.0);
+            const cavernHit = uLayers.raycastCavernWall(wallRay, 5.0);
+            if (cavernHit.hit) {
+              const hole = cavernHit.existingHole;
+              let wallLabel = `⛏️ Dig Cavern Wall into Bedrock [Left Click / E]`;
+              if (hole) {
+                if (hole.hasExposedGoldVein) {
+                  wallLabel = `⛏️ Deepen Mine Drift (Exposed Gold Vein, -${hole.depth.toFixed(1)}m) [Left Click / E]`;
+                } else {
+                  wallLabel = `⛏️ Dig Deeper into Cavern Wall (-${hole.depth.toFixed(1)}m) [Left Click / E]`;
+                }
+              }
+
+              if (executeAction) {
+                executeSubterraneanVoxelMine(playerStateRef.current.equippedTool);
+              } else {
+                onPromptInteract(wallLabel, () => executeSubterraneanVoxelMine(playerStateRef.current.equippedTool));
               }
               return;
             }
@@ -2884,14 +3089,39 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const delta = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
+      // Dynamic Resolution Scaling (DRS) & Real-Time FPS Tracker
+      fpsTrackerRef.current.frames++;
+      fpsTrackerRef.current.time += delta;
+      if (fpsTrackerRef.current.time >= 0.5) {
+        const measuredFps = fpsTrackerRef.current.frames / fpsTrackerRef.current.time;
+        fpsTrackerRef.current.frames = 0;
+        fpsTrackerRef.current.time = 0;
+
+        if (onFpsUpdate) {
+          onFpsUpdate(Math.round(measuredFps));
+        }
+
+        // Automatic DRS downscaling if mobile/browser drops below 32 FPS for consecutive intervals
+        if (measuredFps < 32) {
+          fpsTrackerRef.current.lowFpsCount++;
+          if (fpsTrackerRef.current.lowFpsCount >= 2 && currentDprRef.current > 0.72) {
+            currentDprRef.current = Math.max(0.70, currentDprRef.current - 0.1);
+            renderer.setPixelRatio(currentDprRef.current);
+            fpsTrackerRef.current.lowFpsCount = 0;
+          }
+        } else if (measuredFps > 56) {
+          fpsTrackerRef.current.lowFpsCount = 0;
+          const targetDpr = getTargetPixelRatio(qualityRef.current);
+          if (currentDprRef.current < targetDpr) {
+            currentDprRef.current = Math.min(targetDpr, currentDprRef.current + 0.05);
+            renderer.setPixelRatio(currentDprRef.current);
+          }
+        }
+      }
+
       // Update custom GLSL gold vein shader uniforms for metallic glint & torchlight shimmer
       if (voxelTimeRef.current) {
         voxelTimeRef.current.value = now * 0.001;
-      }
-
-      // Update subterranean layers & dynamic debris particles
-      if (undergroundLayersRef.current) {
-        undergroundLayersRef.current.update(delta, now);
       }
 
       // 1. Player Physics & Locomotion (Crisp, Responsive, Ground-Snapped Controls)
@@ -2921,6 +3151,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         if (keys['KeyS'] || keys['ArrowDown']) moveDir.sub(forward);
         if (keys['KeyD'] || keys['ArrowRight']) moveDir.add(right);
         if (keys['KeyA'] || keys['KeyQ'] || keys['ArrowLeft']) moveDir.sub(right);
+
+        // Virtual joystick contribution (mobile)
+        const vj = virtualJoystickInput.current;
+        if (Math.abs(vj.forward) > 0.05 || Math.abs(vj.right) > 0.05) {
+          moveDir.add(forward.clone().multiplyScalar(vj.forward));
+          moveDir.add(right.clone().multiplyScalar(vj.right));
+        }
       }
 
       const isMoving = moveDir.lengthSq() > 0.001;
@@ -3513,22 +3750,38 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
-      // 7. Periodic Interaction Check
-      checkInteractions(false);
+      // 7. Periodic Interaction Check (Throttled to every 4 frames / ~15Hz for high CPU savings)
+      interactionCheckTick.current++;
+      if (interactionCheckTick.current % 4 === 0) {
+        checkInteractions(false);
+      }
 
-      // 8. Update State for HUD (yaw, position)
-      setPlayerState((prev) => ({
-        ...prev,
-        position: {
-          x: playerPos.current.x,
-          y: playerPos.current.y,
-          z: playerPos.current.z,
-        },
-        rotation: {
-          yaw: playerYaw.current,
-          pitch: playerPitch.current,
-        },
-      }));
+      // 8. Update State for HUD (Throttled to ~10Hz or on movement threshold to eliminate 60Hz React re-render churn!)
+      const nowMs = performance.now();
+      const posDistSq = lastSentPos.current.distanceToSquared(playerPos.current);
+      const yawDiff = Math.abs(lastSentYaw.current - playerYaw.current);
+      const pitchDiff = Math.abs(lastSentPitch.current - playerPitch.current);
+      const timeSinceLastSync = nowMs - lastHudSyncTime.current;
+
+      if (timeSinceLastSync > 100 || posDistSq > 0.08 || yawDiff > 0.05 || pitchDiff > 0.05) {
+        lastHudSyncTime.current = nowMs;
+        lastSentPos.current.copy(playerPos.current);
+        lastSentYaw.current = playerYaw.current;
+        lastSentPitch.current = playerPitch.current;
+
+        setPlayerState((prev) => ({
+          ...prev,
+          position: {
+            x: playerPos.current.x,
+            y: playerPos.current.y,
+            z: playerPos.current.z,
+          },
+          rotation: {
+            yaw: playerYaw.current,
+            pitch: playerPitch.current,
+          },
+        }));
+      }
 
       // Render scene
       renderer.render(scene, camera);
@@ -3538,19 +3791,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         rp.update(delta, playerPos.current);
       });
 
-      // Transmit local position & action to multiplayer server
-      multiplayer.queuePositionUpdate({
-        x: playerPos.current.x,
-        y: playerPos.current.y,
-        z: playerPos.current.z,
-        yaw: playerYaw.current,
-        pitch: playerPitch.current,
-        action: isSprinting ? 'run' : (isMoving ? 'walk' : 'idle'),
-        activeTool: playerStateRef.current.equippedTool,
-        goldFound: playerStateRef.current.goldFound || 0,
-        rocksGathered: playerStateRef.current.blocksDug || 0,
-        health: playerStateRef.current.health || 100,
-      });
+      // Transmit local position & action to multiplayer server (Throttled to 10Hz network tick)
+      if (nowMs - lastMultiplayerSyncTime.current > 100) {
+        lastMultiplayerSyncTime.current = nowMs;
+        multiplayer.queuePositionUpdate({
+          x: playerPos.current.x,
+          y: playerPos.current.y,
+          z: playerPos.current.z,
+          yaw: playerYaw.current,
+          pitch: playerPitch.current,
+          action: isSprinting ? 'run' : (isMoving ? 'walk' : 'idle'),
+          activeTool: playerStateRef.current.equippedTool,
+          goldFound: playerStateRef.current.goldFound || 0,
+          rocksGathered: playerStateRef.current.blocksDug || 0,
+          health: playerStateRef.current.health || 100,
+        });
+      }
     };
 
     animationFrameId = requestAnimationFrame(animate);
@@ -3575,10 +3831,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', onOrientationChange);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       renderer.domElement.removeEventListener('mousedown', handleMouseDown);
       renderer.domElement.removeEventListener('contextmenu', handleContextMenu);
       renderer.domElement.removeEventListener('touchstart', handleTouchStart);
       renderer.domElement.removeEventListener('touchmove', handleTouchMove);
+      renderer.domElement.removeEventListener('touchend', handleTouchEnd);
+      renderer.domElement.removeEventListener('touchcancel', handleTouchEnd);
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }

@@ -10,10 +10,15 @@ export type MountainRockMaterial =
   | 'granite'
   | 'basalt'
   | 'caliche'
+  | 'calcite'
   | 'tuff'
   | 'gneiss'
   | 'quartz_gold'
   | 'quartz'
+  | 'silver_ore'
+  | 'amethyst'
+  | 'copper'
+  | 'pyrite_gravel'
   | 'dirt';
 
 export interface MaterialIntensityConfig {
@@ -242,7 +247,93 @@ export const MOUNTAIN_MATERIAL_PRESETS: Record<MountainRockMaterial, MaterialInt
     dustLifetime: 1.3,
     description: 'Pure crystalline quartz emitting sharp conchoidal chips and brilliant white sparks.',
   },
-  // 4. Loose Desert Soil
+  // 4. Subterranean Mine Ores & Mineral Strata
+  calcite: {
+    name: 'Crystalline Calcite & Spar',
+    hardness: 3,
+    intensity: 0.48,
+    dustColors: [0xf5efe6, 0xe8dfd1, 0xfffcf7, 0xdcd0bf],
+    sparkColor: 0xfff5e6,
+    baseCloudRadius: 1.60,
+    billowCount: 15,
+    microDustCount: 52,
+    sparkCount: 3,
+    chipCount: 7,
+    chipScale: 0.10,
+    expansionSpeed: 2.3,
+    baseOpacity: 0.80,
+    dustLifetime: 1.45,
+    description: 'Rhomboidal calcite cleavage shearing into fine calcium flour dust.',
+  },
+  silver_ore: {
+    name: 'Argentiferous Galena & Silver Vein',
+    hardness: 5,
+    intensity: 0.88,
+    dustColors: [0x687178, 0x828b94, 0x4e5459, 0xa4b0bc],
+    sparkColor: 0xd6f0ff,
+    baseCloudRadius: 1.15,
+    billowCount: 11,
+    microDustCount: 40,
+    sparkCount: 22,
+    chipCount: 11,
+    chipScale: 0.12,
+    expansionSpeed: 2.9,
+    baseOpacity: 0.86,
+    dustLifetime: 1.25,
+    description: 'Heavy metallic galena and silver fracture throwing electric blue-silver sparks and dark slate dust.',
+  },
+  amethyst: {
+    name: 'Imperial Amethyst Geode Cavity',
+    hardness: 6,
+    intensity: 0.96,
+    dustColors: [0x783682, 0x9648a4, 0x582460, 0xcaa0d8],
+    sparkColor: 0xf5d0ff,
+    baseCloudRadius: 1.20,
+    billowCount: 13,
+    microDustCount: 46,
+    sparkCount: 24,
+    chipCount: 11,
+    chipScale: 0.13,
+    expansionSpeed: 3.0,
+    baseOpacity: 0.84,
+    dustLifetime: 1.35,
+    description: 'Vitreous purple quartz geode shattering into shimmering lilac crystal silt and violet sparks.',
+  },
+  copper: {
+    name: 'Native Copper & Malachite Vein',
+    hardness: 4,
+    intensity: 0.72,
+    dustColors: [0xb86444, 0x3d8268, 0xc97250, 0x549e82],
+    sparkColor: 0x66ffcc,
+    baseCloudRadius: 1.40,
+    billowCount: 13,
+    microDustCount: 44,
+    sparkCount: 14,
+    chipCount: 9,
+    chipScale: 0.11,
+    expansionSpeed: 2.5,
+    baseOpacity: 0.80,
+    dustLifetime: 1.4,
+    description: 'Fibrous malachite and copper throwing teal-green sparks and oxidized terracotta dust.',
+  },
+  pyrite_gravel: {
+    name: "Auriferous Pyrite (Fool's Gold)",
+    hardness: 5,
+    intensity: 0.84,
+    dustColors: [0x826e42, 0x9e8654, 0x645430, 0xba9e64],
+    sparkColor: 0xffd700,
+    baseCloudRadius: 1.25,
+    billowCount: 12,
+    microDustCount: 42,
+    sparkCount: 20,
+    chipCount: 10,
+    chipScale: 0.12,
+    expansionSpeed: 2.7,
+    baseOpacity: 0.84,
+    dustLifetime: 1.3,
+    description: 'Brassy iron disulfide striking sharp golden sparks and sulfuric ochre dust.',
+  },
+  // 5. Loose Desert Soil
   dirt: {
     name: 'Desert Wash Alluvium',
     hardness: 1,
@@ -263,8 +354,26 @@ export const MOUNTAIN_MATERIAL_PRESETS: Record<MountainRockMaterial, MaterialInt
 };
 
 export function getMaterialConfig(materialName: string): MaterialIntensityConfig {
-  const key = materialName.toLowerCase().replace(/\s+/g, '_') as MountainRockMaterial;
-  return MOUNTAIN_MATERIAL_PRESETS[key] || MOUNTAIN_MATERIAL_PRESETS.sandstone;
+  const normalized = materialName.toLowerCase().replace(/[\s-]+/g, '_');
+  if (MOUNTAIN_MATERIAL_PRESETS[normalized as MountainRockMaterial]) {
+    return MOUNTAIN_MATERIAL_PRESETS[normalized as MountainRockMaterial];
+  }
+  // Subterranean & Geological Strata Alias Mapping
+  if (normalized.includes('silver') || normalized.includes('galena')) return MOUNTAIN_MATERIAL_PRESETS.silver_ore;
+  if (normalized.includes('amethyst') || normalized.includes('purple')) return MOUNTAIN_MATERIAL_PRESETS.amethyst;
+  if (normalized.includes('copper') || normalized.includes('malachite')) return MOUNTAIN_MATERIAL_PRESETS.copper;
+  if (normalized.includes('pyrite')) return MOUNTAIN_MATERIAL_PRESETS.pyrite_gravel;
+  if (normalized.includes('calcite')) return MOUNTAIN_MATERIAL_PRESETS.calcite;
+  if (normalized.includes('gold') || normalized.includes('electrum')) return MOUNTAIN_MATERIAL_PRESETS.quartz_gold;
+  if (normalized.includes('quartz')) return MOUNTAIN_MATERIAL_PRESETS.quartz;
+  if (normalized.includes('basalt') || normalized.includes('caldera')) return MOUNTAIN_MATERIAL_PRESETS.basalt;
+  if (normalized.includes('granit') || normalized.includes('granodiorite') || normalized.includes('diorite')) return MOUNTAIN_MATERIAL_PRESETS.granite;
+  if (normalized.includes('schist') || normalized.includes('gneiss')) return MOUNTAIN_MATERIAL_PRESETS.gneiss;
+  if (normalized.includes('dacite') || normalized.includes('crag')) return MOUNTAIN_MATERIAL_PRESETS.volcanic_crag;
+  if (normalized.includes('tuff')) return MOUNTAIN_MATERIAL_PRESETS.tuff;
+  if (normalized.includes('caliche')) return MOUNTAIN_MATERIAL_PRESETS.caliche;
+  if (normalized.includes('dirt') || normalized.includes('sand') || normalized.includes('gravel')) return MOUNTAIN_MATERIAL_PRESETS.dirt;
+  return MOUNTAIN_MATERIAL_PRESETS.sandstone;
 }
 
 // Procedural Particle Texture Generators
@@ -467,16 +576,18 @@ export class MountainDustParticleSystem {
    * Triggers the mountain pickaxe dust cloud & chip particle effect.
    * Size, density, sparks, and stone chip behavior depend directly on rock material intensity!
    *
-   * @param hitPoint World position where the pickaxe struck the mountain
+   * @param hitPoint World position where the pickaxe struck the mountain or mine
    * @param surfaceNormal Outward normal vector of the rock face (or strike reflection dir)
-   * @param material Rock material name (e.g. 'sandstone', 'granite', 'volcanic_crag', 'quartz_gold')
+   * @param material Rock material name (e.g. 'sandstone', 'granite', 'quartz_gold', 'silver_ore', 'amethyst', 'copper')
    * @param intensityMultiplier Optional scaling factor for blow strength or excavation depth (default 1.0)
+   * @param floorY Optional floor elevation for subterranean mines / shafts (defaults to local mine elevation if below terrain)
    */
   public triggerMountainStrike(
     hitPoint: THREE.Vector3,
     surfaceNormal: THREE.Vector3,
     material: MountainRockMaterial | string = 'sandstone',
-    intensityMultiplier: number = 1.0
+    intensityMultiplier: number = 1.0,
+    floorY?: number
   ) {
     const config = getMaterialConfig(material);
     const normal = surfaceNormal.clone().normalize();
@@ -596,7 +707,13 @@ export class MountainDustParticleSystem {
       metalness: config.hardness === 6 ? 0.45 : 0.05,
     });
 
-    const groundY = getTerrainHeight(hitPoint.x, hitPoint.z);
+    const terrainY = getTerrainHeight(hitPoint.x, hitPoint.z);
+    const groundY =
+      floorY !== undefined
+        ? floorY
+        : hitPoint.y < terrainY - 1.2
+        ? hitPoint.y - 0.45
+        : terrainY;
 
     for (let i = 0; i < chipCount; i++) {
       const geo = this.chipGeos[i % this.chipGeos.length];

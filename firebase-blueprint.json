@@ -120,6 +120,51 @@
         }
       },
       "required": ["id", "claimId", "claimName", "claimOwnerId", "jumperId", "jumperName", "action", "x", "z", "timestamp"]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Pardner and fellowship alliance between two prospectors in the Superstition Wilderness",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique friendship identifier"
+        },
+        "senderId": {
+          "type": "string",
+          "description": "Prospector ID who sent the pardner request",
+          "maxLength": 64
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display name of the sender prospector",
+          "maxLength": 64
+        },
+        "receiverId": {
+          "type": "string",
+          "description": "Target prospector ID or callsign receiving the pardner pact",
+          "maxLength": 64
+        },
+        "receiverName": {
+          "type": "string",
+          "description": "Display name of the receiver prospector",
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "description": "Current status of the pardner alliance",
+          "enum": ["pending", "accepted", "declined"]
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Epoch timestamp when pardnership was formed"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Epoch timestamp of last status change"
+        }
+      },
+      "required": ["id", "senderId", "senderName", "receiverId", "receiverName", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -130,6 +175,10 @@
     "/claim_infringements/{infringementId}": {
       "schema": "ClaimInfringement",
       "description": "Active claim jumping and wildcatting alerts for claim deed holders"
+    },
+    "/friendships/{friendshipId}": {
+      "schema": "Friendship",
+      "description": "Pardner alliances and expedition friend bonds between prospectors"
     }
   }
 }

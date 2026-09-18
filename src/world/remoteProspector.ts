@@ -24,6 +24,7 @@ export class RemoteProspector {
   public outfitColor: string = '#8c5932';
   public goldFound: number = 0;
   public health: number = 100;
+  public isPardner: boolean = false;
 
   private walkCycleTime: number = 0;
   private swingCycleTime: number = 0;
@@ -240,6 +241,13 @@ export class RemoteProspector {
     this.updateNameplate(0);
   }
 
+  public setPardnerStatus(isPardner: boolean) {
+    if (this.isPardner !== isPardner) {
+      this.isPardner = isPardner;
+      this.updateNameplate(0);
+    }
+  }
+
   public setTool(tool: string) {
     this.targetTool = tool;
     this.updateToolVisibility();
@@ -291,35 +299,44 @@ export class RemoteProspector {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Rounded card background
-    ctx.fillStyle = 'rgba(18, 14, 11, 0.82)';
+    ctx.fillStyle = this.isPardner ? 'rgba(35, 24, 10, 0.92)' : 'rgba(18, 14, 11, 0.82)';
     ctx.beginPath();
     ctx.roundRect(16, 12, canvas.width - 32, canvas.height - 24, 18);
     ctx.fill();
 
-    // Border with player outfit color
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = this.outfitColor;
+    // Border with player outfit color or bright gold for pardners
+    ctx.lineWidth = this.isPardner ? 6 : 4;
+    ctx.strokeStyle = this.isPardner ? '#fbbf24' : this.outfitColor;
     ctx.stroke();
 
-    // Online status dot
-    ctx.fillStyle = '#22c55e';
-    ctx.beginPath();
-    ctx.arc(44, 48, 8, 0, Math.PI * 2);
-    ctx.fill();
+    // Online status dot (gold star for pardner, green dot for others)
+    if (this.isPardner) {
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('★', 44, 48);
+    } else {
+      ctx.fillStyle = '#22c55e';
+      ctx.beginPath();
+      ctx.arc(44, 48, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Player Name
-    ctx.fillStyle = '#fef3c7';
+    ctx.fillStyle = this.isPardner ? '#fef08a' : '#fef3c7';
     ctx.font = 'bold 30px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(this.name, 62, 48);
 
     // Distance and Gold badge
-    ctx.fillStyle = '#d97706';
+    ctx.fillStyle = this.isPardner ? '#f59e0b' : '#d97706';
     ctx.font = '20px monospace';
     const distText = distanceToLocal > 0 ? `${Math.round(distanceToLocal)}m away` : 'Near';
     const goldText = `${this.goldFound.toFixed(1)} oz Gold`;
-    ctx.fillText(`${distText}  â€¢  ${goldText}`, 44, 88);
+    const pardnerBadge = this.isPardner ? '🤝 PARDNER  •  ' : '';
+    ctx.fillText(`${pardnerBadge}${distText}  •  ${goldText}`, 44, 88);
 
     this.nameplateTexture.needsUpdate = true;
   }
