@@ -82,13 +82,16 @@ export interface MiningOreDrop {
 
 export interface DesertAnimal {
   id: string;
-  type: 'rabbit' | 'snake' | 'bighorn' | 'vulture';
+  type: 'rabbit' | 'snake' | 'scorpion' | 'bighorn' | 'vulture';
   position: Vector3D;
   targetPos: Vector3D;
   rotation: number;
   speed: number;
   stateTimer: number;
   fleeing: boolean;
+  health?: number;
+  maxHealth?: number;
+  isHostile?: boolean;
 }
 
 export interface EnemyBandit {
@@ -318,7 +321,7 @@ export interface GameSettings {
 }
 
 export interface GameOverDetails {
-  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning';
+  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom';
   title: string;
   subtitle: string;
   cause: string;

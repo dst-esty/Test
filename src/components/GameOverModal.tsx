@@ -69,6 +69,15 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ details, onRestart
           icon: <Droplets className="w-8 h-8 text-cyan-400 animate-pulse" />,
           epitaphHeader: 'DROWNED IN FLOODED MINE DRIFTS',
         };
+      case 'venom':
+        return {
+          badge: 'LETHAL DESERT ENVENOMATION',
+          color: 'text-emerald-400',
+          borderColor: 'border-emerald-700/60',
+          glow: 'from-emerald-950/80 via-stone-950/90 to-black/95',
+          icon: <Skull className="w-8 h-8 text-emerald-400 animate-pulse" />,
+          epitaphHeader: 'OVERCOME BY DEADLY DESERT VENOM',
+        };
       case 'dynamite':
       default:
         return {

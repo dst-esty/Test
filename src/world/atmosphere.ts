@@ -682,21 +682,25 @@ export class AtmosphereManager {
           vec3 sky = mix(uHorizonColor, uZenithColor, pow(horizon, 0.52));
 
           // Physical Sun Disc and Mie scattering corona on the celestial sky dome
-          if (sunDir.y > -0.15 && uSunCoronaIntensity > 0.01) {
-            float sunDisc = smoothstep(0.9993, 0.9998, sunDot);
+          // Smooth sunset immersion factor: fades smoothly as sun descends towards/below the horizon
+          float horizonFade = clamp((sunDir.y + 0.04) / 0.16, 0.0, 1.0);
+          if (horizonFade > 0.001 && uSunCoronaIntensity > 0.01) {
+            // Tight realistic solar disc (apparent angular size ~0.5°)
+            float sunDisc = smoothstep(0.9997, 0.99995, sunDot);
 
-            // Forward Mie atmospheric scattering corona
-            float innerCorona = pow(sunDot, 320.0) * 3.5;
-            float outerCorona = pow(sunDot, 24.0) * 0.75;
-            float wideGlare = pow(sunDot, 5.0) * 0.18;
+            // Forward Mie atmospheric scattering corona with realistic steep angular falloff
+            float innerCorona = pow(sunDot, 1200.0) * 1.8;
+            float outerCorona = pow(sunDot, 180.0) * 0.45;
+            float softGlow = pow(sunDot, 48.0) * 0.12;
 
-            sky += uSunCoronaColor * (innerCorona + outerCorona + wideGlare) * uSunCoronaIntensity;
-            sky += vec3(1.0, 1.0, 0.95) * sunDisc * 2.5 * clamp(uSunCoronaIntensity * 1.5, 0.0, 1.0);
-          } else if (sunDir.y > -0.15 && uHaboobDustBlend > 0.05) {
+            float coronaTotal = (innerCorona + outerCorona + softGlow) * uSunCoronaIntensity * horizonFade;
+            sky += uSunCoronaColor * min(coronaTotal, 1.8);
+            sky += vec3(1.0, 1.0, 0.96) * sunDisc * 2.0 * horizonFade;
+          } else if (horizonFade > 0.001 && uHaboobDustBlend > 0.05) {
             // Obscured reddish solar disc struggling through the thick Haboob dust
-            float sunDisc = smoothstep(0.9988, 0.9998, sunDot);
-            sky += vec3(1.0, 0.55, 0.25) * sunDisc * 0.9 * uHaboobDustBlend;
-            sky += vec3(0.9, 0.45, 0.2) * pow(sunDot, 14.0) * 0.32 * uHaboobDustBlend;
+            float sunDisc = smoothstep(0.9995, 0.99995, sunDot);
+            sky += vec3(1.0, 0.55, 0.25) * sunDisc * 0.7 * uHaboobDustBlend * horizonFade;
+            sky += vec3(0.9, 0.45, 0.2) * pow(sunDot, 64.0) * 0.25 * uHaboobDustBlend * horizonFade;
           }
 
           // Celestial Night Stars and Procedural Milky Way with smooth eased opacity
@@ -729,7 +733,7 @@ export class AtmosphereManager {
     this.scene.add(this.skyDome);
 
     // 2. Optical Sun System (Spherical Core + Circular Camera-Facing Sprites)
-    const sunDiscGeo = new THREE.SphereGeometry(6.0, 32, 32);
+    const sunDiscGeo = new THREE.SphereGeometry(3.5, 32, 32);
     const sunDiscMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       fog: false,
@@ -744,31 +748,31 @@ export class AtmosphereManager {
       map: this.sunTexture,
       blending: THREE.AdditiveBlending,
       transparent: true,
-      opacity: 0.92,
+      opacity: 0.72,
       fog: false,
       depthWrite: false,
     });
     this.sunCoronaSprite = new THREE.Sprite(coronaMat);
-    this.sunCoronaSprite.scale.set(58, 58, 1);
+    this.sunCoronaSprite.scale.set(22, 22, 1);
     this.sunGroup.add(this.sunCoronaSprite);
 
-    // Atmospheric wide bloom sprite
+    // Atmospheric wide bloom sprite (subtle ambient optical bleed)
     const outerGlowMat = new THREE.SpriteMaterial({
       map: this.sunTexture,
       blending: THREE.AdditiveBlending,
       transparent: true,
-      opacity: 0.38,
+      opacity: 0.22,
       fog: false,
       depthWrite: false,
     });
     this.sunOuterGlowSprite = new THREE.Sprite(outerGlowMat);
-    this.sunOuterGlowSprite.scale.set(130, 130, 1);
+    this.sunOuterGlowSprite.scale.set(44, 44, 1);
     this.sunGroup.add(this.sunOuterGlowSprite);
 
     this.scene.add(this.sunGroup);
 
     // 3. Optical Moon System
-    const moonDiscGeo = new THREE.SphereGeometry(5.2, 32, 32);
+    const moonDiscGeo = new THREE.SphereGeometry(4.2, 32, 32);
     const moonDiscMat = new THREE.MeshBasicMaterial({
       color: 0xe2e8f0,
       fog: false,
@@ -782,12 +786,12 @@ export class AtmosphereManager {
       map: this.moonTexture,
       blending: THREE.AdditiveBlending,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.42,
       fog: false,
       depthWrite: false,
     });
     this.moonGlowSprite = new THREE.Sprite(moonGlowMat);
-    this.moonGlowSprite.scale.set(42, 42, 1);
+    this.moonGlowSprite.scale.set(24, 24, 1);
     this.moonGroup.add(this.moonGlowSprite);
 
     this.scene.add(this.moonGroup);
@@ -1056,7 +1060,7 @@ export class AtmosphereManager {
     hemiLight?: THREE.HemisphereLight
   ) {
     // 1. Calculate astronomical solar vector
-    const { sunDir } = getCelestialDirections(time);
+    const { sunDir, moonDir } = getCelestialDirections(time);
 
     // 2. Query continuously interpolated diurnal state
     const state = getInterpolatedDiurnalState(time, this.diurnalState);
@@ -1163,15 +1167,17 @@ export class AtmosphereManager {
     this.skyMaterial.uniforms.uHaboobDustBlend.value = dustW;
 
     // Smooth fading of celestial bodies (sun & moon discs and sprites)
-    const effectiveSunAlpha = state.sunAlpha * (1.0 - sw) * (1.0 - 0.45 * dustW);
+    const sunHorizonFade = Math.max(0, Math.min(1, (sunDir.y + 0.04) / 0.16));
+    const effectiveSunAlpha = state.sunAlpha * (1.0 - sw) * (1.0 - 0.45 * dustW) * sunHorizonFade;
     (this.sunDiscMesh.material as THREE.MeshBasicMaterial).opacity = effectiveSunAlpha;
-    (this.sunCoronaSprite.material as THREE.SpriteMaterial).opacity = 0.92 * effectiveSunAlpha;
-    (this.sunOuterGlowSprite.material as THREE.SpriteMaterial).opacity = 0.38 * effectiveSunAlpha;
+    (this.sunCoronaSprite.material as THREE.SpriteMaterial).opacity = 0.72 * effectiveSunAlpha;
+    (this.sunOuterGlowSprite.material as THREE.SpriteMaterial).opacity = 0.22 * effectiveSunAlpha;
     this.sunGroup.visible = effectiveSunAlpha > 0.005;
 
-    const effectiveMoonAlpha = state.moonAlpha * (1.0 - 0.85 * sw) * (1.0 - 0.75 * dustW);
+    const moonHorizonFade = Math.max(0, Math.min(1, (moonDir.y + 0.04) / 0.16));
+    const effectiveMoonAlpha = state.moonAlpha * (1.0 - 0.85 * sw) * (1.0 - 0.75 * dustW) * moonHorizonFade;
     (this.moonDiscMesh.material as THREE.MeshBasicMaterial).opacity = effectiveMoonAlpha * 0.95;
-    (this.moonGlowSprite.material as THREE.SpriteMaterial).opacity = 0.55 * effectiveMoonAlpha;
+    (this.moonGlowSprite.material as THREE.SpriteMaterial).opacity = 0.42 * effectiveMoonAlpha;
     this.moonGroup.visible = effectiveMoonAlpha > 0.005;
 
     // Update 3D volumetric cloud puff colors and opacity

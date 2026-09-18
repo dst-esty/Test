@@ -930,6 +930,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      // Wildlife strike check (pickaxe defends against rattlesnakes and scorpions)
+      if (wildlifeManagerRef.current) {
+        const wildlifeRay = new THREE.Raycaster(origin, dir, 0.1, 4.0);
+        const wRes = wildlifeManagerRef.current.hitTestRay(wildlifeRay, 3.8, 25);
+        if (wRes.hit) {
+          if (onTriggerHitMarker) onTriggerHitMarker();
+          if (wRes.message && onShowBanner) onShowBanner(wRes.message);
+          return;
+        }
+      }
+
       // A. Check if striking near the active Portal Excavation drift
       if (mineBuildingRef.current?.portalExcavation && !mineBuildingRef.current.portalExcavation.isReinforced) {
         const pe = mineBuildingRef.current.portalExcavation;
@@ -1170,6 +1181,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const isNearShaft = uLayers.isNearShaft(playerPos.current, 5.5) || uLayers.currentLevel > 0;
         if (targetedVoxel || (isNearShaft && uLayers.isNearExcavationPit(playerPos.current))) {
           executeSubterraneanVoxelMine('shovel');
+          return;
+        }
+      }
+
+      // First check if shovel strikes aggressive wildlife (rattlesnake, scorpion)
+      if (wildlifeManagerRef.current) {
+        const origin = cam ? cam.position.clone() : playerPos.current.clone().add(new THREE.Vector3(0, 1.4, 0));
+        const shovelRay = new THREE.Raycaster(origin, lookDir, 0.1, 4.2);
+        const wRes = wildlifeManagerRef.current.hitTestRay(shovelRay, 3.8, 25);
+        if (wRes.hit) {
+          if (onTriggerHitMarker) onTriggerHitMarker();
+          if (wRes.message && onShowBanner) onShowBanner(wRes.message);
           return;
         }
       }
@@ -1989,6 +2012,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }));
           }
         });
+
+        // High-caliber bullet strike against dangerous wildlife (rattlesnakes, scorpions)
+        if (wildlifeManagerRef.current) {
+          const wRay = new THREE.Raycaster(cam.position, lookDir, 0.5, 65.0);
+          const wRes = wildlifeManagerRef.current.hitTestRay(wRay, 60.0, 50);
+          if (wRes.hit) {
+            if (onTriggerHitMarker) onTriggerHitMarker();
+            if (wRes.message && onShowBanner) onShowBanner(wRes.message);
+          }
+        }
 
         // High-caliber bullet impact on desert foliage, rocks, and quartz outcroppings
         if (foliageManagerRef.current) {
@@ -3588,9 +3621,44 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         mountainDustParticlesRef.current.update(delta);
       }
 
-      // 4. Update Desert Wildlife (Rabbits, Snakes, Bighorn Sheep, Vultures)
+      // 4. Update Desert Wildlife (Rabbits, Rattlesnakes, Scorpions, Bighorn Sheep, Vultures)
       if (wildlifeManagerRef.current) {
-        wildlifeManagerRef.current.update(delta, playerPos.current, getTerrainHeight);
+        wildlifeManagerRef.current.update(
+          delta,
+          playerPos.current,
+          getTerrainHeight,
+          (dmg, creatureType, creatureName) => {
+            if (onTriggerDamageFlash) onTriggerDamageFlash();
+            setPlayerState((prev) => {
+              const nextHealth = prev.health - dmg;
+              if (nextHealth <= 0 && prev.health > 0) {
+                soundEngine.playPlayerDeath();
+                triggerDeath({
+                  reason: 'venom',
+                  title: creatureType === 'snake' ? 'Fatal Rattlesnake Envenomation' : 'Lethal Scorpion Neurotoxin',
+                  subtitle: 'Succumbed to Sonoran Desert Predator',
+                  cause: `Struck down by a venomous ${creatureName} in the Superstition Mountain wilderness. The potent desert toxins took hold before you could reach medical aid.`,
+                  goldFound: prev.goldFound || 0,
+                  blocksDug: prev.blocksDug || 0,
+                  landmarksDiscovered: prev.discoveredLandmarks?.length || 1,
+                  timeSurvivedSeconds: Math.floor((Date.now() - expeditionStartTime.current) / 1000),
+                  coordinates: { x: playerPos.current.x, y: playerPos.current.y, z: playerPos.current.z },
+                });
+                return {
+                  ...prev,
+                  health: 0,
+                };
+              }
+              return {
+                ...prev,
+                health: nextHealth,
+              };
+            });
+          },
+          (bannerMsg) => {
+            if (onShowBanner) onShowBanner(bannerMsg);
+          }
+        );
       }
 
       // 5. Update Outlaw Bandits & Combat

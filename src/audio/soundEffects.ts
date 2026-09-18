@@ -262,6 +262,162 @@ class SoundEngine {
     rattle.start(t);
   }
 
+  public playSnakeHiss() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const dur = 0.55;
+    const bufferSize = Math.floor(this.ctx.sampleRate * dur);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = (Math.random() * 2 - 1) * Math.sin((i / bufferSize) * Math.PI);
+    }
+
+    const hiss = this.ctx.createBufferSource();
+    hiss.buffer = noiseBuffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(3600, t);
+    filter.frequency.exponentialRampToValueAtTime(2400, t + dur);
+    filter.Q.setValueAtTime(3.2, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.01, t);
+    gain.gain.linearRampToValueAtTime(0.16, t + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+    hiss.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    hiss.start(t);
+  }
+
+  public playSnakeBite() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // 1. Sharp bite snap
+    const snapOsc = this.ctx.createOscillator();
+    const snapGain = this.ctx.createGain();
+    snapOsc.type = 'sawtooth';
+    snapOsc.frequency.setValueAtTime(850, t);
+    snapOsc.frequency.exponentialRampToValueAtTime(90, t + 0.12);
+    snapGain.gain.setValueAtTime(0.35, t);
+    snapGain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+
+    snapOsc.connect(snapGain);
+    snapGain.connect(this.ctx.destination);
+    snapOsc.start(t);
+    snapOsc.stop(t + 0.14);
+
+    // 2. Aggressive strike hiss noise burst
+    const dur = 0.3;
+    const bufferSize = Math.floor(this.ctx.sampleRate * dur);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const out = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      out[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    }
+    const strikeHiss = this.ctx.createBufferSource();
+    strikeHiss.buffer = noiseBuffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(2200, t);
+    const hGain = this.ctx.createGain();
+    hGain.gain.setValueAtTime(0.24, t);
+    hGain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+    strikeHiss.connect(filter);
+    filter.connect(hGain);
+    hGain.connect(this.ctx.destination);
+    strikeHiss.start(t);
+  }
+
+  public playScorpionSting() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // 1. Piercing sting whip / barb puncture
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(2800, t);
+    osc.frequency.exponentialRampToValueAtTime(450, t + 0.15);
+
+    gain.gain.setValueAtTime(0.32, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.16);
+
+    // 2. Burning venom buzz
+    const buzz = this.ctx.createOscillator();
+    const buzzGain = this.ctx.createGain();
+    buzz.type = 'sawtooth';
+    buzz.frequency.setValueAtTime(140, t);
+    buzz.frequency.linearRampToValueAtTime(95, t + 0.28);
+    buzzGain.gain.setValueAtTime(0.18, t);
+    buzzGain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+
+    buzz.connect(buzzGain);
+    buzzGain.connect(this.ctx.destination);
+    buzz.start(t);
+    buzz.stop(t + 0.3);
+  }
+
+  public playScorpionScuttle() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Micro chitinous clatter
+    for (let j = 0; j < 3; j++) {
+      const clickTime = t + j * 0.04;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1600 + Math.random() * 500, clickTime);
+      gain.gain.setValueAtTime(0.08, clickTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, clickTime + 0.02);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(clickTime);
+      osc.stop(clickTime + 0.025);
+    }
+  }
+
+  public playWildlifeDefeated() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(260, t);
+    osc.frequency.exponentialRampToValueAtTime(70, t + 0.2);
+
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.22);
+  }
+
   public playPickaxe() {
     if (this.isMuted) return;
     this.init();
