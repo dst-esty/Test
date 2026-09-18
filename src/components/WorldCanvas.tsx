@@ -187,6 +187,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onFpsUpdate,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const keysPressed = useRef<{ [key: string]: boolean }>({});
+  const virtualJoystickInput = useRef<{ forward: number; right: number }>({ forward: 0, right: 0 });
   const isUIOpenRef = useRef(isUIOpen);
   const activeBuildingTypeRef = useRef<MineStructureType>(activeBuildingType);
 
@@ -201,11 +203,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
   useEffect(() => {
     isUIOpenRef.current = isUIOpen;
-    if (isUIOpen && document.pointerLockElement) {
-      try {
-        document.exitPointerLock();
-      } catch {
-        // Ignore exit pointer lock failures
+    if (isUIOpen) {
+      keysPressed.current = {};
+      virtualJoystickInput.current = { forward: 0, right: 0 };
+      if (document.pointerLockElement) {
+        try {
+          document.exitPointerLock();
+        } catch {
+          // Ignore exit pointer lock failures
+        }
       }
     }
   }, [isUIOpen]);
@@ -217,11 +223,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
   useEffect(() => {
     isGameOverRef.current = isGameOver;
-    if (isGameOver && document.pointerLockElement) {
-      try {
-        document.exitPointerLock();
-      } catch {
-        // Ignore exit pointer lock failures
+    if (isGameOver) {
+      keysPressed.current = {};
+      virtualJoystickInput.current = { forward: 0, right: 0 };
+      if (document.pointerLockElement) {
+        try {
+          document.exitPointerLock();
+        } catch {
+          // Ignore exit pointer lock failures
+        }
       }
     }
   }, [isGameOver]);
@@ -329,8 +339,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   }, [playerState.equippedTool, playerState]);
 
   // Input states
-  const keysPressed = useRef<{ [key: string]: boolean }>({});
-  const virtualJoystickInput = useRef<{ forward: number; right: number }>({ forward: 0, right: 0 });
   const isPointerLocked = useRef<boolean>(false);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
   const stepTimer = useRef<number>(0);
@@ -2226,12 +2234,27 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     };
 
     // Event Handlers (Keyboard, Mouse PointerLock, Touch, Mining & Combat)
+    const handleResetInputs = () => {
+      keysPressed.current = {};
+      virtualJoystickInput.current = { forward: 0, right: 0 };
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isGameOverRef.current) return;
+      if (isGameOverRef.current || isUIOpenRef.current) return;
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+
       keysPressed.current[e.code] = true;
+      if (e.key) keysPressed.current[e.key] = true;
       soundEngine.startAmbiance();
 
       if (e.code === 'Escape') {
+        handleResetInputs();
         if (playerStateRef.current.equippedTool === 'builder') {
           if (mineBuildingRef.current) {
             mineBuildingRef.current.hideGhost();
@@ -2302,7 +2325,50 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      keysPressed.current[e.code] = false;
+      if (e.code) {
+        delete keysPressed.current[e.code];
+      }
+      if (e.key) {
+        delete keysPressed.current[e.key];
+      }
+      // Guarantee movement keys are cleared when their physical key or char is released
+      if (e.code === 'KeyW' || e.key === 'w' || e.key === 'W') {
+        delete keysPressed.current['KeyW'];
+        delete keysPressed.current['w'];
+        delete keysPressed.current['W'];
+      }
+      if (e.code === 'KeyS' || e.key === 's' || e.key === 'S') {
+        delete keysPressed.current['KeyS'];
+        delete keysPressed.current['s'];
+        delete keysPressed.current['S'];
+      }
+      if (e.code === 'KeyA' || e.key === 'a' || e.key === 'A') {
+        delete keysPressed.current['KeyA'];
+        delete keysPressed.current['a'];
+        delete keysPressed.current['A'];
+      }
+      if (e.code === 'KeyD' || e.key === 'd' || e.key === 'D') {
+        delete keysPressed.current['KeyD'];
+        delete keysPressed.current['d'];
+        delete keysPressed.current['D'];
+      }
+      if (e.code === 'ArrowUp') delete keysPressed.current['ArrowUp'];
+      if (e.code === 'ArrowDown') delete keysPressed.current['ArrowDown'];
+      if (e.code === 'ArrowLeft') delete keysPressed.current['ArrowLeft'];
+      if (e.code === 'ArrowRight') delete keysPressed.current['ArrowRight'];
+
+      // Modifier key safety (Alt-Tab, Cmd-Tab, Ctrl shortcuts)
+      if (
+        e.key === 'Alt' ||
+        e.key === 'Control' ||
+        e.key === 'Meta' ||
+        e.code === 'AltLeft' ||
+        e.code === 'AltRight' ||
+        e.code === 'MetaLeft' ||
+        e.code === 'MetaRight'
+      ) {
+        handleResetInputs();
+      }
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -2443,12 +2509,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       isPointerLocked.current = locked;
       if (locked) {
         isLockPending.current = false;
+      } else {
+        // Exited pointer lock: clear any residual key/joystick inputs so player stops immediately
+        handleResetInputs();
       }
     };
 
     const handlePointerLockError = () => {
       isPointerLocked.current = false;
       isLockPending.current = false;
+      handleResetInputs();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        handleResetInputs();
+      }
     };
 
     // Mobile / Touch controls (Drag-to-look camera tracking)
@@ -2506,6 +2582,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('blur', handleResetInputs);
+    window.addEventListener('focus', handleResetInputs);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     document.addEventListener('pointerlockerror', handlePointerLockError);
     renderer.domElement.addEventListener('mousedown', handleMouseDown);
@@ -3305,11 +3384,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const right = new THREE.Vector3(Math.cos(playerYaw.current), 0, -Math.sin(playerYaw.current));
       const moveDir = new THREE.Vector3();
 
-      if (!isGameOverRef.current) {
-        if (keys['KeyW'] || keys['KeyZ'] || keys['ArrowUp']) moveDir.add(forward);
-        if (keys['KeyS'] || keys['ArrowDown']) moveDir.sub(forward);
-        if (keys['KeyD'] || keys['ArrowRight']) moveDir.add(right);
-        if (keys['KeyA'] || keys['KeyQ'] || keys['ArrowLeft']) moveDir.sub(right);
+      if (!isGameOverRef.current && !isUIOpenRef.current) {
+        if (keys['KeyW'] || keys['ArrowUp'] || keys['w'] || keys['W']) moveDir.add(forward);
+        if (keys['KeyS'] || keys['ArrowDown'] || keys['s'] || keys['S']) moveDir.sub(forward);
+        if (keys['KeyD'] || keys['ArrowRight'] || keys['d'] || keys['D']) moveDir.add(right);
+        if (keys['KeyA'] || keys['ArrowLeft'] || keys['a'] || keys['A']) moveDir.sub(right);
 
         // Virtual joystick contribution (mobile)
         const vj = virtualJoystickInput.current;
@@ -3420,8 +3499,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // Handle real-time shaft ladder climbing
       if (nearShaftLadder) {
-        const wantsClimbUp = keys['KeyW'] || keys['KeyZ'] || keys['ArrowUp'] || keys['Space'] || (virtualJoystickInput.current.forward > 0.15);
-        const wantsClimbDown = keys['KeyS'] || keys['ArrowDown'] || keys['ShiftLeft'] || keys['ShiftRight'] || (virtualJoystickInput.current.forward < -0.15);
+        const wantsClimbUp = !isUIOpenRef.current && !isGameOverRef.current && (keys['KeyW'] || keys['ArrowUp'] || keys['w'] || keys['W'] || keys['Space'] || (virtualJoystickInput.current.forward > 0.15));
+        const wantsClimbDown = !isUIOpenRef.current && !isGameOverRef.current && (keys['KeyS'] || keys['ArrowDown'] || keys['s'] || keys['S'] || keys['ShiftLeft'] || keys['ShiftRight'] || (virtualJoystickInput.current.forward < -0.15));
         const ladderPos = uLayers.getShaftLadderPosition();
 
         if (wantsClimbUp) {
@@ -4226,6 +4305,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('blur', handleResetInputs);
+      window.removeEventListener('focus', handleResetInputs);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('pointerlockchange', handlePointerLockChange);
       document.removeEventListener('pointerlockerror', handlePointerLockError);
       if (document.pointerLockElement === renderer.domElement) {

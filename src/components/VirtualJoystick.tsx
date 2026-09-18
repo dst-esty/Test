@@ -72,19 +72,24 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({ onMove, classN
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    let matched = false;
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       if (touch.identifier === touchIdRef.current) {
-        touchIdRef.current = null;
-        setActive(false);
-        setKnobPos({ x: 0, y: 0 });
-        onMove({ forward: 0, right: 0 });
+        matched = true;
         break;
       }
     }
+    // If our touch ended or no fingers remain on the screen, reset immediately
+    if (matched || e.touches.length === 0) {
+      touchIdRef.current = null;
+      setActive(false);
+      setKnobPos({ x: 0, y: 0 });
+      onMove({ forward: 0, right: 0 });
+    }
   };
 
-  // Global cancel safety
+  // Global cancel & focus loss safety
   useEffect(() => {
     const handleGlobalEnd = () => {
       if (touchIdRef.current !== null) {
@@ -96,9 +101,11 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({ onMove, classN
     };
     window.addEventListener('touchend', handleGlobalEnd);
     window.addEventListener('touchcancel', handleGlobalEnd);
+    window.addEventListener('blur', handleGlobalEnd);
     return () => {
       window.removeEventListener('touchend', handleGlobalEnd);
       window.removeEventListener('touchcancel', handleGlobalEnd);
+      window.removeEventListener('blur', handleGlobalEnd);
     };
   }, [onMove]);
 

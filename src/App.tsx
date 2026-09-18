@@ -122,11 +122,36 @@ export default function App() {
   const mobileJumpHandlerRef = useRef<(() => void) | null>(null);
   const mobileInteractHandlerRef = useRef<(() => void) | null>(null);
   const mobileMoveHandlerRef = useRef<((move: { forward: number; right: number }) => void) | null>(null);
+  const [activeInteractAction, setActiveInteractAction] = useState<(() => void) | null>(null);
   const playerStateRef = useRef<PlayerState>(playerState);
 
   useEffect(() => {
     playerStateRef.current = playerState;
   }, [playerState]);
+
+  const handleMobileMove = useCallback((move: { forward: number; right: number }) => {
+    if (mobileMoveHandlerRef.current) mobileMoveHandlerRef.current(move);
+  }, []);
+
+  const handleMobileAction = useCallback(() => {
+    if (mobileActionHandlerRef.current) mobileActionHandlerRef.current();
+  }, []);
+
+  const handleMobileJump = useCallback(() => {
+    if (mobileJumpHandlerRef.current) mobileJumpHandlerRef.current();
+  }, []);
+
+  const handleMobileInteract = useCallback(() => {
+    if (mobileInteractHandlerRef.current) {
+      mobileInteractHandlerRef.current();
+    } else if (activeInteractAction) {
+      activeInteractAction();
+    }
+  }, [activeInteractAction]);
+
+  const handleShoreTrench = useCallback(() => {
+    if (shoreHandlerRef.current) shoreHandlerRef.current();
+  }, []);
 
   const [activeClueDialog, setActiveClueDialog] = useState<{
     clue?: ClueItem;
@@ -450,7 +475,6 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [viewMode, setViewMode] = useState<'first' | 'third'>('first');
   const [interactionPrompt, setInteractionPrompt] = useState<string | undefined>(undefined);
-  const [activeInteractAction, setActiveInteractAction] = useState<(() => void) | null>(null);
   const [hasShownWelcome, setHasShownWelcome] = useState(false);
 
   // Global HUD Visibility and Wilderness Telegraph State
@@ -961,25 +985,11 @@ export default function App() {
         damageFlash={damageFlashActive}
         bannerMessage={bannerMessage}
         nearbyTrench={nearbyTrench}
-        onShoreTrench={() => {
-          if (shoreHandlerRef.current) shoreHandlerRef.current();
-        }}
-        onMobileAction={() => {
-          if (mobileActionHandlerRef.current) mobileActionHandlerRef.current();
-        }}
-        onMobileJump={() => {
-          if (mobileJumpHandlerRef.current) mobileJumpHandlerRef.current();
-        }}
-        onMobileMove={(move) => {
-          if (mobileMoveHandlerRef.current) mobileMoveHandlerRef.current(move);
-        }}
-        onMobileInteract={() => {
-          if (mobileInteractHandlerRef.current) {
-            mobileInteractHandlerRef.current();
-          } else if (activeInteractAction) {
-            activeInteractAction();
-          }
-        }}
+        onShoreTrench={handleShoreTrench}
+        onMobileAction={handleMobileAction}
+        onMobileJump={handleMobileJump}
+        onMobileMove={handleMobileMove}
+        onMobileInteract={handleMobileInteract}
         graphicsQuality={graphicsQuality}
         fps={currentFps}
         onCycleGraphicsQuality={handleCycleGraphicsQuality}
