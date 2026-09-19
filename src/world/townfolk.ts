@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from './terrain';
 import { soundEngine } from '../audio/soundEffects';
+import { characterTextures } from './characterTextures';
 
 export interface TownNPCData {
   id: string;
@@ -151,6 +152,15 @@ export class TownNPC {
   public torsoGroup: THREE.Group;
   public nameplateSprite: THREE.Sprite;
   public speechBubbleSprite: THREE.Sprite;
+
+  // Realistic facial and respiration animation elements
+  public leftEyelid?: THREE.Mesh;
+  public rightEyelid?: THREE.Mesh;
+  public chestMesh?: THREE.Mesh;
+  private blinkTimer: number = 2.5 + Math.random() * 3.0;
+  private isBlinking: boolean = false;
+  private blinkDuration: number = 0.13;
+  private currentBlinkTime: number = 0;
   
   public isSpeaking: boolean = false;
   public speakTimer: number = 0;
@@ -211,13 +221,46 @@ export class TownNPC {
   private buildCharacterMesh() {
     const role = this.data.role;
 
-    // Shared Palette Materials
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xddb494, roughness: 0.8 });
-    const darkLeatherMat = new THREE.MeshStandardMaterial({ color: 0x221811, roughness: 0.75 });
-    const bootMat = new THREE.MeshStandardMaterial({ color: 0x18120d, roughness: 0.8 });
-    const brassMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.8, roughness: 0.3 });
-    const ironMat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, metalness: 0.85, roughness: 0.4 });
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x6e431f, roughness: 0.85 });
+    // Shared Palette PBR Materials with Procedural Bump Mapping
+    const skinMat = new THREE.MeshPhysicalMaterial({
+      color: 0xddb494,
+      roughness: 0.62,
+      metalness: 0.0,
+      sheen: 0.45,
+      sheenColor: new THREE.Color(0xffd2bd),
+      clearcoat: 0.08,
+      clearcoatRoughness: 0.25,
+      bumpMap: characterTextures.getSkinBump(),
+      bumpScale: 0.012,
+    });
+    const darkLeatherMat = new THREE.MeshStandardMaterial({
+      color: 0x221811,
+      roughness: 0.65,
+      bumpMap: characterTextures.getLeatherBump(),
+      bumpScale: 0.03,
+    });
+    const bootMat = new THREE.MeshStandardMaterial({
+      color: 0x18120d,
+      roughness: 0.6,
+      bumpMap: characterTextures.getLeatherBump(),
+      bumpScale: 0.03,
+    });
+    const brassMat = new THREE.MeshStandardMaterial({
+      color: 0xd4af37,
+      metalness: 0.85,
+      roughness: 0.28,
+    });
+    const ironMat = new THREE.MeshStandardMaterial({
+      color: 0x3a3f45,
+      metalness: 0.85,
+      roughness: 0.4,
+    });
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0x6e431f,
+      roughness: 0.75,
+      bumpMap: characterTextures.getWoodGrain(),
+      bumpScale: 0.035,
+    });
 
     // Role-specific fabrics
     let coatColor = 0x4a3525;
@@ -262,10 +305,30 @@ export class TownNPC {
       hatColor = 0x303030; // Flat cap
     }
 
-    const coatMat = new THREE.MeshStandardMaterial({ color: coatColor, roughness: 0.85 });
-    const vestMat = new THREE.MeshStandardMaterial({ color: vestColor, roughness: 0.8 });
-    const pantMat = new THREE.MeshStandardMaterial({ color: pantColor, roughness: 0.85 });
-    const hatMat = new THREE.MeshStandardMaterial({ color: hatColor, roughness: 0.75 });
+    const coatMat = new THREE.MeshStandardMaterial({
+      color: coatColor,
+      roughness: 0.82,
+      bumpMap: characterTextures.getDenimBump(),
+      bumpScale: 0.02,
+    });
+    const vestMat = new THREE.MeshStandardMaterial({
+      color: vestColor,
+      roughness: 0.75,
+      bumpMap: characterTextures.getLeatherBump(),
+      bumpScale: 0.025,
+    });
+    const pantMat = new THREE.MeshStandardMaterial({
+      color: pantColor,
+      roughness: 0.85,
+      bumpMap: characterTextures.getDenimBump(),
+      bumpScale: 0.025,
+    });
+    const hatMat = new THREE.MeshStandardMaterial({
+      color: hatColor,
+      roughness: 0.72,
+      bumpMap: characterTextures.getLeatherBump(),
+      bumpScale: 0.02,
+    });
 
     // --- 1. Torso & Pelvis ---
     this.torsoGroup.position.y = this.data.isSeated ? 0.72 : 0.88;
@@ -299,11 +362,11 @@ export class TownNPC {
       this.torsoGroup.add(grip);
     }
 
-    // Chest & Vest
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.38, 0.24), vestMat);
-    chest.position.y = 0.32;
-    chest.castShadow = true;
-    this.torsoGroup.add(chest);
+    // Chest & Vest (Articulated with natural breathing cycle)
+    this.chestMesh = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.38, 0.24), vestMat);
+    this.chestMesh.position.y = 0.32;
+    this.chestMesh.castShadow = true;
+    this.torsoGroup.add(this.chestMesh);
 
     // Sheriff Silver 5-Point Star Badge
     if (role === 'sheriff') {
@@ -347,12 +410,14 @@ export class TownNPC {
       this.torsoGroup.add(skirt);
     }
 
-    // Neckerchief / Bandana / Bowtie
+    // Neckerchief / Bandana / Bowtie with cloth bump
     const neckTie = new THREE.Mesh(
       new THREE.BoxGeometry(0.14, 0.08, 0.14),
       new THREE.MeshStandardMaterial({
         color: role === 'barkeep' ? 0x111111 : role === 'sheriff' ? 0x1c1e22 : 0xa42618,
         roughness: 0.7,
+        bumpMap: characterTextures.getDenimBump(),
+        bumpScale: 0.015,
       })
     );
     neckTie.position.set(0, 0.52, 0.05);
@@ -362,16 +427,85 @@ export class TownNPC {
     this.headGroup.position.set(0, 0.62, 0.02);
     this.torsoGroup.add(this.headGroup);
 
-    // Head Base
+    // Head Base with Subsurface Physical Skin
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.22, 0.2), skinMat);
     head.position.y = 0.09;
     head.castShadow = true;
     this.headGroup.add(head);
 
-    // Nose
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.06), skinMat);
+    // Brow Ridge
+    const browRidge = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.035, 0.05), skinMat);
+    browRidge.position.set(0, 0.145, 0.105);
+    this.headGroup.add(browRidge);
+
+    // Sculpted Nose
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.065, 0.06), skinMat);
     nose.position.set(0, 0.09, 0.125);
     this.headGroup.add(nose);
+
+    // Sculpted Cheekbones
+    const cheekL = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.025), skinMat);
+    cheekL.position.set(-0.075, 0.08, 0.105);
+    cheekL.rotation.y = 0.2;
+    this.headGroup.add(cheekL);
+
+    const cheekR = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.025), skinMat);
+    cheekR.position.set(0.075, 0.08, 0.105);
+    cheekR.rotation.y = -0.2;
+    this.headGroup.add(cheekR);
+
+    // --- Realistic Physical Eyes with Role-Colored Irises & Eyelids ---
+    const eyeIrisColor = role === 'sheriff' ? 0x2c4e6b : role === 'homesteader' ? 0x2d4f35 : role === 'barkeep' ? 0x3b291d : role === 'hostler' ? 0x4c3319 : 0x3c2a1b;
+    const eyeMat = new THREE.MeshPhysicalMaterial({
+      map: characterTextures.getEyeTexture(eyeIrisColor),
+      roughness: 0.04,
+      metalness: 0.0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.02,
+    });
+
+    const eyeGeo = new THREE.SphereGeometry(0.021, 10, 10);
+    eyeGeo.rotateY(Math.PI / 2);
+
+    // Left Eyeball
+    const eyeLeft = new THREE.Mesh(eyeGeo, eyeMat);
+    eyeLeft.position.set(-0.055, 0.115, 0.106);
+    this.headGroup.add(eyeLeft);
+
+    // Left Eyelid
+    this.leftEyelid = new THREE.Mesh(
+      new THREE.BoxGeometry(0.042, 0.022, 0.015),
+      skinMat
+    );
+    this.leftEyelid.position.set(-0.055, 0.124, 0.109);
+    this.leftEyelid.scale.y = 0.01;
+    this.headGroup.add(this.leftEyelid);
+
+    // Right Eyeball
+    const eyeRight = new THREE.Mesh(eyeGeo, eyeMat);
+    eyeRight.position.set(0.055, 0.115, 0.106);
+    this.headGroup.add(eyeRight);
+
+    // Right Eyelid
+    this.rightEyelid = new THREE.Mesh(
+      new THREE.BoxGeometry(0.042, 0.022, 0.015),
+      skinMat
+    );
+    this.rightEyelid.position.set(0.055, 0.124, 0.109);
+    this.rightEyelid.scale.y = 0.01;
+    this.headGroup.add(this.rightEyelid);
+
+    // Eyebrows
+    const hairColor = role === 'prospector' ? 0xb5b8ba : role === 'barkeep' ? 0x1f1915 : 0x483221;
+    const browMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.95 });
+    const browLeft = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.02, 0.02), browMat);
+    browLeft.position.set(-0.055, 0.14, 0.115);
+    browLeft.rotation.z = -0.06;
+    const browRight = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.02, 0.02), browMat);
+    browRight.position.set(0.055, 0.14, 0.115);
+    browRight.rotation.z = 0.06;
+    this.headGroup.add(browLeft);
+    this.headGroup.add(browRight);
 
     // --- Articulated Lower Jaw & Mouth ---
     this.jawGroup.position.set(0, 0.02, 0.02);
@@ -392,7 +526,6 @@ export class TownNPC {
     this.jawGroup.add(mouthCavity);
 
     // Beard / Mustache
-    const hairColor = role === 'prospector' ? 0xb5b8ba : role === 'barkeep' ? 0x1f1915 : 0x483221;
     const beardMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.95 });
 
     if (role === 'prospector') {
@@ -604,10 +737,46 @@ export class TownNPC {
       this.leftArmGroup.rotation.set(-0.55, 0.1, 0.35);
       this.rightArmGroup.rotation.set(-0.75, -0.2, -0.25);
     }
+
+    // Ensure all NPC meshes cast and receive rich frontier lighting shadows
+    this.group.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh && !(child instanceof THREE.Sprite)) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
   }
 
   public update(delta: number, playerPos: THREE.Vector3) {
     this.animClock += delta;
+
+    // --- Procedural Natural Eye Blinking ---
+    this.blinkTimer -= delta;
+    if (this.blinkTimer <= 0) {
+      this.isBlinking = true;
+      this.currentBlinkTime = 0;
+      this.blinkTimer = 2.4 + Math.random() * 3.6;
+    }
+
+    if (this.isBlinking && this.leftEyelid && this.rightEyelid) {
+      this.currentBlinkTime += delta;
+      const progress = this.currentBlinkTime / this.blinkDuration;
+      if (progress >= 1.0) {
+        this.isBlinking = false;
+        this.leftEyelid.scale.y = 0.01;
+        this.rightEyelid.scale.y = 0.01;
+      } else {
+        const blinkAmount = Math.sin(progress * Math.PI);
+        this.leftEyelid.scale.y = Math.max(0.01, blinkAmount * 1.0);
+        this.rightEyelid.scale.y = Math.max(0.01, blinkAmount * 1.0);
+      }
+    }
+
+    // --- Organic Chest Respiration Breathing ---
+    if (this.chestMesh) {
+      const breath = Math.sin(this.animClock * 1.8) * 0.02;
+      this.chestMesh.scale.set(1.0 + breath, 1.0 + breath * 0.5, 1.0 + breath * 1.3);
+    }
 
     // Face toward player if player is nearby (< 6m)
     const distToPlayer = this.group.position.distanceTo(playerPos);

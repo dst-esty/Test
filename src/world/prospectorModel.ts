@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createRifleModel } from './rifleModel';
+import { characterTextures } from './characterTextures';
 
 export interface ProspectorModelOptions {
   outfitColor?: string | number;
@@ -61,6 +62,18 @@ export class ProspectorRig {
   public rockMesh: THREE.Mesh;
   public activeToolName: string = 'hands';
 
+  // Realistic facial and breathing nodes
+  private leftEyelid?: THREE.Mesh;
+  private rightEyelid?: THREE.Mesh;
+  private chestMesh?: THREE.Mesh;
+  private bandanaTail?: THREE.Mesh;
+  private leftSpurWheel?: THREE.Group;
+  private rightSpurWheel?: THREE.Group;
+  private blinkTimer: number = 3.0;
+  private isBlinking: boolean = false;
+  private blinkDuration: number = 0.13;
+  private currentBlinkTime: number = 0;
+
   // Materials to allow runtime recoloring
   private coatMaterial: THREE.MeshStandardMaterial;
   private vestMaterial: THREE.MeshStandardMaterial;
@@ -84,60 +97,96 @@ export class ProspectorRig {
     this.root = new THREE.Group();
     this.root.scale.set(scale, scale, scale);
 
-    // --- Shared Standard Materials ---
+    // --- Shared High-Fidelity PBR Materials ---
     this.coatMaterial = new THREE.MeshStandardMaterial({
       color: outfitColor,
-      roughness: 0.85,
-      metalness: 0.08,
+      roughness: 0.82,
+      metalness: 0.05,
+      bumpMap: characterTextures.getDenimBump(),
+      bumpScale: 0.02,
     });
     this.vestMaterial = new THREE.MeshStandardMaterial({
       color: 0x3d2719,
-      roughness: 0.75,
+      roughness: 0.65,
       metalness: 0.12,
+      bumpMap: characterTextures.getLeatherBump(),
+      bumpScale: 0.025,
     });
     this.hatMaterial = new THREE.MeshStandardMaterial({
       color: hatColor,
-      roughness: 0.88,
-      metalness: 0.05,
+      roughness: 0.78,
+      metalness: 0.04,
+      bumpMap: characterTextures.getLeatherBump(),
+      bumpScale: 0.02,
     });
-    const skinMat = new THREE.MeshStandardMaterial({
+    const skinMat = new THREE.MeshPhysicalMaterial({
       color: skinTone,
-      roughness: 0.82,
+      roughness: 0.62,
+      metalness: 0.0,
+      sheen: 0.45,
+      sheenColor: new THREE.Color(0xffd2bd),
+      clearcoat: 0.08,
+      bumpMap: characterTextures.getSkinBump(),
+      bumpScale: 0.012,
     });
     const hairMat = new THREE.MeshStandardMaterial({
-      color: 0x3d281a,
+      color: 0x3a2518,
       roughness: 0.95,
     });
     const bandanaMat = new THREE.MeshStandardMaterial({
       color: 0x9b2226,
-      roughness: 0.75,
+      roughness: 0.72,
+      map: characterTextures.getBandanaTexture(),
+      bumpMap: characterTextures.getDenimBump(),
+      bumpScale: 0.015,
     });
     const leatherBeltMat = new THREE.MeshStandardMaterial({
       color: 0x1f1610,
-      roughness: 0.85,
+      roughness: 0.55,
+      metalness: 0.15,
+      bumpMap: characterTextures.getLeatherBump(),
+      bumpScale: 0.035,
     });
     const brassMat = new THREE.MeshStandardMaterial({
       color: 0xd4af37,
-      metalness: 0.85,
-      roughness: 0.32,
+      metalness: 0.9,
+      roughness: 0.22,
     });
     const pantMat = new THREE.MeshStandardMaterial({
       color: pantColor,
-      roughness: 0.9,
+      roughness: 0.86,
+      metalness: 0.04,
+      bumpMap: characterTextures.getDenimBump(),
+      bumpScale: 0.025,
     });
     const bootMat = new THREE.MeshStandardMaterial({
-      color: 0x1a140f,
-      roughness: 0.78,
+      color: 0x18120d,
+      roughness: 0.55,
+      metalness: 0.12,
+      bumpMap: characterTextures.getLeatherBump(),
+      bumpScale: 0.03,
     });
     const ironMat = new THREE.MeshStandardMaterial({
       color: 0x2d3136,
-      metalness: 0.85,
-      roughness: 0.35,
+      metalness: 0.88,
+      roughness: 0.32,
     });
     const woodMat = new THREE.MeshStandardMaterial({
       color: 0x6e431f,
-      roughness: 0.8,
+      roughness: 0.72,
+      bumpMap: characterTextures.getWoodGrain(),
+      bumpScale: 0.035,
     });
+
+    // Helper to configure cast/receive shadows on meshes
+    const enableShadows = (mesh: THREE.Object3D) => {
+      mesh.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+    };
 
     // --- Main Torso Body Group ---
     this.bodyGroup = new THREE.Group();
@@ -177,13 +226,53 @@ export class ProspectorRig {
     holster.rotation.z = -0.12;
     this.bodyGroup.add(holster);
 
-    // Upper Torso / Vest & Shirt
-    const chest = new THREE.Mesh(
+    // Holstered Frontier Revolver Sidearm
+    const revolverGrip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.038, 0.09, 0.05),
+      woodMat
+    );
+    revolverGrip.position.set(0.2, 0.13, 0.04);
+    revolverGrip.rotation.x = -0.25;
+    this.bodyGroup.add(revolverGrip);
+
+    const revolverHammer = new THREE.Mesh(
+      new THREE.BoxGeometry(0.02, 0.025, 0.03),
+      brassMat
+    );
+    revolverHammer.position.set(0.2, 0.165, 0.02);
+    this.bodyGroup.add(revolverHammer);
+
+    // Brass cartridge loops along back of gun belt
+    for (let c = -2; c <= 2; c++) {
+      const cartridge = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.012, 0.012, 0.045, 6),
+        brassMat
+      );
+      cartridge.position.set(c * 0.042, 0.1, -0.14);
+      this.bodyGroup.add(cartridge);
+    }
+
+    // Upper Torso / Vest & Shirt (Articulated with natural breathing cycle)
+    this.chestMesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.38, 0.38, 0.26),
       this.vestMaterial
     );
-    chest.position.y = 0.31;
-    this.bodyGroup.add(chest);
+    this.chestMesh.position.y = 0.31;
+    this.bodyGroup.add(this.chestMesh);
+
+    // Collar / Open Shirt V-neck with cloth texture
+    const shirtMat = new THREE.MeshStandardMaterial({
+      color: 0xdfd4c5,
+      roughness: 0.82,
+      bumpMap: characterTextures.getDenimBump(),
+      bumpScale: 0.018,
+    });
+    const shirtV = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.16, 0.02),
+      shirtMat
+    );
+    shirtV.position.set(0, 0.36, 0.132);
+    this.bodyGroup.add(shirtV);
 
     // Duster Coat Outer Lapels & Shoulders
     const coatChest = new THREE.Mesh(
@@ -194,6 +283,15 @@ export class ProspectorRig {
     coatChest.scale.set(1.02, 1.0, 1.02);
     this.bodyGroup.add(coatChest);
 
+    // Duster Shoulder Cape / Mantle (characteristic western duster storm flap)
+    const mantle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.24, 0.29, 0.12, 12, 1, false, 0, Math.PI * 2),
+      this.coatMaterial
+    );
+    mantle.position.set(0, 0.48, 0);
+    mantle.scale.set(1.08, 1.0, 0.82);
+    this.bodyGroup.add(mantle);
+
     // Front Vest Buttons (Tiny brass studs)
     for (let i = 0; i < 3; i++) {
       const button = new THREE.Mesh(
@@ -201,19 +299,19 @@ export class ProspectorRig {
         brassMat
       );
       button.rotation.x = Math.PI / 2;
-      button.position.set(0, 0.22 + i * 0.09, 0.146);
+      button.position.set(0, 0.22 + i * 0.08, 0.146);
       this.bodyGroup.add(button);
     }
 
     // Split Duster Coat Tails (hanging down behind legs)
-    const tailGeo = new THREE.PlaneGeometry(0.18, 0.46);
+    const tailGeo = new THREE.PlaneGeometry(0.19, 0.48);
     this.coatLeftTail = new THREE.Mesh(tailGeo, this.coatMaterial);
-    this.coatLeftTail.position.set(-0.09, -0.15, -0.14);
+    this.coatLeftTail.position.set(-0.095, -0.15, -0.14);
     this.coatLeftTail.rotation.x = 0.08;
     this.bodyGroup.add(this.coatLeftTail);
 
     this.coatRightTail = new THREE.Mesh(tailGeo, this.coatMaterial);
-    this.coatRightTail.position.set(0.09, -0.15, -0.14);
+    this.coatRightTail.position.set(0.095, -0.15, -0.14);
     this.coatRightTail.rotation.x = 0.08;
     this.bodyGroup.add(this.coatRightTail);
 
@@ -224,26 +322,35 @@ export class ProspectorRig {
 
     // Wild Rag / Frontier Bandana Neckerchief
     const bandana = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.13, 0.16, 0.11, 8),
+      new THREE.CylinderGeometry(0.13, 0.16, 0.11, 10),
       bandanaMat
     );
     bandana.position.y = 0.04;
     this.neckGroup.add(bandana);
 
     const bandanaKnot = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 0.12, 0.06),
+      new THREE.BoxGeometry(0.08, 0.09, 0.06),
       bandanaMat
     );
     bandanaKnot.position.set(0, 0.01, 0.13);
     bandanaKnot.rotation.x = 0.2;
     this.neckGroup.add(bandanaKnot);
 
+    // Dangling triangular bandana tail with secondary wind flutter
+    this.bandanaTail = new THREE.Mesh(
+      new THREE.ConeGeometry(0.065, 0.16, 4),
+      bandanaMat
+    );
+    this.bandanaTail.position.set(0, -0.08, 0.135);
+    this.bandanaTail.rotation.x = 0.15;
+    this.neckGroup.add(this.bandanaTail);
+
     // Head Group (Pivots with camera pitch)
     this.headGroup = new THREE.Group();
     this.headGroup.position.set(0, 0.16, 0);
     this.neckGroup.add(this.headGroup);
 
-    // Weathered Face & Cranium
+    // Weathered Face & Cranium with Subsurface-Simulated Material
     const headMesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.22, 0.24, 0.22),
       skinMat
@@ -251,47 +358,123 @@ export class ProspectorRig {
     headMesh.position.set(0, 0.08, 0);
     this.headGroup.add(headMesh);
 
-    // Brow Ridge & Nose
-    const nose = new THREE.Mesh(
-      new THREE.ConeGeometry(0.035, 0.09, 4),
+    // Brow Ridge & Weathered Forehead
+    const browRidge = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.04, 0.06),
       skinMat
     );
-    nose.position.set(0, 0.08, 0.125);
-    nose.rotation.x = -Math.PI / 2;
+    browRidge.position.set(0, 0.14, 0.11);
+    this.headGroup.add(browRidge);
+
+    // Sculpted Nose with bridge and nostrils
+    const nose = new THREE.Mesh(
+      new THREE.BoxGeometry(0.045, 0.08, 0.06),
+      skinMat
+    );
+    nose.position.set(0, 0.08, 0.135);
     this.headGroup.add(nose);
 
-    // Eyes
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1a120c });
-    const eyeLeft = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.02, 0.02), eyeMat);
+    // Sculpted High Frontier Cheekbones
+    const cheekL = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.04, 0.03), skinMat);
+    cheekL.position.set(-0.08, 0.07, 0.112);
+    cheekL.rotation.y = 0.22;
+    this.headGroup.add(cheekL);
+
+    const cheekR = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.04, 0.03), skinMat);
+    cheekR.position.set(0.08, 0.07, 0.112);
+    cheekR.rotation.y = -0.22;
+    this.headGroup.add(cheekR);
+
+    // --- Highly Realistic Glossy Physical Eyes with Iris & Blink Eyelids ---
+    const eyeMat = new THREE.MeshPhysicalMaterial({
+      map: characterTextures.getEyeTexture(0x3f2a1a),
+      roughness: 0.04,
+      metalness: 0.0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.02,
+    });
+
+    const eyeGeo = new THREE.SphereGeometry(0.022, 12, 12);
+    eyeGeo.rotateY(Math.PI / 2); // align eye texture to face forward
+
+    // Left Eyeball
+    const eyeLeft = new THREE.Mesh(eyeGeo, eyeMat);
     eyeLeft.position.set(-0.06, 0.11, 0.115);
-    const eyeRight = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.02, 0.02), eyeMat);
-    eyeRight.position.set(0.06, 0.11, 0.115);
     this.headGroup.add(eyeLeft);
+
+    // Left Eyelid (Blusher / Eyelid that animates on natural blinks)
+    this.leftEyelid = new THREE.Mesh(
+      new THREE.BoxGeometry(0.044, 0.024, 0.016),
+      skinMat
+    );
+    this.leftEyelid.position.set(-0.06, 0.12, 0.118);
+    this.leftEyelid.scale.y = 0.01; // hidden/open by default
+    this.headGroup.add(this.leftEyelid);
+
+    // Right Eyeball
+    const eyeRight = new THREE.Mesh(eyeGeo, eyeMat);
+    eyeRight.position.set(0.06, 0.11, 0.115);
     this.headGroup.add(eyeRight);
 
-    // Bushy Eyebrows
-    const browMat = new THREE.MeshStandardMaterial({ color: 0x4a3222, roughness: 0.9 });
-    const browLeft = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.02, 0.025), browMat);
-    browLeft.position.set(-0.06, 0.13, 0.12);
-    const browRight = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.02, 0.025), browMat);
-    browRight.position.set(0.06, 0.13, 0.12);
+    // Right Eyelid
+    this.rightEyelid = new THREE.Mesh(
+      new THREE.BoxGeometry(0.044, 0.024, 0.016),
+      skinMat
+    );
+    this.rightEyelid.position.set(0.06, 0.12, 0.118);
+    this.rightEyelid.scale.y = 0.01;
+    this.headGroup.add(this.rightEyelid);
+
+    // Bushy Eyebrows with character arch
+    const browMat = new THREE.MeshStandardMaterial({ color: 0x362114, roughness: 0.95 });
+    const browLeft = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.025, 0.03), browMat);
+    browLeft.position.set(-0.06, 0.135, 0.125);
+    browLeft.rotation.z = -0.08;
+    const browRight = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.025, 0.03), browMat);
+    browRight.position.set(0.06, 0.135, 0.125);
+    browRight.rotation.z = 0.08;
     this.headGroup.add(browLeft);
     this.headGroup.add(browRight);
 
-    // Bushy Prospector Beard & Mustache
+    // Bushy Multi-layered Prospector Beard & Mustache
     const beard = new THREE.Mesh(
-      new THREE.BoxGeometry(0.24, 0.2, 0.18),
+      new THREE.BoxGeometry(0.24, 0.22, 0.18),
       hairMat
     );
     beard.position.set(0, -0.04, 0.06);
     this.headGroup.add(beard);
 
-    const mustache = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.05, 0.06),
+    // Beard lower tapered point
+    const beardTip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.12, 0.14),
       hairMat
     );
-    mustache.position.set(0, 0.04, 0.125);
-    this.headGroup.add(mustache);
+    beardTip.position.set(0, -0.12, 0.05);
+    this.headGroup.add(beardTip);
+
+    // Swept Handlebar Mustache
+    const mustacheCenter = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.055, 0.06),
+      hairMat
+    );
+    mustacheCenter.position.set(0, 0.04, 0.13);
+    this.headGroup.add(mustacheCenter);
+
+    const mustacheWingL = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, 0.045, 0.05),
+      hairMat
+    );
+    mustacheWingL.position.set(-0.08, 0.03, 0.125);
+    mustacheWingL.rotation.z = -0.22;
+    this.headGroup.add(mustacheWingL);
+
+    const mustacheWingR = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, 0.045, 0.05),
+      hairMat
+    );
+    mustacheWingR.position.set(0.08, 0.03, 0.125);
+    mustacheWingR.rotation.z = 0.22;
+    this.headGroup.add(mustacheWingR);
 
     // Ears
     const earLeft = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.06, 0.04), skinMat);
@@ -301,9 +484,18 @@ export class ProspectorRig {
     this.headGroup.add(earLeft);
     this.headGroup.add(earRight);
 
-    // --- Slouch Prospector Hat (Curved Brim & Pinched Crown) ---
+    // Sideburns / Hair Tuft
+    const hairSideL = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, 0.12), hairMat);
+    hairSideL.position.set(-0.115, 0.12, -0.02);
+    const hairSideR = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, 0.12), hairMat);
+    hairSideR.position.set(0.115, 0.12, -0.02);
+    this.headGroup.add(hairSideL);
+    this.headGroup.add(hairSideR);
+
+    // --- Slouch Prospector Hat (Curved Brim & Pinched Crown with authentic tilt) ---
     const hatGroup = new THREE.Group();
     hatGroup.position.set(0, 0.2, 0);
+    hatGroup.rotation.x = 0.04; // Authentic low slouch tilt over eyes
     this.headGroup.add(hatGroup);
 
     // Oval Shaped Wide Brim
@@ -409,13 +601,49 @@ export class ProspectorRig {
     leftForearm.position.y = -0.13;
     this.leftForearmGroup.add(leftForearm);
 
+    // Articulated Frontier Work Gloves Builder
+    const buildGlove = (isRight: boolean) => {
+      const glove = new THREE.Group();
+
+      // Flared Wrist Gauntlet Cuff
+      const cuff = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.072, 0.062, 0.06, 8),
+        leatherBeltMat
+      );
+      cuff.position.set(0, -0.22, 0);
+      glove.add(cuff);
+
+      // Main Hand / Palm Section
+      const palm = new THREE.Mesh(
+        new THREE.BoxGeometry(0.072, 0.095, 0.082),
+        leatherBeltMat
+      );
+      palm.position.set(0, -0.29, 0.01);
+      glove.add(palm);
+
+      // Angled Articulated Thumb
+      const thumb = new THREE.Mesh(
+        new THREE.BoxGeometry(0.028, 0.05, 0.034),
+        leatherBeltMat
+      );
+      thumb.position.set(isRight ? -0.042 : 0.042, -0.27, 0.035);
+      thumb.rotation.z = isRight ? 0.4 : -0.4;
+      thumb.rotation.x = -0.25;
+      glove.add(thumb);
+
+      // Knuckle Guard Reinforcement
+      const knuckle = new THREE.Mesh(
+        new THREE.BoxGeometry(0.07, 0.02, 0.02),
+        leatherBeltMat
+      );
+      knuckle.position.set(0, -0.28, 0.05);
+      glove.add(knuckle);
+
+      return glove;
+    };
+
     // Leather Work Glove (Left)
-    const leftHand = new THREE.Mesh(
-      new THREE.BoxGeometry(0.07, 0.11, 0.09),
-      leatherBeltMat
-    );
-    leftHand.position.set(0, -0.29, 0.01);
-    this.leftForearmGroup.add(leftHand);
+    this.leftForearmGroup.add(buildGlove(false));
 
     // --- Right Arm (Shoulder -> Upper Arm -> Forearm -> Hand & Tool Socket) ---
     this.rightArmGroup = new THREE.Group();
@@ -441,17 +669,39 @@ export class ProspectorRig {
     this.rightForearmGroup.add(rightForearm);
 
     // Leather Work Glove (Right)
-    const rightHand = new THREE.Mesh(
-      new THREE.BoxGeometry(0.07, 0.11, 0.09),
-      leatherBeltMat
-    );
-    rightHand.position.set(0, -0.29, 0.01);
-    this.rightForearmGroup.add(rightHand);
+    this.rightForearmGroup.add(buildGlove(true));
 
     // Right Hand Tool Mount Socket
     this.rightHandSocket = new THREE.Group();
     this.rightHandSocket.position.set(0, -0.32, 0.02);
     this.rightForearmGroup.add(this.rightHandSocket);
+
+    // Helper to construct realistic 8-point rotating brass star spur
+    const createStarSpur = () => {
+      const spurGroup = new THREE.Group();
+      // Curved heel heel-band shank
+      const shank = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.055, 0.055, 0.018, 8, 1, false, -Math.PI / 2, Math.PI),
+        brassMat
+      );
+      shank.position.set(0, 0, 0.03);
+      spurGroup.add(shank);
+
+      // Star rowel wheel (rotates with movement)
+      const wheelGroup = new THREE.Group();
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.012, 8), brassMat);
+      hub.rotation.z = Math.PI / 2;
+      wheelGroup.add(hub);
+
+      for (let p = 0; p < 8; p++) {
+        const ray = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.032, 0.006), brassMat);
+        ray.rotation.x = (p * Math.PI) / 4;
+        wheelGroup.add(ray);
+      }
+      wheelGroup.position.set(0, 0, -0.04);
+      spurGroup.add(wheelGroup);
+      return { group: spurGroup, wheel: wheelGroup };
+    };
 
     // --- Articulated Legs (Hips -> Thigh -> Knee -> Shin -> Boot with Spur) ---
     // Left Leg
@@ -477,6 +727,14 @@ export class ProspectorRig {
     leftShin.position.y = -0.18;
     this.leftShinGroup.add(leftShin);
 
+    // Denim pant cuff rolled over boot
+    const leftPantCuff = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.088, 0.085, 0.06, 8),
+      pantMat
+    );
+    leftPantCuff.position.y = -0.32;
+    this.leftShinGroup.add(leftPantCuff);
+
     // Left Cowboy Boot with Heel and Brass Spur
     const leftBoot = new THREE.Mesh(
       new THREE.BoxGeometry(0.12, 0.14, 0.23),
@@ -492,13 +750,10 @@ export class ProspectorRig {
     leftHeel.position.set(0, -0.44, -0.04);
     this.leftShinGroup.add(leftHeel);
 
-    const leftSpur = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03, 0.03, 0.01, 8),
-      brassMat
-    );
-    leftSpur.rotation.z = Math.PI / 2;
-    leftSpur.position.set(0, -0.42, -0.1);
-    this.leftShinGroup.add(leftSpur);
+    const leftSpurData = createStarSpur();
+    leftSpurData.group.position.set(0, -0.42, -0.08);
+    this.leftShinGroup.add(leftSpurData.group);
+    this.leftSpurWheel = leftSpurData.wheel;
 
     // Right Leg
     this.rightLegGroup = new THREE.Group();
@@ -523,6 +778,14 @@ export class ProspectorRig {
     rightShin.position.y = -0.18;
     this.rightShinGroup.add(rightShin);
 
+    // Denim pant cuff rolled over boot
+    const rightPantCuff = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.088, 0.085, 0.06, 8),
+      pantMat
+    );
+    rightPantCuff.position.y = -0.32;
+    this.rightShinGroup.add(rightPantCuff);
+
     // Right Cowboy Boot with Heel and Brass Spur
     const rightBoot = new THREE.Mesh(
       new THREE.BoxGeometry(0.12, 0.14, 0.23),
@@ -538,13 +801,10 @@ export class ProspectorRig {
     rightHeel.position.set(0, -0.44, -0.04);
     this.rightShinGroup.add(rightHeel);
 
-    const rightSpur = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03, 0.03, 0.01, 8),
-      brassMat
-    );
-    rightSpur.rotation.z = Math.PI / 2;
-    rightSpur.position.set(0, -0.42, -0.1);
-    this.rightShinGroup.add(rightSpur);
+    const rightSpurData = createStarSpur();
+    rightSpurData.group.position.set(0, -0.42, -0.08);
+    this.rightShinGroup.add(rightSpurData.group);
+    this.rightSpurWheel = rightSpurData.wheel;
 
     // --- Build 3D Equipped Tools ---
     this.toolsGroup = new THREE.Group();
@@ -689,6 +949,9 @@ export class ProspectorRig {
     this.rockMesh.position.set(0, 0.35, 0.35);
     this.rockMesh.visible = false;
     this.bodyGroup.add(this.rockMesh);
+
+    // Apply high-fidelity dynamic shadows to all character body parts, garments & tools
+    enableShadows(this.root);
   }
 
   /**
@@ -741,6 +1004,43 @@ export class ProspectorRig {
       this.root.rotation.z = 0;
     }
 
+    // --- Procedural Natural Eye Blinking ---
+    this.blinkTimer -= delta;
+    if (this.blinkTimer <= 0) {
+      this.isBlinking = true;
+      this.currentBlinkTime = 0;
+      this.blinkTimer = 2.4 + Math.random() * 3.6; // random interval 2.4s - 6s
+    }
+
+    if (this.isBlinking && this.leftEyelid && this.rightEyelid) {
+      this.currentBlinkTime += delta;
+      const progress = this.currentBlinkTime / this.blinkDuration;
+      if (progress >= 1.0) {
+        this.isBlinking = false;
+        this.leftEyelid.scale.y = 0.01;
+        this.rightEyelid.scale.y = 0.01;
+      } else {
+        const blinkAmount = Math.sin(progress * Math.PI);
+        this.leftEyelid.scale.y = Math.max(0.01, blinkAmount * 1.0);
+        this.rightEyelid.scale.y = Math.max(0.01, blinkAmount * 1.0);
+      }
+    }
+
+    // --- Organic Chest Respiration Breathing ---
+    if (this.chestMesh) {
+      const respTime = isMoving ? this.walkTime * 0.35 : this.idleTime * 1.6;
+      const breathExpand = Math.sin(respTime) * 0.022;
+      this.chestMesh.scale.set(1.0 + breathExpand, 1.0 + breathExpand * 0.5, 1.0 + breathExpand * 1.4);
+    }
+
+    // --- Secondary Wild Rag Bandana Wind Flutter ---
+    if (this.bandanaTail) {
+      const windCycle = (this.walkTime || this.idleTime) * 4.0;
+      const windFlutter = Math.sin(windCycle) * 0.12 + Math.cos(windCycle * 1.7) * 0.06;
+      this.bandanaTail.rotation.x = 0.15 + (isMoving ? 0.35 : 0.05) + windFlutter;
+      this.bandanaTail.rotation.z = Math.sin(windCycle * 0.8) * 0.08;
+    }
+
     // Head Pitch (Looks up/down with player aim)
     this.headGroup.rotation.x = THREE.MathUtils.clamp(-pitch * 0.7, -0.6, 0.6);
 
@@ -790,6 +1090,13 @@ export class ProspectorRig {
       const stride = Math.sin(this.walkTime);
       const counterStride = Math.cos(this.walkTime);
 
+      // Rotating star spurs as feet strike the ground
+      if (this.leftSpurWheel && this.rightSpurWheel) {
+        const spurSpin = delta * 12.0;
+        this.leftSpurWheel.rotation.x += spurSpin;
+        this.rightSpurWheel.rotation.x += spurSpin;
+      }
+
       // Alternating Leg Swings
       this.leftLegGroup.rotation.x = stride * 0.55;
       this.leftLegGroup.rotation.z = 0;
@@ -826,8 +1133,9 @@ export class ProspectorRig {
       // Idle Breathing & Subtle Weight Shift
       this.idleTime += delta * 1.8;
       const breath = Math.sin(this.idleTime) * 0.015;
+      const sway = Math.sin(this.idleTime * 0.8) * 0.012;
       this.bodyGroup.position.y = 0.88 + breath;
-      this.bodyGroup.rotation.set(0, 0, 0);
+      this.bodyGroup.rotation.set(0, sway * 0.5, sway * 0.3);
 
       // Relaxed Legs
       this.leftLegGroup.rotation.set(0.04, 0, 0.04);
