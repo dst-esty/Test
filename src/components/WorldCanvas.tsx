@@ -351,6 +351,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const stepTimer = useRef<number>(0);
   const detectorBeepTimer = useRef<number>(0);
   const discoveredSummitsRef = useRef<Set<string>>(new Set());
+  const lastBoundaryNoticeRef = useRef<number>(0);
 
   // 3D Game Engine Locomotion & Physics
   const playerPos = useRef<THREE.Vector3>(
@@ -3687,6 +3688,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
           playerPos.current.x = colRes.x;
           playerPos.current.z = colRes.z;
+
+          if (colRes.isBlocked && colRes.blockedReason === 'frontier_boundary') {
+            const now = Date.now();
+            if (now - lastBoundaryNoticeRef.current > 8000) {
+              lastBoundaryNoticeRef.current = now;
+              if (onShowBanner) {
+                onShowBanner('☁️ Wilderness Frontier: Impassable mountain cloud shroud blankets the uncharted territory.');
+              }
+            }
+          }
         }
 
         // Footstep sounds & Surface Water Splash

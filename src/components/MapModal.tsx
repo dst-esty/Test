@@ -135,6 +135,22 @@ export const MapModal: React.FC<MapModalProps> = ({
             <text x="250" y="385" fill="#78350f" fontSize="6.5" fontFamily="serif" fontStyle="italic">
               Fremont Saddle
             </text>
+
+            {/* Out-Of-Bounds Perimeter Cloud Bank & Mountain Shroud */}
+            <g opacity="0.65">
+              {/* North / Northwest Clouds */}
+              <path d="M 0 0 C 40 15, 80 8, 120 18 C 160 8, 200 20, 240 12 C 280 22, 330 10, 380 18 C 420 12, 440 22, 460 0 L 460 0 L 0 0 Z" fill="#f8fafc" stroke="#94a3b8" strokeWidth="0.8" />
+              {/* South / Southeast Clouds */}
+              <path d="M 0 460 C 45 440, 95 448, 140 438 C 190 448, 240 435, 290 445 C 340 438, 390 446, 460 460 L 460 460 L 0 460 Z" fill="#f8fafc" stroke="#94a3b8" strokeWidth="0.8" />
+              {/* West Ridge Clouds */}
+              <path d="M 0 0 C 18 60, 8 130, 22 190 C 8 260, 20 330, 0 460 L 0 460 L 0 0 Z" fill="#f8fafc" stroke="#94a3b8" strokeWidth="0.8" />
+              {/* East Ridge Clouds */}
+              <path d="M 460 0 C 442 70, 452 140, 438 210 C 454 280, 440 360, 460 460 L 460 460 L 460 0 Z" fill="#f8fafc" stroke="#94a3b8" strokeWidth="0.8" />
+
+              <text x="230" y="452" fill="#475569" fontSize="6.5" fontFamily="serif" fontStyle="italic" textAnchor="middle" letterSpacing="1">
+                ☁️ PERIMETER CLOUD SHROUD • UNCHARTED WILDERNESS BEYOND BOUNDS ☁️
+              </text>
+            </g>
           </svg>
 
           {/* Compass Rose in Corner */}

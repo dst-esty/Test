@@ -10,6 +10,20 @@ interface CloudCluster {
   baseY: number;
 }
 
+interface OutOfBoundsCloudCluster {
+  mesh: THREE.Group;
+  topSprites: THREE.Sprite[];
+  baseSprites: THREE.Sprite[];
+  mistSprites: THREE.Sprite[];
+  angle: number;
+  radius: number;
+  baseY: number;
+  driftSpeed: number;
+  bobPhase: number;
+  bobSpeed: number;
+  initialScales: { sprite: THREE.Sprite; scaleX: number; scaleY: number }[];
+}
+
 /**
  * Procedural soft radial cumulus puff texture.
  * Generates organic, billowy fractal edges with zero sharp polygon boundaries.
@@ -597,6 +611,11 @@ export class AtmosphereManager {
   // Volumetric procedural cloud banks
   private cloudGroup: THREE.Group = new THREE.Group();
   private clouds: CloudCluster[] = [];
+
+  // Out-of-bounds perimeter cloud banks and mountain fog shrouds
+  private outOfBoundsCloudGroup: THREE.Group = new THREE.Group();
+  private outOfBoundsClouds: OutOfBoundsCloudCluster[] = [];
+
   private cloudTexture: THREE.CanvasTexture;
   private sunTexture: THREE.CanvasTexture;
   private moonTexture: THREE.CanvasTexture;
@@ -822,6 +841,10 @@ export class AtmosphereManager {
     this.scene.add(this.cloudGroup);
     this.spawnRealisticClouds();
 
+    // 4b. Out-of-bounds Perimeter Cloud Banks & Mountain Fog Shrouds
+    this.scene.add(this.outOfBoundsCloudGroup);
+    this.spawnOutOfBoundsClouds();
+
     // 5. Rain Particle System
     this.scene.add(this.rainGroup);
     this.initRainSystem();
@@ -909,6 +932,116 @@ export class AtmosphereManager {
         baseSprites,
         speed: 1.2 + Math.random() * 1.6,
         baseY: altitude,
+      });
+    }
+  }
+
+  /**
+   * Spawns dense, rolling volumetric cloud banks and mountain fog shrouds
+   * that encircle the entire wilderness perimeter, blanketing the out-of-bounds terrain.
+   * Features:
+   * - 36 multi-layered cloud clusters encircling the perimeter (radii 235m to 390m).
+   * - Low-altitude mountain ridge clouds (Y = 28m - 62m) that hug the perimeter peaks, passes, and out-of-bounds rims.
+   * - Mid-to-high sprawling cumulus banks (Y = 55m - 125m) completely obscuring the out-of-bounds horizon.
+   * - Dynamic lighting: reactive to sunrise, golden hour, midday sun, stormy skies, and silver moonlight.
+   */
+  private spawnOutOfBoundsClouds() {
+    const clusterCount = 36;
+    for (let i = 0; i < clusterCount; i++) {
+      const clusterGroup = new THREE.Group();
+      const topSprites: THREE.Sprite[] = [];
+      const baseSprites: THREE.Sprite[] = [];
+      const mistSprites: THREE.Sprite[] = [];
+      const initialScales: { sprite: THREE.Sprite; scaleX: number; scaleY: number }[] = [];
+
+      // Alternate between inner ridge-clinging cloud banks (radius ~240-285m)
+      // and outer massive frontier cloud banks (radius ~290-390m)
+      const isInnerRidgeCloud = i % 2 === 0;
+      const angle = (i / clusterCount) * Math.PI * 2 + (Math.random() - 0.5) * (Math.PI / clusterCount);
+      const radius = isInnerRidgeCloud
+        ? 240 + Math.random() * 45
+        : 290 + Math.random() * 95;
+
+      // Inner ridge clouds sit lower along the perimeter mountain crests (elevations 28-62m)
+      // Outer boundary clouds billow higher into towering thunderheads/cumulus banks (55-125m)
+      const altitude = isInnerRidgeCloud
+        ? 28 + Math.random() * 30
+        : 55 + Math.random() * 65;
+
+      // Organic cluster composition: 12 to 16 large billow puffs
+      const puffCount = 12 + Math.floor(Math.random() * 5);
+      const clusterWidth = isInnerRidgeCloud ? 95 + Math.random() * 45 : 130 + Math.random() * 60;
+      const clusterDepth = isInnerRidgeCloud ? 60 + Math.random() * 35 : 85 + Math.random() * 45;
+
+      for (let p = 0; p < puffCount; p++) {
+        // Classify puffs: mist (low base wisp), base (dense mid-body), top (sunlit dome)
+        const isMist = p < 4;
+        const isTop = !isMist && p >= puffCount - 5;
+        const isBase = !isMist && !isTop;
+
+        const puffSize = isMist
+          ? (55 + Math.random() * 35)
+          : isTop
+          ? (42 + Math.random() * 32)
+          : (50 + Math.random() * 40);
+
+        const puffMat = new THREE.SpriteMaterial({
+          map: this.cloudTexture,
+          transparent: true,
+          opacity: isMist ? 0.72 : isTop ? 0.90 : 0.85,
+          fog: false,
+          depthWrite: false,
+        });
+
+        const sprite = new THREE.Sprite(puffMat);
+        const scaleX = puffSize * (isMist ? 1.6 : (0.9 + Math.random() * 0.3));
+        const scaleY = puffSize * (isMist ? 0.55 : (0.75 + Math.random() * 0.25));
+        sprite.scale.set(scaleX, scaleY, 1);
+        initialScales.push({ sprite, scaleX, scaleY });
+
+        // Spread puffs across cluster
+        const xOffset = (Math.random() - 0.5) * clusterWidth;
+        const zOffset = (Math.random() - 0.5) * clusterDepth;
+        const distFromClusterCenter = Math.hypot(xOffset / clusterWidth, zOffset / clusterDepth);
+        const domeElevation = Math.max(0, 1.0 - distFromClusterCenter * 1.5) * (isInnerRidgeCloud ? 16 : 28);
+
+        const yOffset = isMist
+          ? (-10 + Math.random() * 5)
+          : isTop
+          ? (domeElevation + Math.random() * 6)
+          : (-2 + Math.random() * 10);
+
+        sprite.position.set(xOffset, yOffset, zOffset);
+        // Slight random rotation for varied cloud puff silhouettes
+        sprite.material.rotation = (Math.random() - 0.5) * Math.PI;
+        clusterGroup.add(sprite);
+
+        if (isMist) {
+          mistSprites.push(sprite);
+        } else if (isTop) {
+          topSprites.push(sprite);
+        } else {
+          baseSprites.push(sprite);
+        }
+      }
+
+      const posX = Math.cos(angle) * radius;
+      const posZ = Math.sin(angle) * radius;
+      clusterGroup.position.set(posX, altitude, posZ);
+      this.outOfBoundsCloudGroup.add(clusterGroup);
+
+      this.outOfBoundsClouds.push({
+        mesh: clusterGroup,
+        topSprites,
+        baseSprites,
+        mistSprites,
+        angle,
+        radius,
+        baseY: altitude,
+        driftSpeed: (0.003 + Math.random() * 0.005) * (Math.random() > 0.5 ? 1 : -1),
+        bobPhase: Math.random() * Math.PI * 2,
+        bobSpeed: 0.12 + Math.random() * 0.15,
+        initialScales,
       });
     }
   }
@@ -1247,6 +1380,22 @@ export class AtmosphereManager {
         s.material.opacity = opacity * 0.92;
       });
     });
+
+    const mistCol = baseCol.clone().lerp(this.diurnalState.horizonColor, 0.45);
+    this.outOfBoundsClouds.forEach((c) => {
+      c.topSprites.forEach((s) => {
+        s.material.color.copy(topCol);
+        s.material.opacity = opacity * 0.95;
+      });
+      c.baseSprites.forEach((s) => {
+        s.material.color.copy(baseCol);
+        s.material.opacity = opacity * 0.88;
+      });
+      c.mistSprites.forEach((s) => {
+        s.material.color.copy(mistCol);
+        s.material.opacity = opacity * 0.78;
+      });
+    });
   }
 
   /**
@@ -1323,11 +1472,28 @@ export class AtmosphereManager {
       }
     });
 
+    // 1b. Out-of-bounds Perimeter Clouds animation (slow orbital drift and organic billow breathing)
+    this.outOfBoundsClouds.forEach((c) => {
+      c.angle += c.driftSpeed * delta;
+      c.mesh.position.x = Math.cos(c.angle) * c.radius;
+      c.mesh.position.z = Math.sin(c.angle) * c.radius;
+      c.mesh.position.y = c.baseY + Math.sin(this.elapsedTime * c.bobSpeed + c.bobPhase) * 3.8;
+
+      const breathe = 1.0 + Math.sin(this.elapsedTime * (c.bobSpeed * 1.5) + c.bobPhase) * 0.06;
+      c.initialScales.forEach(({ sprite, scaleX, scaleY }) => {
+        sprite.scale.set(scaleX * breathe, scaleY * breathe, 1);
+      });
+    });
+
     // 2. Underground attenuation
     if (isUnderground) {
+      this.cloudGroup.visible = false;
+      this.outOfBoundsCloudGroup.visible = false;
       if (this.sandstormParticles) this.sandstormParticles.visible = false;
       if (this.rainParticles) this.rainParticles.visible = false;
     } else {
+      this.cloudGroup.visible = true;
+      this.outOfBoundsCloudGroup.visible = true;
       // 3. Dynamic Sandstorm Dust Particle System
       if (this.weather === 'sandstorm' && this.sandstormParticles && this.sandstormPositions && this.sandstormVelocities) {
         this.sandstormParticles.visible = true;
@@ -1458,6 +1624,16 @@ export class AtmosphereManager {
       });
     });
     this.clouds = [];
+
+    this.scene.remove(this.outOfBoundsCloudGroup);
+    this.outOfBoundsClouds.forEach((c) => {
+      c.mesh.traverse((child) => {
+        if (child instanceof THREE.Sprite) {
+          child.material.dispose();
+        }
+      });
+    });
+    this.outOfBoundsClouds = [];
 
     this.cloudTexture.dispose();
     this.sunTexture.dispose();
