@@ -583,6 +583,29 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           {/* Multiplayer Online Status Slot (Directly Under Red Heart) */}
           <div id="multiplayer-status-slot" className="w-fit" />
 
+          {/* Active Tunneling Domain Indicator */}
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-900/90 backdrop-blur-md border shadow-md text-[10px] font-mono select-none"
+            style={{
+              borderColor: (playerState.currentMineLevel || 0) > 0 ? '#d97706' : '#78716c',
+            }}
+            title={(playerState.currentMineLevel || 0) > 0
+              ? `Subterranean Mine Tunneling active (Level ${playerState.currentMineLevel}). Drifts are fortified with square-set timbers and rock bolts.`
+              : 'Above-Ground Mountain Tunneling active. Excavations carve walk-in adits into mountain ridges with natural pass-through portals.'}
+          >
+            {(playerState.currentMineLevel || 0) > 0 ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <span className="text-amber-400 font-semibold tracking-wider">MINE DRIFT • L{playerState.currentMineLevel}</span>
+              </>
+            ) : (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-stone-400" />
+                <span className="text-stone-300 tracking-wider">MOUNTAIN ADIT</span>
+              </>
+            )}
+          </div>
+
           {/* Collapsible Supply Icon & Panel (Field Supplies & Tools) */}
           {isSupplyCollapsed ? (
             <button
@@ -1227,15 +1250,6 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                     </div>
                   </div>
                 )}
-
-                {nearbyTrench.depth >= 0.8 && onInteract && (
-                  <button
-                    onClick={onInteract}
-                    className="mt-1.5 px-3 py-1 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-[10px] rounded-lg shadow font-mono flex items-center justify-center gap-1.5 transition-colors cursor-pointer w-full border border-amber-300"
-                  >
-                    <span>⛏️ Enter Subterranean Mine Shaft [E]</span>
-                  </button>
-                )}
               </>
             )}
           </div>
@@ -1453,8 +1467,24 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               Cancel [Esc]
             </button>
 
-            <span className="text-[10px] text-emerald-400 font-mono hidden sm:inline">
-              [Left-Click] {activeBuildingType === 'frontier_torch' ? 'Stake Torch (Place 3-4 in row)' : activeBuildingType === 'timber_portal' ? 'Excavate Portal / Build' : 'Place in 3D'}
+            <span className="text-[10px] font-mono hidden sm:inline">
+              {activeBuildingType === 'headframe_hoist' ? (
+                <span className="text-amber-200 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-500/30">
+                  ⚠️ <strong>Requires level surface ground (&lt;16° slope)</strong> • Use <strong>Timber Portal</strong> for mountain tunnels
+                </span>
+              ) : activeBuildingType === 'timber_portal' ? (
+                <span className="text-emerald-300 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-500/30">
+                  ⛰️ <strong>Mountain Adit Portal</strong> • Face mountain rock face to cut entrance
+                </span>
+              ) : activeBuildingType === 'frontier_torch' ? (
+                <span className="text-amber-300">
+                  🔥 <strong>Stake Ground Torch</strong> • Place along paths or drifts (1 Wood Log)
+                </span>
+              ) : (
+                <span className="text-emerald-400">
+                  🔨 [Left-Click / E] Place in 3D • [R] Rotate
+                </span>
+              )}
             </span>
           </div>
         )}

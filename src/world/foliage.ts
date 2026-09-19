@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getTerrainHeight, updateTerrainHoleCutouts } from './terrain';
+import { getTerrainHeight, updateTerrainHoleCutouts, applyMountainHoleShaderToMaterial } from './terrain';
 import { DebrisType } from '../types';
 import { MountainHoleManager } from './mountainHoles';
 import { MountainDustParticleSystem } from './mountainDustParticles';
@@ -68,6 +68,7 @@ export interface ExplodeFoliageResult {
   woodBlasted: number;
   hydrationBlasted: number;
   destroyedPoints: Array<{ pos: THREE.Vector3; type: DebrisType }>;
+  bannerMessage?: string;
 }
 
 // Palette of authentic mineral colors found across the Superstition Mountains and Sonoran desert
@@ -461,6 +462,8 @@ export function isNearPeraltaCamp(x: number, z: number, clearanceRadius: number 
   return distTrailhead < clearanceRadius || distSpawn < clearanceRadius || distCenter < clearanceRadius;
 }
 
+const _scratchFoliageBoreDirs = Array.from({ length: 16 }, () => new THREE.Vector3());
+
 export class DesertFoliageManager {
   public goldDeposits: GoldDeposit[] = [];
   public springTrees: HarvestableTree[] = [];
@@ -494,7 +497,7 @@ export class DesertFoliageManager {
   constructor(scene: THREE.Scene, dustParticles?: MountainDustParticleSystem) {
     this.scene = scene;
     this.dustParticleSystem = dustParticles;
-    this.mountainHoleManager = new MountainHoleManager(this.scene, dustParticles);
+    this.mountainHoleManager = new MountainHoleManager(this.scene, dustParticles, 'surface');
     // Wire rock check callback so mountain holes can detect when they pierce through outcroppings
     this.mountainHoleManager.setRockCheckCallback((pos: THREE.Vector3) => {
       for (let i = 0; i < this.rockColliders.length; i++) {
@@ -508,7 +511,12 @@ export class DesertFoliageManager {
       }
       return false;
     });
+    // Auto-update terrain and rock cutouts whenever tunnels are dug or expanded
+    this.mountainHoleManager.onHolesChanged = () => {
+      this.updateMountainHoleCutouts();
+    };
     this.init();
+    this.updateMountainHoleCutouts();
   }
 
   public setDustParticleSystem(ps: MountainDustParticleSystem) {
@@ -522,14 +530,19 @@ export class DesertFoliageManager {
       (h) => h.position.y >= -1.5
     );
     const count = Math.min(16, surfaceHoles.length);
+
+    // Precompute bore directions once for all holes without memory allocations
+    for (let i = 0; i < count; i++) {
+      _scratchFoliageBoreDirs[i].set(0, 0, -1).applyQuaternion(surfaceHoles[i].group.quaternion).normalize();
+    }
+
     for (let u = 0; u < this.mountainHoleUniformsList.length; u++) {
       const uniforms = this.mountainHoleUniformsList[u];
       uniforms.uMountainHoleCount.value = count;
       for (let i = 0; i < count; i++) {
         const h = surfaceHoles[i];
         uniforms.uMountainHolePositions.value[i].copy(h.position);
-        const boreDir = new THREE.Vector3(0, 0, -1).applyQuaternion(h.group.quaternion).normalize();
-        uniforms.uMountainHoleDirs.value[i].copy(boreDir);
+        uniforms.uMountainHoleDirs.value[i].copy(_scratchFoliageBoreDirs[i]);
         uniforms.uMountainHoleRadii.value[i] = h.radius * 0.96;
         uniforms.uMountainHoleDepths.value[i] = h.depth;
         uniforms.uMountainHolePassThrough.value[i] = h.isPassThrough ? 1.0 : 0.0;
@@ -677,6 +690,7 @@ export class DesertFoliageManager {
         metalness: 0.08,
         flatShading: arch.flatShading,
       });
+      applyMountainHoleShaderToMaterial(mat, `boulder_${archIdx}`);
 
       const mesh = new THREE.InstancedMesh(arch.geo, mat, arch.count);
       mesh.castShadow = true;
@@ -930,87 +944,13 @@ export class DesertFoliageManager {
     for (let archIdx = 0; archIdx < outcroppingArchetypes.length; archIdx++) {
       const arch = outcroppingArchetypes[archIdx];
       const mat = new THREE.MeshStandardMaterial({
+        name: `rock_outcrop_${arch.name}`,
         vertexColors: true,
         roughness: 0.92,
         metalness: 0.06,
         flatShading: false,
       });
-
-      const holeUniforms = {
-        uMountainHolePositions: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, -9999, 0)) },
-        uMountainHoleDirs: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, 0, 1)) },
-        uMountainHoleRadii: { value: new Float32Array(16) },
-        uMountainHoleDepths: { value: new Float32Array(16) },
-        uMountainHolePassThrough: { value: new Float32Array(16) },
-        uMountainHoleCount: { value: 0 },
-      };
-      this.mountainHoleUniformsList.push(holeUniforms);
-
-      mat.onBeforeCompile = (shader) => {
-        shader.uniforms.uMountainHolePositions = holeUniforms.uMountainHolePositions;
-        shader.uniforms.uMountainHoleDirs = holeUniforms.uMountainHoleDirs;
-        shader.uniforms.uMountainHoleRadii = holeUniforms.uMountainHoleRadii;
-        shader.uniforms.uMountainHoleDepths = holeUniforms.uMountainHoleDepths;
-        shader.uniforms.uMountainHolePassThrough = holeUniforms.uMountainHolePassThrough;
-        shader.uniforms.uMountainHoleCount = holeUniforms.uMountainHoleCount;
-
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <common>',
-          `#include <common>
-           varying vec3 vWorldPositionCustom;`
-        );
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <worldpos_vertex>',
-          `#include <worldpos_vertex>
-           vec4 customWorldPos = vec4( transformed, 1.0 );
-           #ifdef USE_INSTANCING
-             customWorldPos = instanceMatrix * customWorldPos;
-           #endif
-           customWorldPos = modelMatrix * customWorldPos;
-           vWorldPositionCustom = customWorldPos.xyz;`
-        );
-
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <common>',
-          `#include <common>
-           varying vec3 vWorldPositionCustom;
-           uniform vec3 uMountainHolePositions[16];
-           uniform vec3 uMountainHoleDirs[16];
-           uniform float uMountainHoleRadii[16];
-           uniform float uMountainHoleDepths[16];
-           uniform float uMountainHolePassThrough[16];
-           uniform int uMountainHoleCount;`
-        );
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <dithering_fragment>',
-          `#include <dithering_fragment>
-           for (int i = 0; i < 16; i++) {
-             if (i >= uMountainHoleCount) break;
-             vec3 p = vWorldPositionCustom;
-             vec3 a = uMountainHolePositions[i];
-             vec3 dir = uMountainHoleDirs[i];
-             float d = uMountainHoleDepths[i];
-             float r = uMountainHoleRadii[i];
-             float isPass = uMountainHolePassThrough[i];
-
-             float t = dot(p - a, dir);
-             // 1. Entrance portal opening at rock face (-0.35m to +0.65m)
-             if (t >= -0.35 && t <= 0.65) {
-               vec3 axisPoint = a + dir * t;
-               if (distance(p, axisPoint) < r) {
-                 discard;
-               }
-             }
-             // 2. Exit portal opening on opposite mountain face if pass-through tunnel
-             if (isPass > 0.5 && t >= (d - 0.65) && t <= (d + 0.35)) {
-               vec3 axisPoint = a + dir * t;
-               if (distance(p, axisPoint) < r) {
-                 discard;
-               }
-             }
-           }`
-        );
-      };
+      applyMountainHoleShaderToMaterial(mat, `outcrop_${arch.name}`);
 
       const mesh = new THREE.InstancedMesh(arch.geo, mat, arch.count);
       mesh.castShadow = true;
@@ -1597,7 +1537,9 @@ export class DesertFoliageManager {
           }
 
           // Carve or deepen a real, visible physical 3D hole into the mountain rock face!
-          const groundY = getTerrainHeight(hitPoint.x, hitPoint.z);
+          const frontX = hitPoint.x + normal.x * 1.8;
+          const frontZ = hitPoint.z + normal.z * 1.8;
+          const groundY = getTerrainHeight(frontX, frontZ);
           const holeRes = this.mountainHoleManager.digMountainHole(
             hitPoint,
             normal,
@@ -1861,6 +1803,7 @@ export class DesertFoliageManager {
     let rocksBlasted = 0;
     let woodBlasted = 0;
     let hydrationBlasted = 0;
+    let bannerMsg: string | undefined;
     const destroyedPoints: Array<{ pos: THREE.Vector3; type: DebrisType }> = [];
 
     // Gold deposits
@@ -1913,7 +1856,7 @@ export class DesertFoliageManager {
             destroyedPoints.push({ pos: pos.clone(), type: 'sandstone' });
 
             const blastNormal = center.clone().sub(pos).normalize();
-            this.mountainHoleManager.digMountainHole(
+            const holeRes = this.mountainHoleManager.digMountainHole(
               center,
               blastNormal.lengthSq() > 0.1 ? blastNormal : new THREE.Vector3(0, 1, 0),
               0x7c3820,
@@ -1921,6 +1864,9 @@ export class DesertFoliageManager {
               'dynamite',
               true
             );
+            if (holeRes.message) {
+              bannerMsg = holeRes.message;
+            }
             this.updateMountainHoleCutouts();
           }
         }
@@ -1998,7 +1944,7 @@ export class DesertFoliageManager {
       }
     }
 
-    return { goldBlasted, rocksBlasted, woodBlasted, hydrationBlasted, destroyedPoints };
+    return { goldBlasted, rocksBlasted, woodBlasted, hydrationBlasted, destroyedPoints, bannerMessage: bannerMsg };
   }
 
   public dispose() {

@@ -1,4 +1,5 @@
 import { MultiplayerChatMessage, MultiplayerColorPreset, MultiplayerPlayer, WeatherType } from '../types';
+import { safeLocalStorage } from '../utils/storage';
 
 export type MultiplayerEventHandler = {
   onConnected?: (selfId: string, selfData: any) => void;
@@ -80,11 +81,11 @@ class MultiplayerService {
   }
 
   public getSelfName(): string {
-    return localStorage.getItem('prospector_name') || 'Canyon Jack';
+    return safeLocalStorage.getItem('prospector_name') || 'Canyon Jack';
   }
 
   public getSelfColor(): string {
-    return localStorage.getItem('prospector_color') || '#8c5932';
+    return safeLocalStorage.getItem('prospector_color') || '#8c5932';
   }
 
   public getUniversalWeather(): WeatherType {
@@ -377,10 +378,10 @@ class MultiplayerService {
 
   public updateProfile(name: string, outfitColor: string) {
     if (name && name.trim()) {
-      localStorage.setItem('prospector_name', name.trim());
+      safeLocalStorage.setItem('prospector_name', name.trim());
     }
     if (outfitColor) {
-      localStorage.setItem('prospector_color', outfitColor);
+      safeLocalStorage.setItem('prospector_color', outfitColor);
     }
     this.sendRaw({
       type: 'player:profile',

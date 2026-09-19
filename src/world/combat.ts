@@ -148,6 +148,18 @@ export class CombatManager {
 
     const bulletRay = new THREE.Raycaster(cameraPos, cameraDir, 0.5, 120);
 
+    // Check hit against active thrown dynamite sticks (frontier sharpshooter trick!)
+    for (let i = 0; i < this.dynamites.length; i++) {
+      const d = this.dynamites[i];
+      const dDist = bulletRay.ray.distanceToPoint(d.mesh.position);
+      if (dDist < 0.75) {
+        d.entity.fuseTimer = 0.01; // Detonate immediately
+        soundEngine.playRicochet();
+        this.spawnTracer(cameraPos, d.mesh.position.clone(), false);
+        return true;
+      }
+    }
+
     // Check hit against bandits
     let hitBandit: BanditEntity | null = null;
     let hitPoint = cameraPos.clone().addScaledVector(cameraDir, 80);

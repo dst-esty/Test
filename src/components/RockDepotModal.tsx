@@ -341,7 +341,7 @@ export const RockDepotModal: React.FC<RockDepotModalProps> = ({
               Prospector's Field Guidance:
             </p>
             <p>
-              • <strong>Mine directly:</strong> Equip your pickaxe [3] and strike the bedrock or portal drift with [Left-Click] or [Space] to chip out natural rocks and unearth raw gold quartz veins.
+              • <strong>Mine directly:</strong> Equip your pickaxe [4] and strike the bedrock or portal drift with [Left-Click] or [Space] to chip out natural rocks and unearth raw gold quartz veins.
             </p>
             <p>
               • <strong>Mountain Shear Warning:</strong> Digging inside the unreinforced portal lowers Bedrock Stability. Listen for low mountain rumbles, creaking timbers, and pebble showers!

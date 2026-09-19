@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../firebase';
 import { TerritoryClaim, ClaimInfringement, Vector3D } from '../types';
+import { safeLocalStorage } from '../utils/storage';
 
 export class TerritoryClaimService {
   private static instance: TerritoryClaimService;
@@ -34,16 +35,16 @@ export class TerritoryClaimService {
 
   // Get or persist a steady local prospector UUID for claim deeds
   public getOrCreateProspectorId(): string {
-    let id = localStorage.getItem('superstition_prospector_id');
+    let id = safeLocalStorage.getItem('superstition_prospector_id');
     if (!id) {
       id = 'prospector_' + Math.random().toString(36).substring(2, 10);
-      localStorage.setItem('superstition_prospector_id', id);
+      safeLocalStorage.setItem('superstition_prospector_id', id);
     }
     return id;
   }
 
   public getProspectorName(): string {
-    return localStorage.getItem('prospector_name') || 'Canyon Jack';
+    return safeLocalStorage.getItem('prospector_name') || 'Canyon Jack';
   }
 
   private initRealtimeListeners() {
@@ -61,8 +62,12 @@ export class TerritoryClaimService {
           this.subscribers.forEach((cb) => cb(list));
         },
         (error) => {
-          console.warn('[TerritoryClaimService] Realtime listener error:', error);
-          handleFirestoreError(error, OperationType.LIST, claimsPath);
+          console.warn('[TerritoryClaimService] Realtime listener notice:', error.message);
+          try {
+            handleFirestoreError(error, OperationType.LIST, claimsPath);
+          } catch (e) {
+            console.warn('[TerritoryClaimService] Handled firestore claims error non-fatally:', e);
+          }
         }
       );
     } catch (err) {
@@ -85,8 +90,12 @@ export class TerritoryClaimService {
           this.infringementSubscribers.forEach((cb) => cb(list));
         },
         (error) => {
-          console.warn('[TerritoryClaimService] Realtime infringement listener error:', error);
-          handleFirestoreError(error, OperationType.LIST, infringementsPath);
+          console.warn('[TerritoryClaimService] Realtime infringement notice:', error.message);
+          try {
+            handleFirestoreError(error, OperationType.LIST, infringementsPath);
+          } catch (e) {
+            console.warn('[TerritoryClaimService] Handled firestore infringement error non-fatally:', e);
+          }
         }
       );
     } catch (err) {

@@ -74,7 +74,7 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
           </div>
           <h3 className="text-2xl font-bold text-[#3e250f] mb-2">No Mineral Claim Registered</h3>
           <p className="text-sm text-stone-700 mb-6 font-sans leading-relaxed">
-            You have not yet staked an official 40-acre lode boundary in the Superstition Mountains. Equip your Survey Claim Stake [8] or open the Construction Depot [B] to drive the corner posts and survey cord!
+            You have not yet staked an official 40-acre lode boundary in the Superstition Mountains. Equip your Survey Claim Stake [9] or open the Construction Depot [B] to drive the corner posts and survey cord!
           </p>
           <div className="flex justify-center gap-3">
             {onOpenBuilder && (

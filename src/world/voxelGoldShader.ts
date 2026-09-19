@@ -150,8 +150,8 @@ uniform vec3 uGoldAmber;
 uniform vec3 uQuartzColor;
 uniform vec3 uCrackColor;
 
-varying vec3 vVoxelWorldPos;
-varying vec3 vVoxelNormal;
+varying highp vec3 vVoxelWorldPos;
+varying highp vec3 vVoxelNormal;
 
 /**
  * Triplanar projection sampling of the procedural noise texture.
@@ -321,7 +321,7 @@ export function createGoldVeinStandardMaterial(options: {
     // Vertex Shader injections
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
-      `#include <common>\nvarying vec3 vVoxelWorldPos;\nvarying vec3 vVoxelNormal;`
+      `#include <common>\nvarying highp vec3 vVoxelWorldPos;\nvarying highp vec3 vVoxelNormal;`
     );
     shader.vertexShader = shader.vertexShader.replace(
       '#include <worldpos_vertex>',

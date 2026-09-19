@@ -3,6 +3,236 @@ import { BuiltStructure, ClaimInfo, MineStructureType, PortalExcavationState, St
 import { soundEngine } from '../audio/soundEffects';
 import { MountainDustParticleSystem } from './mountainDustParticles';
 
+export interface StructurePlacementValidationContext {
+  getTerrainHeight: (x: number, z: number) => number;
+  isUnderground?: boolean;
+  currentLevel?: number;
+  foliageManager?: any;
+  undergroundLayers?: any;
+  builtStructures?: BuiltStructure[];
+  playerGold?: number;
+  playerRocks?: number;
+  playerWood?: number;
+}
+
+export interface StructurePlacementValidationResult {
+  valid: boolean;
+  reason?: string;
+  slopeDegrees?: number;
+  terrainHeightDelta?: number;
+}
+
+export function getTerrainSlopeAt(
+  x: number,
+  z: number,
+  getTerrainHeight: (x: number, z: number) => number,
+  radius: number = 2.2
+): { maxSlope: number; slopeDegrees: number; heightDelta: number } {
+  const hC = getTerrainHeight(x, z);
+  const angles = [
+    0,
+    Math.PI / 4,
+    Math.PI / 2,
+    (3 * Math.PI) / 4,
+    Math.PI,
+    (5 * Math.PI) / 4,
+    (3 * Math.PI) / 2,
+    (7 * Math.PI) / 4,
+  ];
+  let minH = hC;
+  let maxH = hC;
+  let maxGrad = 0;
+
+  for (const a of angles) {
+    const sx = x + Math.cos(a) * radius;
+    const sz = z + Math.sin(a) * radius;
+    const sh = getTerrainHeight(sx, sz);
+    if (sh < minH) minH = sh;
+    if (sh > maxH) maxH = sh;
+    const grad = Math.abs(sh - hC) / radius;
+    if (grad > maxGrad) maxGrad = grad;
+  }
+
+  const heightDelta = maxH - minH;
+  const slopeDegrees = (Math.atan(maxGrad) * 180) / Math.PI;
+  return { maxSlope: maxGrad, slopeDegrees, heightDelta };
+}
+
+export function validateStructurePlacement(
+  type: MineStructureType | 'stake',
+  pos: { x: number; y: number; z: number },
+  rotationY: number,
+  ctx: StructurePlacementValidationContext
+): StructurePlacementValidationResult {
+  if (type === 'stake') {
+    return { valid: true };
+  }
+
+  const bp = STRUCTURE_BLUEPRINTS[type];
+  if (!bp) return { valid: true };
+
+  const isUnderground = Boolean(ctx.isUnderground || (ctx.currentLevel && ctx.currentLevel > 0));
+
+  // 1. Underground level placement constraints
+  if (isUnderground) {
+    if (type === 'headframe_hoist' || type === 'deep_shaft') {
+      return {
+        valid: false,
+        reason: '⚠️ Cannot erect a surface hoisting headframe underground! Headframes must be built on open surface ground to sink vertical shafts.',
+      };
+    }
+    if (type === 'timber_portal') {
+      return {
+        valid: false,
+        reason: '⚠️ Timber mine portals are for surface mountain entry! Use Pickaxe or Dynamite directly on cavern walls to dig underground drifts.',
+      };
+    }
+    if (type === 'campfire' || type === 'prospector_camp' || type === 'assay_forge' || type === 'sluice_box') {
+      return {
+        valid: false,
+        reason: `⚠️ Cannot build ${bp.name} underground in mine drifts. Build at surface camp.`,
+      };
+    }
+  }
+
+  // 2. Mountain Tunnel Interior Constraint
+  const insideMtnTunnel = Boolean(
+    ctx.foliageManager?.mountainHoleManager?.isInsideMountainTunnel(pos.x, pos.y, pos.z, 1.2)?.inside ||
+    ctx.undergroundLayers?.holeManager?.isInsideMountainTunnel(pos.x, pos.y, pos.z, 1.2)?.inside
+  );
+
+  if (insideMtnTunnel) {
+    if (type === 'headframe_hoist' || type === 'deep_shaft') {
+      return {
+        valid: false,
+        reason: '⚠️ Cannot erect headframe hoist inside a mountain tunnel! Headframes require open surface skies for vertical hoisting sheaves.',
+      };
+    }
+    if (type === 'timber_portal') {
+      return {
+        valid: false,
+        reason: '⚠️ Cannot place an entrance portal inside an existing excavated tunnel!',
+      };
+    }
+  }
+
+  // 3. Mountain Outcroppings & Bedrock Crags Constraint
+  if (ctx.foliageManager?.rockColliders && Array.isArray(ctx.foliageManager.rockColliders)) {
+    for (const c of ctx.foliageManager.rockColliders) {
+      if (!c.active || c.type !== 'mountain') continue;
+      const dist = Math.hypot(pos.x - c.x, pos.z - c.z);
+      const halfSize = (type === 'headframe_hoist' || type === 'deep_shaft') ? 2.2 : (type === 'frontier_torch' ? 0.3 : 1.4);
+
+      if (type === 'headframe_hoist' || type === 'deep_shaft') {
+        if (dist < c.radius + halfSize) {
+          return {
+            valid: false,
+            reason: '⚠️ Cannot erect headframe on solid mountain rock outcroppings! The hoist tower and vertical shaft collar require open ground clear of cliff crags.',
+          };
+        }
+      } else if (type === 'campfire' || type === 'prospector_camp' || type === 'assay_forge') {
+        if (dist < c.radius + halfSize) {
+          return {
+            valid: false,
+            reason: '⚠️ Cannot build inside solid mountain rock outcroppings.',
+          };
+        }
+      }
+    }
+  }
+
+  // 4. Terrain Slope & Mountain Cliff Constraints
+  const footprintRadius = (type === 'headframe_hoist' || type === 'deep_shaft') ? 2.4 : 1.8;
+  const { slopeDegrees, heightDelta } = getTerrainSlopeAt(pos.x, pos.z, ctx.getTerrainHeight, footprintRadius);
+
+  if (type === 'headframe_hoist' || type === 'deep_shaft') {
+    // Headframe requires relatively level ground (under 16° slope / 1.6m elevation variance across footprint)
+    if (slopeDegrees > 16.0 || heightDelta > 1.6) {
+      return {
+        valid: false,
+        slopeDegrees,
+        terrainHeightDelta: heightDelta,
+        reason: `⚠️ Ground is too steep (${Math.round(slopeDegrees)}° slope)! Headframes require open, level ground (under 16° slope) to sink a vertical shaft collar. Build a Timber Adit Portal for mountain slopes instead.`,
+      };
+    }
+  } else if (type === 'sluice_box') {
+    if (slopeDegrees > 22.0 || heightDelta > 2.0) {
+      return {
+        valid: false,
+        slopeDegrees,
+        terrainHeightDelta: heightDelta,
+        reason: `⚠️ Ground is too steep (${Math.round(slopeDegrees)}° slope)! Sluice flumes require gentle ground (under 22° slope) to run water riffles.`,
+      };
+    }
+  } else if (type === 'campfire' || type === 'prospector_camp') {
+    if (slopeDegrees > 26.0) {
+      return {
+        valid: false,
+        slopeDegrees,
+        terrainHeightDelta: heightDelta,
+        reason: `⚠️ Ground is too steep (${Math.round(slopeDegrees)}° slope) to safely pitch camp.`,
+      };
+    }
+  }
+
+  // 5. Perimeter Mountain Massif & Needle Summit Crags
+  const distFromCenter = Math.hypot(pos.x, pos.z);
+  if (type === 'headframe_hoist' || type === 'deep_shaft') {
+    if (distFromCenter > 192) {
+      return {
+        valid: false,
+        reason: '⚠️ Cannot erect headframe on the jagged Superstition perimeter mountain wall! Build on valley floors, washes, or open plateaus.',
+      };
+    }
+    const distToNeedle = Math.hypot(pos.x - 80, pos.z - 15);
+    if (distToNeedle < 28) {
+      return {
+        valid: false,
+        reason: "⚠️ Cannot erect headframe on the sheer volcanic pinnacle of Weaver's Needle!",
+      };
+    }
+  }
+
+  // 6. Proximity to Existing Mine Shafts
+  if (ctx.builtStructures && (type === 'headframe_hoist' || type === 'deep_shaft')) {
+    for (const s of ctx.builtStructures) {
+      if (s.type === 'headframe_hoist' || s.type === 'deep_shaft') {
+        const d = Math.hypot(pos.x - s.position.x, pos.z - s.position.z);
+        if (d < 8.5) {
+          return {
+            valid: false,
+            reason: '⚠️ Too close to an existing mine shaft collar!',
+          };
+        }
+      }
+    }
+  }
+
+  // 7. Resource Cost Validation
+  const goldCost = bp.goldCost || 0;
+  const rockCost = bp.rockCost || 0;
+  const woodCost = bp.woodCost || 0;
+
+  if (type !== 'timber_portal') {
+    if (
+      (ctx.playerGold !== undefined && ctx.playerGold < goldCost) ||
+      (ctx.playerRocks !== undefined && ctx.playerRocks < rockCost) ||
+      (ctx.playerWood !== undefined && ctx.playerWood < woodCost)
+    ) {
+      return {
+        valid: false,
+        reason: `Need ${goldCost} oz Gold, ${rockCost} Rocks & ${woodCost} Wood to build ${bp.name}.`,
+      };
+    }
+  }
+
+  return {
+    valid: true,
+    slopeDegrees,
+    terrainHeightDelta: heightDelta,
+  };
+}
+
 export const STRUCTURE_BLUEPRINTS: Record<MineStructureType, StructureBlueprint> = {
   timber_portal: {
     type: 'timber_portal',
@@ -2189,6 +2419,98 @@ export class MineBuildingSystem {
       torchGhost.add(lightRing);
 
       this.ghostMesh = torchGhost;
+    } else if (type === 'headframe_hoist') {
+      const hfGhost = new THREE.Group();
+      // Collar base timber footprint
+      const collar = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.4, 4.2), ghostMat);
+      collar.position.y = 0.2;
+      hfGhost.add(collar);
+
+      // Vertical shaft pit cutout ring
+      const shaftRing = new THREE.Mesh(new THREE.RingGeometry(1.0, 1.5, 16), ghostMat);
+      shaftRing.rotation.x = -Math.PI / 2;
+      shaftRing.position.y = 0.42;
+      hfGhost.add(shaftRing);
+
+      // Four towering A-frame timber legs (7.6m high)
+      const legGeo = new THREE.CylinderGeometry(0.12, 0.18, 7.6, 6);
+      const leg1 = new THREE.Mesh(legGeo, ghostMat);
+      leg1.position.set(-1.35, 3.8, -1.35);
+      leg1.rotation.z = -0.14;
+      leg1.rotation.x = 0.14;
+      hfGhost.add(leg1);
+
+      const leg2 = new THREE.Mesh(legGeo, ghostMat);
+      leg2.position.set(1.35, 3.8, -1.35);
+      leg2.rotation.z = 0.14;
+      leg2.rotation.x = 0.14;
+      hfGhost.add(leg2);
+
+      const leg3 = new THREE.Mesh(legGeo, ghostMat);
+      leg3.position.set(-1.35, 3.8, 1.35);
+      leg3.rotation.z = -0.14;
+      leg3.rotation.x = -0.14;
+      hfGhost.add(leg3);
+
+      const leg4 = new THREE.Mesh(legGeo, ghostMat);
+      leg4.position.set(1.35, 3.8, 1.35);
+      leg4.rotation.z = 0.14;
+      leg4.rotation.x = -0.14;
+      hfGhost.add(leg4);
+
+      // Top cross-beam headpiece
+      const headBeam = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.3, 1.6), ghostMat);
+      headBeam.position.set(0, 7.4, 0);
+      hfGhost.add(headBeam);
+
+      // Spinning sheave wheel ring at top
+      const sheaveRing = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.12, 8, 16), ghostMat);
+      sheaveRing.position.set(0, 7.35, 0);
+      sheaveRing.rotation.y = Math.PI / 2;
+      hfGhost.add(sheaveRing);
+
+      this.ghostMesh = hfGhost;
+    } else if (type === 'deep_shaft') {
+      const dsGhost = new THREE.Group();
+      // Square timber shaft collar
+      const collar = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.6, 5.2), ghostMat);
+      collar.position.y = 0.3;
+      dsGhost.add(collar);
+
+      // Shaft pit opening
+      const pitRing = new THREE.Mesh(new THREE.RingGeometry(1.4, 2.1, 16), ghostMat);
+      pitRing.rotation.x = -Math.PI / 2;
+      pitRing.position.y = 0.62;
+      dsGhost.add(pitRing);
+
+      // Corner cribbing posts
+      for (const [cx, cz] of [[-2.3, -2.3], [2.3, -2.3], [-2.3, 2.3], [2.3, 2.3]]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.2, 0.4), ghostMat);
+        post.position.set(cx, 1.6, cz);
+        dsGhost.add(post);
+      }
+      this.ghostMesh = dsGhost;
+    } else if (type === 'timber_portal') {
+      const tpGhost = new THREE.Group();
+      // Adit portal arch
+      const postL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4.8, 0.35), ghostMat);
+      postL.position.set(-2.0, 2.4, 0);
+      tpGhost.add(postL);
+
+      const postR = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4.8, 0.35), ghostMat);
+      postR.position.set(2.0, 2.4, 0);
+      tpGhost.add(postR);
+
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.4, 0.4), ghostMat);
+      cap.position.set(0, 4.7, 0);
+      tpGhost.add(cap);
+
+      // Tunnel bore corridor outline
+      const tunnelBox = new THREE.Mesh(new THREE.BoxGeometry(3.8, 4.4, 3.5), ghostMat);
+      tunnelBox.position.set(0, 2.3, -1.75);
+      tpGhost.add(tunnelBox);
+
+      this.ghostMesh = tpGhost;
     } else {
       const bp = STRUCTURE_BLUEPRINTS[type];
       const box = new THREE.Mesh(

@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../firebase';
 import { Friendship, PardnerStatus } from '../types';
+import { safeLocalStorage } from '../utils/storage';
 
 export class FriendshipService {
   private static instance: FriendshipService;
@@ -27,22 +28,22 @@ export class FriendshipService {
   }
 
   public getOrCreateProspectorId(): string {
-    let id = localStorage.getItem('superstition_prospector_id');
+    let id = safeLocalStorage.getItem('superstition_prospector_id');
     if (!id) {
       id = 'prospector_' + Math.random().toString(36).substring(2, 10);
-      localStorage.setItem('superstition_prospector_id', id);
+      safeLocalStorage.setItem('superstition_prospector_id', id);
     }
     return id;
   }
 
   public getProspectorName(): string {
-    return localStorage.getItem('prospector_name') || 'Canyon Jack';
+    return safeLocalStorage.getItem('prospector_name') || 'Canyon Jack';
   }
 
   public setProspectorName(name: string) {
     const trimmed = name.trim();
     if (trimmed) {
-      localStorage.setItem('prospector_name', trimmed);
+      safeLocalStorage.setItem('prospector_name', trimmed);
       this.notifySubscribers(Array.from(this.friendshipsCache.values()));
     }
   }
@@ -90,7 +91,11 @@ export class FriendshipService {
         },
         (error) => {
           console.warn('[FriendshipService] Firestore subscription notice:', error.message);
-          handleFirestoreError(error, OperationType.GET, path);
+          try {
+            handleFirestoreError(error, OperationType.GET, path);
+          } catch (e) {
+            console.warn('[FriendshipService] Handled firestore subscription notice non-fatally:', e);
+          }
         }
       );
     } catch (err) {

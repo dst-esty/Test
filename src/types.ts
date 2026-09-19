@@ -244,6 +244,7 @@ export interface ExcavatedRoom {
   direction: RoomDirection;
   name: string;
   depthMeters: number;
+  driftLengthMeters?: number;
   excavationProgress: number; // 0 to 100%
   hitsNeeded: number;
   currentHits: number;

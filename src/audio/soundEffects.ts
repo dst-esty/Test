@@ -2069,6 +2069,91 @@ class SoundEngine {
     rattleOsc.start(t + 0.05);
     rattleOsc.stop(t + 0.14);
   }
+
+  // Mountain Tunnel Daylight Breakthrough Sound
+  public playMountainBreakthrough() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // 1. Heavy bedrock rupture boom & low-frequency shockwave
+    const boomOsc = this.ctx.createOscillator();
+    const boomGain = this.ctx.createGain();
+    boomOsc.type = 'triangle';
+    boomOsc.frequency.setValueAtTime(120, t);
+    boomOsc.frequency.exponentialRampToValueAtTime(32, t + 0.8);
+    boomGain.gain.setValueAtTime(0.5, t);
+    boomGain.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+    boomOsc.connect(boomGain);
+    boomGain.connect(this.ctx.destination);
+    boomOsc.start(t);
+    boomOsc.stop(t + 1.2);
+
+    // 2. Cascading rock shatter and gravel tumble
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.9);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.25));
+    }
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuffer;
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.setValueAtTime(800, t);
+    noiseFilter.frequency.exponentialRampToValueAtTime(350, t + 0.9);
+    noiseFilter.Q.setValueAtTime(1.5, t);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.35, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+    noiseSrc.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.ctx.destination);
+    noiseSrc.start(t);
+    noiseSrc.stop(t + 0.9);
+
+    // 3. Canyon mountain wind rush rushing through newly opened tunnel
+    const windBuffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * 1.5), this.ctx.sampleRate);
+    const wData = windBuffer.getChannelData(0);
+    for (let i = 0; i < wData.length; i++) {
+      wData[i] = (Math.random() * 2 - 1) * 0.2;
+    }
+    const windSrc = this.ctx.createBufferSource();
+    windSrc.buffer = windBuffer;
+    const windFilter = this.ctx.createBiquadFilter();
+    windFilter.type = 'bandpass';
+    windFilter.frequency.setValueAtTime(450, t + 0.1);
+    windFilter.frequency.exponentialRampToValueAtTime(950, t + 0.7);
+    windFilter.frequency.exponentialRampToValueAtTime(320, t + 1.5);
+    windFilter.Q.setValueAtTime(4.0, t);
+    const windGain = this.ctx.createGain();
+    windGain.gain.setValueAtTime(0.01, t);
+    windGain.gain.linearRampToValueAtTime(0.28, t + 0.35);
+    windGain.gain.exponentialRampToValueAtTime(0.001, t + 1.5);
+    windSrc.connect(windFilter);
+    windFilter.connect(windGain);
+    windGain.connect(this.ctx.destination);
+    windSrc.start(t + 0.05);
+    windSrc.stop(t + 1.5);
+
+    // 4. Resonant mountain breakthrough brass/chime fanfare
+    const freqs = [293.66, 369.99, 440.0, 587.33]; // D major mountain chord
+    freqs.forEach((f, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, t + 0.2 + idx * 0.08);
+      g.gain.setValueAtTime(0.12, t + 0.2 + idx * 0.08);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 1.4 + idx * 0.08);
+      osc.connect(g);
+      g.connect(this.ctx.destination);
+      osc.start(t + 0.2 + idx * 0.08);
+      osc.stop(t + 1.5 + idx * 0.08);
+    });
+  }
 }
 
 export const soundEngine = new SoundEngine();

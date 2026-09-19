@@ -19,7 +19,7 @@ import { MiningSystem } from '../world/mining';
 import { WildlifeManager } from '../world/wildlife';
 import { CombatManager } from '../world/combat';
 import { AtmosphereManager } from '../world/atmosphere';
-import { MineBuildingSystem, STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
+import { MineBuildingSystem, STRUCTURE_BLUEPRINTS, validateStructurePlacement } from '../world/mineBuilding';
 import { soundEngine } from '../audio/soundEffects';
 import {
   ClaimInfo,
@@ -472,14 +472,27 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const initQuality = qualityRef.current;
     const isPerf = initQuality === 'performance';
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isMobile || initQuality === 'high',
-      powerPreference: 'high-performance',
-      precision: isMobile ? 'mediump' : 'highp',
-      stencil: false,
-      depth: true,
-      alpha: false,
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !isMobile || initQuality === 'high',
+        powerPreference: isMobile ? 'default' : 'high-performance',
+        precision: isMobile ? 'mediump' : 'highp',
+        stencil: false,
+        depth: true,
+        alpha: false,
+      });
+    } catch (glErr) {
+      console.warn('[WorldCanvas] Primary WebGLRenderer init failed, falling back to basic WebGL context:', glErr);
+      renderer = new THREE.WebGLRenderer({
+        antialias: false,
+        powerPreference: 'default',
+        precision: 'mediump',
+        stencil: false,
+        depth: true,
+        alpha: false,
+      });
+    }
     renderer.setSize(width, height);
 
     const initialDpr = getTargetPixelRatio(initQuality);
@@ -501,7 +514,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+    const maxAnisotropy = renderer.capabilities?.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1;
 
     // 4. Lighting Setup
     const hemiLight = new THREE.HemisphereLight(0xffeedd, 0x553311, 0.8);
@@ -612,12 +625,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (onShowBanner) onShowBanner('🌊 Flash flood runoff has receded into the gravel wash. Heavy placer gold deposits exposed!');
     };
 
-    // Initialize Subterranean Mine Shaft & Geological Strata System
-    const undergroundLayers = new UndergroundLayersManager(scene, mountainDustParticles, foliage.manager.mountainHoleManager);
+    // Initialize Subterranean Mine Shaft & Geological Strata System with dedicated subterranean tunnel manager
+    const undergroundLayers = new UndergroundLayersManager(scene, mountainDustParticles);
     undergroundLayers.setDustParticleSystem(mountainDustParticles);
-    if (foliage.manager.mountainHoleManager) {
-      undergroundLayers.setHoleManager(foliage.manager.mountainHoleManager);
-    }
     undergroundLayersRef.current = undergroundLayers;
 
     const mineStructure = playerStateRef.current.builtStructures?.find(
@@ -940,24 +950,21 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     // 9. Universal Action Executors (Digging, Shooting, Dynamite)
     const executeDig = () => {
       const cam = cameraRef.current;
-      const lookDir = new THREE.Vector3();
-      if (cam) cam.getWorldDirection(lookDir);
-      else {
-        lookDir.set(Math.sin(playerYaw.current), 0, Math.cos(playerYaw.current));
-      }
+      // Calculate true player forward direction vector
+      const forwardDir = new THREE.Vector3(
+        -Math.sin(playerYaw.current) * Math.cos(playerPitch.current),
+        Math.sin(playerPitch.current),
+        -Math.cos(playerYaw.current) * Math.cos(playerPitch.current)
+      ).normalize();
 
       const origin =
         viewMode === 'third'
-          ? playerPos.current.clone().add(new THREE.Vector3(0, 1.2, 0))
+          ? playerPos.current.clone().add(new THREE.Vector3(0, 1.35, 0))
           : cam
           ? cam.position.clone()
           : playerPos.current.clone().add(new THREE.Vector3(0, 1.6, 0));
 
-      const dir = lookDir.clone();
-      if (viewMode === 'third') {
-        dir.y -= 0.35;
-        dir.normalize();
-      }
+      const dir = forwardDir.clone();
 
       // 0. Subterranean Mini-Voxel Bedrock / Vein Strike Check
       if (undergroundLayersRef.current) {
@@ -1043,14 +1050,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               fRes.type === 'outcropping' ? 1.8 : 1.4,
               fRes.surfaceNormal
             );
-            if (mountainDustParticlesRef.current && fRes.type === 'outcropping') {
-              mountainDustParticlesRef.current.triggerMountainStrike(
-                fRes.hitPoint,
-                fRes.surfaceNormal || new THREE.Vector3(0, 1, 0),
-                fRes.rockMaterial || 'volcanic_crag',
-                1.35
-              );
-            }
             if (fRes.type === 'gold_deposit' && fRes.goldAwarded) {
               miningSystemRef.current.spawnOreDrop(
                 new THREE.Vector3(fRes.hitPoint.x, fRes.hitPoint.y + 0.4, fRes.hitPoint.z),
@@ -1122,7 +1121,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       // C. Standard Bedrock / Ground Excavation
       if (!miningSystemRef.current) return;
       const raycaster = new THREE.Raycaster(origin, dir, 0.1, 7.5);
-      const res = miningSystemRef.current.digVoxelAtRay(raycaster, playerPos.current, lookDir);
+      const res = miningSystemRef.current.digVoxelAtRay(raycaster, playerPos.current, dir);
 
       if (res.hit) {
         foliageManagerRef.current?.updateMountainHoleCutouts();
@@ -1184,20 +1183,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       } else {
         // Fallback: Pickaxe strikes ground terrain directly
-        const forwardXZ = new THREE.Vector2(lookDir.x, lookDir.z).normalize();
+        const forwardXZ = new THREE.Vector2(dir.x, dir.z).normalize();
         const digX = playerPos.current.x + (forwardXZ.x || 0) * 1.6;
         const digZ = playerPos.current.z + (forwardXZ.y || 0) * 1.6;
         const result = digHoleInTerrain(digX, digZ, 0.42, 1.85, 'pickaxe');
         if (result.hole) {
           multiplayer.broadcastDig(result.hole, 'pickaxe');
         }
-        if (result.shaftCollarEstablished && undergroundLayersRef.current) {
-          const digY = getTerrainHeight(digX, digZ);
-          undergroundLayersRef.current.initAtPosition({ x: digX, y: digY, z: digZ }, digY);
-          if (onUpdateShaftLayers) onUpdateShaftLayers(undergroundLayersRef.current.layers);
-          if (onUpdateShaftLevel) onUpdateShaftLevel(0, undergroundLayersRef.current.maxUnlockedLevel);
-          if (onShowBanner) onShowBanner(`⚒️ Deep Bedrock Shaft Collar Established! Press [E] to Descend into Subterranean Mine Shaft!`);
-        } else if (result.strataMessage && onShowBanner) {
+        if (result.strataMessage && onShowBanner) {
           onShowBanner(result.strataMessage);
         }
       }
@@ -1416,18 +1409,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }));
       }
 
-      if (result.shaftCollarEstablished && undergroundLayersRef.current) {
-        undergroundLayersRef.current.initAtPosition({ x: digX, y: digY, z: digZ }, digY);
-        if (onUpdateShaftLayers) {
-          onUpdateShaftLayers(undergroundLayersRef.current.layers);
-        }
-        if (onUpdateShaftLevel) {
-          onUpdateShaftLevel(0, undergroundLayersRef.current.maxUnlockedLevel);
-        }
-        bannerText = `⚒️ Deep Bedrock Shaft Collar Established! Press [E] to Descend into Subterranean Mine Shaft!`;
-      }
-
-      if (onShowBanner) {
+      if (onShowBanner && bannerText) {
         onShowBanner(bannerText);
       }
     };
@@ -1765,6 +1747,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (!uLayers) return;
 
       const activeTool = playerStateRef.current.equippedTool || tool;
+      if (activeTool === 'rifle') {
+        if (onShowBanner) {
+          onShowBanner('⚠️ A rifle cannot excavate solid rock! Equip a Rock Pickaxe [4] or Nitro Dynamite [6].');
+        }
+        return;
+      }
 
       if (uLayers.voxelEngine.targetedVoxel) {
         const res = uLayers.mineTargetedVoxel(activeTool);
@@ -1821,7 +1809,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           cavernHit.point,
           activeTool,
           cavernHit.normal,
-          cavernHit.existingHole
+          cavernHit.existingHole,
+          {
+            isBranch: cavernHit.isSideWall,
+            isCeiling: cavernHit.isCeiling,
+          }
         );
 
         if (wallRes.success) {
@@ -2085,7 +2077,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           ...prev,
           ammo: Math.max(0, prev.ammo - 1),
         }));
-        combatManagerRef.current.playerShootRifle(cam.position, lookDir, (bandit) => {
+
+        let bulletHitTarget = false;
+
+        // 1. Shoot bandits or detonate thrown dynamite sticks in mid-air
+        const hitCombat = combatManagerRef.current.playerShootRifle(cam.position, lookDir, (bandit) => {
           if (onTriggerHitMarker) onTriggerHitMarker();
           if (bandit.health <= 0) {
             if (onShowBanner) onShowBanner(`Outlaw Bandit Defeated! Picked up .44 ammunition.`);
@@ -2093,39 +2089,38 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               ...prev,
               ammo: prev.ammo + 10,
               goldFound: prev.goldFound + 4,
-              dynamite: prev.dynamite + 1,
             }));
           }
         });
+        if (hitCombat) bulletHitTarget = true;
 
-        // High-caliber bullet strike against dangerous wildlife (rattlesnakes, scorpions)
+        // 2. High-caliber bullet strike against dangerous wildlife (rattlesnakes, scorpions)
         if (wildlifeManagerRef.current) {
           const wRay = new THREE.Raycaster(cam.position, lookDir, 0.5, 65.0);
           const wRes = wildlifeManagerRef.current.hitTestRay(wRay, 60.0, 50);
           if (wRes.hit) {
+            bulletHitTarget = true;
             if (onTriggerHitMarker) onTriggerHitMarker();
             if (wRes.message && onShowBanner) onShowBanner(wRes.message);
           }
         }
 
-        // High-caliber bullet impact on desert foliage, rocks, and quartz outcroppings
-        if (foliageManagerRef.current) {
-          const rifleRay = new THREE.Raycaster(cam.position, lookDir, 0.5, 65.0);
-          const fRes = foliageManagerRef.current.strikeFoliageOrRock(rifleRay, 60.0);
-          if (fRes.hit && fRes.hitPoint && fRes.debrisType && miningSystemRef.current) {
-            miningSystemRef.current.spawnDigDebris(fRes.hitPoint, fRes.debrisType, 1.8);
-            if (fRes.goldAwarded && fRes.goldAwarded > 0) {
-              soundEngine.playOreChime();
-              miningSystemRef.current.spawnOreDrop(
-                new THREE.Vector3(fRes.hitPoint.x, fRes.hitPoint.y + 0.4, fRes.hitPoint.z),
-                'gold_nugget',
-                fRes.goldAwarded
-              );
-            }
-            if (fRes.message && onShowBanner) {
-              onShowBanner(fRes.message);
+        // 3. Bullet impact on terrain / rocks: Play realistic ricochet sound and spark/dust puff (No mining/dynamite commands)
+        if (!bulletHitTarget) {
+          const impactRay = new THREE.Raycaster(cam.position, lookDir, 0.5, 80.0);
+          if (terrain && miningSystemRef.current) {
+            const hits = impactRay.intersectObject(terrain, false);
+            if (hits.length > 0) {
+              soundEngine.playRicochet();
+              miningSystemRef.current.spawnDigDebris(hits[0].point, 'sandstone', 0.6);
             }
           }
+        }
+      } else {
+        // Rifle dry fire click when magazine is empty
+        soundEngine.playPickaxe();
+        if (onShowBanner) {
+          onShowBanner('⚠️ Winchester .44 empty (0 rounds)! Purchase cartridges at Tortilla Flat Saloon or defeat outlaw bandits.');
         }
       }
     };
@@ -2176,6 +2171,35 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const targetPos = groundHitPoint.current;
       const type = activeBuildingTypeRef.current || 'timber_portal';
       const blueprint = STRUCTURE_BLUEPRINTS[type];
+
+      // Physical Terrain & Geological Placement Validation
+      const isUndergroundNow = Boolean(
+        undergroundLayersRef.current && undergroundLayersRef.current.currentLevel > 0
+      );
+      const validation = validateStructurePlacement(
+        type,
+        { x: targetPos.x, y: targetPos.y, z: targetPos.z },
+        ghostRotationY.current,
+        {
+          getTerrainHeight,
+          isUnderground: isUndergroundNow,
+          currentLevel: undergroundLayersRef.current?.currentLevel || 0,
+          foliageManager: foliageManagerRef.current,
+          undergroundLayers: undergroundLayersRef.current,
+          builtStructures: playerStateRef.current.builtStructures,
+          playerGold: playerStateRef.current.goldFound || 0,
+          playerRocks: playerStateRef.current.blocksDug || 0,
+          playerWood: playerStateRef.current.woodPlanks || 0,
+        }
+      );
+
+      if (!validation.valid) {
+        soundEngine.playPickaxe();
+        if (onShowBanner) {
+          onShowBanner(validation.reason || '⚠️ Cannot erect structure at this location.');
+        }
+        return;
+      }
 
       // Special Handling for Timber Portal Excavation:
       if (type === 'timber_portal') {
@@ -2831,7 +2855,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             label = `⛏️ Carve Drift (${typeName.charAt(0).toUpperCase() + typeName.slice(1)})`;
           }
 
-          if (executeAction) {
+          if (playerStateRef.current.equippedTool === 'rifle') {
+            if (executeAction) {
+              setPlayerState((prev) => ({ ...prev, equippedTool: 'pickaxe' }));
+              if (onShowBanner) onShowBanner('⛏️ Equipped Rock Pickaxe to mine bedrock.');
+            } else {
+              onPromptInteract(`⛏️ Equip Rock Pickaxe [4] to mine ${targetedVoxel.type.replace('_', ' ')} [E]`, () => {
+                setPlayerState((prev) => ({ ...prev, equippedTool: 'pickaxe' }));
+              });
+            }
+          } else if (executeAction) {
             executeSubterraneanVoxelMine(playerStateRef.current.equippedTool);
           } else {
             onPromptInteract(label, () => executeSubterraneanVoxelMine(playerStateRef.current.equippedTool));
@@ -2920,7 +2953,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                 }
               }
 
-              if (executeAction) {
+              if (playerStateRef.current.equippedTool === 'rifle') {
+                if (executeAction) {
+                  setPlayerState((prev) => ({ ...prev, equippedTool: 'pickaxe' }));
+                  if (onShowBanner) onShowBanner('⛏️ Equipped Rock Pickaxe to excavate cavern wall.');
+                } else {
+                  onPromptInteract(`⛏️ Equip Rock Pickaxe [4] or Dynamite [6] to excavate cavern wall [E]`, () => {
+                    setPlayerState((prev) => ({ ...prev, equippedTool: 'pickaxe' }));
+                  });
+                }
+              } else if (executeAction) {
                 executeSubterraneanVoxelMine(playerStateRef.current.equippedTool);
               } else {
                 onPromptInteract(wallLabel, () => executeSubterraneanVoxelMine(playerStateRef.current.equippedTool));
@@ -2929,28 +2971,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
         } else {
-          // On surface - check proximity to ANY dug mine pit (depth >= 0.8m) OR shaft collar
-          const isNearAnyPit =
-            (nearbyTrench && nearbyTrench.depth >= 0.8) ||
-            uLayers.isNearShaft(playerPos.current, 5.5) ||
-            activeDugHoles.some((h) => h.depth >= 0.8 && Math.hypot(px - h.x, pz - h.z) <= 5.5);
-
-          if (isNearAnyPit) {
-            // Anchor subterranean system to this pit collar if not already anchored
-            const pitHole =
-              (nearbyTrench && nearbyTrench.depth >= 0.8 ? nearbyTrench : null) ||
-              activeDugHoles.find((h) => h.depth >= 0.8 && Math.hypot(px - h.x, pz - h.z) <= 5.5);
-
-            if (
-              pitHole &&
-              (Math.abs(uLayers.surfacePos.x - pitHole.x) > 0.5 || Math.abs(uLayers.surfacePos.z - pitHole.z) > 0.5)
-            ) {
-              const hBaseY = getTerrainHeight(pitHole.x, pitHole.z);
-              uLayers.initAtPosition({ x: pitHole.x, y: hBaseY, z: pitHole.z }, hBaseY);
-              if (onUpdateShaftLayers) onUpdateShaftLayers(uLayers.layers);
-              if (onUpdateShaftLevel) onUpdateShaftLevel(0, uLayers.maxUnlockedLevel);
-            }
-
+          // On surface - check proximity to the active mine shaft collar
+          if (uLayers.isNearShaft(playerPos.current, 4.5)) {
             if (executeAction) {
               executeTraverseShaft(1);
             } else {
@@ -3007,7 +3029,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           return;
         } else {
           if (!executeAction) {
-            onPromptInteract('Mine Claimed: Dig with Pickaxe [3] or Nitro Dynamite [5]', () => {});
+            onPromptInteract('Mine Claimed: Dig with Rock Pickaxe [4], Spade Shovel [3], or Nitro Dynamite [6]', () => {});
           }
           return;
         }
@@ -3358,18 +3380,24 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           const isDeepAdit = mtnHole.depth >= 2.0;
           const veinText = mtnHole.hasExposedGoldVein ? ' | ✨ High-Grade Gold Vein' : '';
           let aditType = isUndergroundNow ? 'Mine Drift' : 'Mountain Adit';
-          if (mtnHole.holeType === 'raise') {
-            aditType = 'Upward Raise Chimney';
+          if (mtnHole.isPassThrough) {
+            aditType = 'Pass-Through Mountain Tunnel';
+          } else if (mtnHole.holeType === 'raise') {
+            aditType = isUndergroundNow ? 'Subterranean Stope Raise' : 'Upward Mountain Chimney';
           } else if (mtnHole.holeType === 'branch') {
-            aditType = 'Branching Side Cross-Cut';
+            aditType = isUndergroundNow ? 'Subterranean Cross-Cut Drift' : 'Branching Mountain Adit';
           }
 
           const depthPrefix = mtnHole.holeType === 'raise' ? '+' : '-';
-          const label = tunnelStatus.inside
-            ? `⛏️ Inside ${aditType} (${depthPrefix}${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Working-Face with Pickaxe [3] or Blast Dynamite [5]]`
+          const label = mtnHole.isPassThrough
+            ? tunnelStatus.inside
+              ? `🌄 Inside Pass-Through Tunnel (${mtnHole.depth.toFixed(1)}m | Pierces Ridge to Opposite Face) [Walk through mountain • Strike walls to widen]`
+              : `🚪 Mountain Pass-Through Portal (${mtnHole.depth.toFixed(1)}m | Pierces Ridge) [Walk Through to Opposite Face]`
+            : tunnelStatus.inside
+            ? `⛏️ Inside ${aditType} (${depthPrefix}${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Working-Face with Pickaxe [4] or Blast Dynamite [6]]`
             : isDeepAdit
             ? `🚪 ${aditType} Portal (${depthPrefix}${mtnHole.depth.toFixed(1)}m${veinText}) [Step Inside or Strike to Advance]`
-            : `⛏️ ${aditType} Excavation (${depthPrefix}${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Pickaxe to Advance]`;
+            : `⛏️ ${aditType} Excavation (${depthPrefix}${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Pickaxe [4] to Advance]`;
 
           if (executeAction) {
             if (mtnHole.hasExposedGoldVein && Math.random() < 0.4) {
@@ -3382,15 +3410,29 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                 onShowBanner(`✨ Chiseled 1 oz Native Gold Specimen from deep quartz vein!`);
               }
             } else if (onShowBanner) {
-              if (mtnHole.holeType === 'raise') {
-                onShowBanner(`⛏️ Upward Raise: +${mtnHole.depth.toFixed(1)}m overhead stope. Climb ladder [W / Space] or strike ceiling to mine upward!`);
+              if (mtnHole.isPassThrough) {
+                onShowBanner(`🌄 Mountain Pass-Through Tunnel: -${mtnHole.depth.toFixed(1)}m long. Walk right through the mountain ridge to the other side, or mine the rock ribs to widen passage!`);
+              } else if (mtnHole.holeType === 'raise') {
+                onShowBanner(
+                  isUndergroundNow
+                    ? `⛏️ Subterranean Stope Raise: +${mtnHole.depth.toFixed(1)}m overhead stope. Climb ladder [W / Space] or strike ceiling to mine upward!`
+                    : `⛰️ Upward Mountain Chimney: +${mtnHole.depth.toFixed(1)}m overhead stope. Climb ladder [W / Space] or strike ceiling to mine upward!`
+                );
               } else if (mtnHole.holeType === 'branch') {
-                onShowBanner(`⛏️ Branch Drift: -${mtnHole.depth.toFixed(1)}m lateral cross-cut. Strike the face to advance or branch further!`);
+                onShowBanner(
+                  isUndergroundNow
+                    ? `⛏️ Subterranean Cross-Cut Drift: -${mtnHole.depth.toFixed(1)}m lateral drift. Strike the face to advance or branch further!`
+                    : `⛰️ Branch Mountain Adit: -${mtnHole.depth.toFixed(1)}m lateral cross-cut. Strike the face to advance or branch further!`
+                );
               } else {
                 onShowBanner(
-                  isDeepAdit
-                    ? `⛏️ Mine Adit: -${mtnHole.depth.toFixed(1)}m deep. Step inside to explore timbered drift, or strike the back face to bore further!`
-                    : `⛏️ Mine Excavation: -${mtnHole.depth.toFixed(1)}m deep. Strike with Pickaxe [3] or toss Dynamite [5] to expand into a walk-in adit!`
+                  isUndergroundNow
+                    ? (isDeepAdit
+                        ? `⛏️ Subterranean Mine Drift: -${mtnHole.depth.toFixed(1)}m deep. Step inside to explore timbered drift, or strike the back face to bore further!`
+                        : `⛏️ Subterranean Mine Excavation: -${mtnHole.depth.toFixed(1)}m deep. Strike with Pickaxe [4] or toss Dynamite [6] to expand into a walk-in drift!`)
+                    : (isDeepAdit
+                        ? `⛰️ Mountain Adit: -${mtnHole.depth.toFixed(1)}m deep. Step inside to explore timbered mountain drift, or strike the back face to bore further!`
+                        : `⛰️ Mountain Cliff Excavation: -${mtnHole.depth.toFixed(1)}m deep. Strike with Pickaxe [4] or toss Dynamite [6] to expand into a walk-in adit!`)
                 );
               }
             }
@@ -3399,6 +3441,43 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
           return;
         }
+      }
+
+      // 5. Holographic Construction Placement Prompt
+      if (playerStateRef.current.equippedTool === 'builder') {
+        const type = activeBuildingTypeRef.current || 'timber_portal';
+        const bp = STRUCTURE_BLUEPRINTS[type];
+        const isUndergroundNow = Boolean(
+          undergroundLayersRef.current && undergroundLayersRef.current.currentLevel > 0
+        );
+        const validation = validateStructurePlacement(
+          type,
+          groundHitPoint.current,
+          ghostRotationY.current,
+          {
+            getTerrainHeight,
+            isUnderground: isUndergroundNow,
+            currentLevel: undergroundLayersRef.current?.currentLevel || 0,
+            foliageManager: foliageManagerRef.current,
+            undergroundLayers: undergroundLayersRef.current,
+            builtStructures: playerStateRef.current.builtStructures,
+            playerGold: playerStateRef.current.goldFound || 0,
+            playerRocks: playerStateRef.current.blocksDug || 0,
+            playerWood: playerStateRef.current.woodPlanks || 0,
+          }
+        );
+
+        if (executeAction) {
+          executeBuildStructure();
+        } else {
+          if (!validation.valid) {
+            onPromptInteract(validation.reason || '⚠️ Cannot erect structure here', () => executeBuildStructure());
+          } else {
+            const bpName = bp?.name || 'Structure';
+            onPromptInteract(`🔨 Erect ${bpName} [Left-Click / E] • Rotate [R]`, () => executeBuildStructure());
+          }
+        }
+        return;
       }
 
       if (!executeAction) {
@@ -3529,7 +3608,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             playerPos.current.x,
             playerPos.current.y,
             playerPos.current.z,
-            0.65
+            0.85
           );
           const currentGroundY = (tunnelCheck?.inside && tunnelCheck.floorY !== undefined)
             ? tunnelCheck.floorY
@@ -3722,7 +3801,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         // Handle climbing upward raise ladders into overhead stopes and chimneys
         const wantsClimbUp = !isUIOpenRef.current && !isGameOverRef.current && (keys['KeyW'] || keys['ArrowUp'] || keys['w'] || keys['W'] || (virtualJoystickInput.current.forward > 0.15));
         const wantsClimbDown = !isUIOpenRef.current && !isGameOverRef.current && (keys['KeyS'] || keys['ArrowDown'] || keys['s'] || keys['S'] || keys['ShiftLeft'] || keys['ShiftRight'] || (virtualJoystickInput.current.forward < -0.15));
-        const wantsStepOff = !isUIOpenRef.current && !isGameOverRef.current && (keys['KeyA'] || keys['KeyD'] || keys['a'] || keys['d'] || keys['Space'] || Math.abs(virtualJoystickInput.current.strafe) > 0.35);
+        const wantsStepOff = !isUIOpenRef.current && !isGameOverRef.current && (keys['KeyA'] || keys['KeyD'] || keys['a'] || keys['d'] || keys['Space'] || Math.abs(virtualJoystickInput.current.right) > 0.35);
 
         const ladderPos = raiseLadderCheck.ladderPos;
         const baseGroundY = isUnderground && uLayers
@@ -3822,7 +3901,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           playerPos.current.x,
           playerPos.current.y,
           playerPos.current.z,
-          0.45
+          0.85
         );
         if (tunnelCheck?.inside && tunnelCheck.floorY !== undefined) {
           currentGroundY = tunnelCheck.floorY;
@@ -4015,44 +4094,88 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           const dzFromShaft = playerPos.current.z - uLayers.surfacePos.z;
           const distToShaft = Math.hypot(dxFromShaft, dzFromShaft);
 
-          // Close over-shoulder camera underground to prevent wall clipping
-          const distBehind = distToShaft <= 2.2 ? 1.8 : 2.5;
-          const camYOffset = 1.35;
-
-          let camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
-          let camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
-
-          // Chamber wall boundary constraint
-          const camDx = camX - uLayers.surfacePos.x;
-          const camDz = camZ - uLayers.surfacePos.z;
-          const camDist = Math.hypot(camDx, camDz);
-          const maxAllowedRadius = chamberRadius - 1.2;
-          if (camDist > maxAllowedRadius && camDist > 0.001) {
-            const scale = maxAllowedRadius / camDist;
-            camX = uLayers.surfacePos.x + camDx * scale;
-            camZ = uLayers.surfacePos.z + camDz * scale;
-          }
-
-          // Ceiling and floor height constraints
-          let camY = playerPos.current.y + camYOffset + Math.sin(playerPitch.current) * 1.2;
-          camY = Math.max(floorY + 0.6, Math.min(ceilY - 0.45, camY));
-
-          camera.position.set(camX, camY, camZ);
-          camera.lookAt(playerPos.current.x, playerPos.current.y + 0.35, playerPos.current.z);
-        } else {
-          const distBehind = 4.2;
-          const camYOffset = 1.8;
-          const camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
-          const camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
-          const camGroundY = getTerrainHeight(camX, camZ);
-          const camY = Math.max(
-            camGroundY + 0.65,
-            currentGroundY + 1.2,
-            playerPos.current.y + camYOffset + Math.sin(playerPitch.current) * 2.0
+          // Check if player is inside a subterranean mine drift tunnel
+          const driftCheck = uLayers.holeManager?.isInsideMountainTunnel(
+            playerPos.current.x,
+            playerPos.current.y,
+            playerPos.current.z,
+            0.85
           );
 
-          camera.position.set(camX, camY, camZ);
-          camera.lookAt(playerPos.current.x, playerPos.current.y + 0.3, playerPos.current.z);
+          if (driftCheck?.inside) {
+            // Tight over-shoulder camera inside subterranean mine drift tunnel
+            const distBehind = 1.7;
+            const camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
+            const camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
+            const tunnelFloorY = driftCheck.floorY !== undefined ? driftCheck.floorY : floorY;
+            let camY = playerPos.current.y + 1.25 + Math.sin(playerPitch.current) * 0.9;
+            camY = Math.max(tunnelFloorY + 0.45, Math.min(tunnelFloorY + 2.8, camY));
+
+            camera.position.set(camX, camY, camZ);
+            camera.lookAt(playerPos.current.x, playerPos.current.y + 0.35, playerPos.current.z);
+          } else {
+            // Close over-shoulder camera underground in main cavern
+            const distBehind = distToShaft <= 2.2 ? 1.8 : 2.5;
+            const camYOffset = 1.35;
+
+            let camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
+            let camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
+
+            // Chamber wall boundary constraint
+            const camDx = camX - uLayers.surfacePos.x;
+            const camDz = camZ - uLayers.surfacePos.z;
+            const camDist = Math.hypot(camDx, camDz);
+            const maxAllowedRadius = chamberRadius - 1.2;
+            if (camDist > maxAllowedRadius && camDist > 0.001) {
+              const scale = maxAllowedRadius / camDist;
+              camX = uLayers.surfacePos.x + camDx * scale;
+              camZ = uLayers.surfacePos.z + camDz * scale;
+            }
+
+            // Ceiling and floor height constraints
+            let camY = playerPos.current.y + camYOffset + Math.sin(playerPitch.current) * 1.2;
+            camY = Math.max(floorY + 0.6, Math.min(ceilY - 0.45, camY));
+
+            camera.position.set(camX, camY, camZ);
+            camera.lookAt(playerPos.current.x, playerPos.current.y + 0.35, playerPos.current.z);
+          }
+        } else {
+          // Check if player is inside mountain tunnel
+          const mtnTunnelCamCheck = foliageManagerRef.current?.mountainHoleManager?.isInsideMountainTunnel(
+            playerPos.current.x,
+            playerPos.current.y,
+            playerPos.current.z,
+            0.85
+          );
+
+          if (mtnTunnelCamCheck?.inside) {
+            // Close over-shoulder camera inside mountain tunnel to prevent exterior mountain clipping
+            const distBehind = 1.9;
+            const camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
+            const camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
+            const floorY = mtnTunnelCamCheck.floorY ?? currentGroundY;
+            const radius = mtnTunnelCamCheck.hole?.radius || 1.6;
+            const ceilY = floorY + radius * 1.95;
+            let camY = playerPos.current.y + 0.3 + Math.sin(playerPitch.current) * 0.8;
+            camY = Math.max(floorY + 0.4, Math.min(ceilY - 0.35, camY));
+
+            camera.position.set(camX, camY, camZ);
+            camera.lookAt(playerPos.current.x, playerPos.current.y + 0.25, playerPos.current.z);
+          } else {
+            const distBehind = 4.2;
+            const camYOffset = 1.8;
+            const camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
+            const camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
+            const camGroundY = getTerrainHeight(camX, camZ);
+            const camY = Math.max(
+              camGroundY + 0.65,
+              currentGroundY + 1.2,
+              playerPos.current.y + camYOffset + Math.sin(playerPitch.current) * 2.0
+            );
+
+            camera.position.set(camX, camY, camZ);
+            camera.lookAt(playerPos.current.x, playerPos.current.y + 0.3, playerPos.current.z);
+          }
         }
       }
 
@@ -4114,13 +4237,27 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           mineBuildingRef.current.updateGhostPosition(groundHitPoint.current, ghostRotationY.current, true);
         } else if (tool === 'builder') {
           const type = activeBuildingTypeRef.current || 'timber_portal';
-          const blueprint = STRUCTURE_BLUEPRINTS[type];
-          const canAfford =
-            playerStateRef.current.goldFound >= blueprint.goldCost &&
-            playerStateRef.current.blocksDug >= blueprint.rockCost &&
-            (playerStateRef.current.woodPlanks || 0) >= (blueprint.woodCost || 0);
+          const isUndergroundNow = Boolean(
+            undergroundLayersRef.current && undergroundLayersRef.current.currentLevel > 0
+          );
+          const validation = validateStructurePlacement(
+            type,
+            groundHitPoint.current,
+            ghostRotationY.current,
+            {
+              getTerrainHeight,
+              isUnderground: isUndergroundNow,
+              currentLevel: undergroundLayersRef.current?.currentLevel || 0,
+              foliageManager: foliageManagerRef.current,
+              undergroundLayers: undergroundLayersRef.current,
+              builtStructures: playerStateRef.current.builtStructures,
+              playerGold: playerStateRef.current.goldFound || 0,
+              playerRocks: playerStateRef.current.blocksDug || 0,
+              playerWood: playerStateRef.current.woodPlanks || 0,
+            }
+          );
           mineBuildingRef.current.setGhost(type);
-          mineBuildingRef.current.updateGhostPosition(groundHitPoint.current, ghostRotationY.current, canAfford);
+          mineBuildingRef.current.updateGhostPosition(groundHitPoint.current, ghostRotationY.current, validation.valid);
         } else {
           mineBuildingRef.current.hideGhost();
         }
@@ -4320,6 +4457,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                 miningSystemRef.current?.spawnDigDebris(dp.pos, dp.type, 2.4);
               });
               foliageManagerRef.current.updateMountainHoleCutouts();
+
+              if (fBlast.bannerMessage && onShowBanner) {
+                onShowBanner(fBlast.bannerMessage);
+              }
             }
 
             // Check if blast affects shaft mini-voxels or cavern wall tunnels

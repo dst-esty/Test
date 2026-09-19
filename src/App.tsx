@@ -29,6 +29,7 @@ import { getTerrainHeight } from './world/terrain';
 import { advanceDiurnalTime } from './world/atmosphere';
 import { Compass, BookOpen, Map as MapIcon, Sparkles, AlertCircle } from 'lucide-react';
 import { isMobileDevice } from './utils/device';
+import { safeLocalStorage } from './utils/storage';
 
 export default function App() {
   // Player State
@@ -58,8 +59,8 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<MultiplayerChatMessage[]>([]);
   const [multiplayerPing, setMultiplayerPing] = useState<number>(35);
   const [selfId, setSelfId] = useState<string | null>(null);
-  const [selfName, setSelfName] = useState<string>(() => localStorage.getItem('prospector_name') || 'Canyon Jack');
-  const [selfColor, setSelfColor] = useState<string>(() => localStorage.getItem('prospector_color') || '#8c5932');
+  const [selfName, setSelfName] = useState<string>(() => safeLocalStorage.getItem('prospector_name') || 'Canyon Jack');
+  const [selfColor, setSelfColor] = useState<string>(() => safeLocalStorage.getItem('prospector_color') || '#8c5932');
   const [trackedPlayerPos, setTrackedPlayerPos] = useState<Vector3D | null>(null);
 
   // Initialize and synchronize real-time multiplayer connection
@@ -214,7 +215,7 @@ export default function App() {
   // Graphics Quality & Frame Pacing Engine (Performance / Balanced / High)
   const [graphicsQuality, setGraphicsQuality] = useState<GraphicsQuality>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('prospector_graphics_quality') as GraphicsQuality | null;
+      const saved = safeLocalStorage.getItem('prospector_graphics_quality') as GraphicsQuality | null;
       if (saved && (saved === 'performance' || saved === 'balanced' || saved === 'high')) {
         return saved;
       }
@@ -230,7 +231,7 @@ export default function App() {
       const next: GraphicsQuality =
         prev === 'performance' ? 'balanced' : prev === 'balanced' ? 'high' : 'performance';
       try {
-        localStorage.setItem('prospector_graphics_quality', next);
+        safeLocalStorage.setItem('prospector_graphics_quality', next);
       } catch {}
       const label =
         next === 'performance'
@@ -1041,7 +1042,7 @@ export default function App() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-[#442710] font-serif">Arsenal:</span>
-                <span className="font-mono text-[11px] text-stone-700">[1] Compass [2] Lantern [3] Pickaxe [4] Winchester Rifle [5] Dynamite [6] Detector</span>
+                <span className="font-mono text-[11px] text-stone-700">[1] Compass [2] Lantern [3] Shovel [4] Pickaxe [5] Rifle [6] Dynamite [7] Detector [8] Field Glass [9] Claim Stake [0] Mine Builder [X] Axe</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-[#442710] font-serif">Claim & Dig:</span>

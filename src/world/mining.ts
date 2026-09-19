@@ -55,6 +55,16 @@ export class MiningSystem {
   public mountainHoleManager?: MountainHoleManager;
   public dustParticleSystem?: MountainDustParticleSystem;
 
+  // Cached debris materials and geometries to eliminate allocation churn on pickaxe strikes
+  private sharedMacroMaterials: Map<string, THREE.MeshStandardMaterial> = new Map();
+  private sharedGritMaterials: Map<number, THREE.MeshBasicMaterial> = new Map();
+  private sharedDustMaterials: Map<number, THREE.MeshBasicMaterial> = new Map();
+  private sharedGritGeo: THREE.BufferGeometry = new THREE.BoxGeometry(0.026, 0.026, 0.026);
+  private sharedDustGeo: THREE.BufferGeometry = new THREE.IcosahedronGeometry(0.18, 1);
+  private sharedMacroBoxGeo: THREE.BufferGeometry = new THREE.BoxGeometry(0.16, 0.035, 0.12);
+  private sharedMacroDodecaGeo: THREE.BufferGeometry = new THREE.DodecahedronGeometry(0.10, 0);
+  private sharedMacroConeGeo: THREE.BufferGeometry = new THREE.ConeGeometry(0.07, 0.15, 5);
+
   constructor(
     scene: THREE.Scene,
     terrainMesh?: THREE.Mesh,
@@ -333,7 +343,10 @@ export class MiningSystem {
           strikeNormal,
           mtnHit.hole.rockColor,
           mtnHit.hole.rockType,
-          'pickaxe'
+          'pickaxe',
+          true,
+          mtnHit.hole,
+          { isBranch: mtnHit.isSideWall, isCeiling: mtnHit.isCeiling }
         );
         soundEngine.playRockChisel();
         this.spawnDigDebris(res.hitPoint, res.debrisType, 1.6);
@@ -439,8 +452,6 @@ export class MiningSystem {
 
     if (targetPoint) {
       // If striking a steep mountain cliff face, carve a visible 3D hole into the mountain rock!
-      let mountainHoleMsg = '';
-      let mtnGold = 0;
       if (hitNormal && hitNormal.y < 0.76 && this.mountainHoleManager) {
         const norm = hitNormal.clone().normalize();
         if (raycaster && norm.dot(raycaster.ray.direction) > 0) {
@@ -454,15 +465,28 @@ export class MiningSystem {
           'pickaxe',
           true
         );
-        mountainHoleMsg = mRes.message;
-        mtnGold = mRes.goldAwarded;
+        soundEngine.playRockChisel();
+        this.spawnDigDebris(mRes.hitPoint, mRes.debrisType, 1.8);
+        this.claim.blocksDug += mRes.rocksAwarded;
+        if (mRes.goldAwarded > 0) {
+          this.spawnOreDrop(
+            new THREE.Vector3(mRes.hitPoint.x, mRes.hitPoint.y + 0.4, mRes.hitPoint.z),
+            'quartz_gold',
+            mRes.goldAwarded
+          );
+          soundEngine.playOreChime();
+        }
+        return {
+          hit: true,
+          type: 'granite',
+          goldAwarded: mRes.goldAwarded,
+          hitPoint: mRes.hitPoint,
+          message: mRes.message,
+        };
       }
 
       // Progressively excavate into real subterranean geological rock strata!
       const digResult = digHoleInTerrain(targetPoint.x, targetPoint.z, 0.65, 2.0, 'pickaxe');
-      if (mtnGold > 0) {
-        digResult.goldAwarded = (digResult.goldAwarded || 0) + mtnGold;
-      }
 
       if (digResult.slumpOccurred) {
         soundEngine.playTrenchSlump();
@@ -488,7 +512,7 @@ export class MiningSystem {
         type: digResult.layer.rockType,
         goldAwarded: digResult.goldAwarded,
         hitPoint: targetPoint,
-        message: mountainHoleMsg || digResult.strataMessage,
+        message: digResult.strataMessage,
         slumpOccurred: digResult.slumpOccurred,
         slumpDamage: digResult.slumpDamage,
         slumpFatal: digResult.slumpFatal,
@@ -613,42 +637,40 @@ export class MiningSystem {
 
     const colorConfig = strataColors[type] || strataColors.dirt;
 
-    // 1. TIER 1: Macro Cleavage Chunks (3-6 pieces shaped by natural geological cleavage)
-    const macroCount = 3 + Math.floor(Math.random() * 3);
+    // 1. TIER 1: Macro Cleavage Chunks (2-3 pieces shaped by natural geological cleavage)
+    const maxMacro = Math.max(1, 10 - this.debrisList.filter(d => d.particleType === 'macro').length);
+    const macroCount = Math.min(maxMacro, 2 + Math.floor(Math.random() * 2));
+    const matKey = `${type}_${colorConfig.macro}`;
+    let macroMat = this.sharedMacroMaterials.get(matKey);
+    if (!macroMat) {
+      macroMat = new THREE.MeshStandardMaterial({
+        color: colorConfig.macro,
+        roughness: 0.85,
+        metalness: type === 'silver_ore' ? 0.8 : (type === 'quartz_gold' ? 0.6 : 0.05),
+      });
+      this.sharedMacroMaterials.set(matKey, macroMat);
+    }
+
     for (let i = 0; i < macroCount; i++) {
       let geo: THREE.BufferGeometry;
       const baseSize = 0.08 + Math.random() * 0.11;
 
       if (type === 'sandstone') {
-        // Flat tabular wafer flagstones along bedding planes
-        geo = new THREE.BoxGeometry(baseSize * 1.6, baseSize * 0.32, baseSize * 1.2);
-      } else if (type === 'granite') {
-        // Sharp angular multifaceted blocks
-        geo = new THREE.DodecahedronGeometry(baseSize, 0);
-      } else if (type === 'calcite') {
-        // Chalky crumbly irregular nodule
-        geo = new THREE.DodecahedronGeometry(baseSize * 1.1, 0);
+        geo = this.sharedMacroBoxGeo;
       } else if (type === 'quartz_gold' || type === 'quartz') {
-        // Sharp vitreous quartz shard
-        geo = new THREE.ConeGeometry(baseSize * 0.7, baseSize * 1.4, 5);
+        geo = this.sharedMacroConeGeo;
       } else {
-        // Wash gravel / dirt pebble
-        geo = new THREE.DodecahedronGeometry(baseSize, 0);
+        geo = this.sharedMacroDodecaGeo;
       }
 
-      const mat = new THREE.MeshStandardMaterial({
-        color: colorConfig.macro,
-        roughness: 0.85,
-        metalness: type === 'silver_ore' ? 0.8 : (type === 'quartz_gold' && i === 0 ? 0.6 : 0.05),
-      });
-
-      const mesh = new THREE.Mesh(geo, mat);
+      const mesh = new THREE.Mesh(geo, macroMat);
+      mesh.scale.setScalar(baseSize / 0.10);
       mesh.position.set(
         pos.x + (Math.random() - 0.5) * 0.25,
         pos.y + 0.1 + Math.random() * 0.18,
         pos.z + (Math.random() - 0.5) * 0.25
       );
-      mesh.castShadow = true;
+      mesh.castShadow = false; // Disable dynamic shadow map updates for fleeting debris
 
       const vel = new THREE.Vector3(
         (Math.random() - 0.5) * 5.2 * speedMult,
@@ -668,13 +690,17 @@ export class MiningSystem {
       });
     }
 
-    // 2. TIER 2: Friable Micro-Grit / Sand Grains (24-36 fine sand & stone particles)
-    const gritCount = 22 + Math.floor(Math.random() * 14);
-    const gritMat = new THREE.MeshBasicMaterial({ color: colorConfig.grit });
+    // 2. TIER 2: Friable Micro-Grit / Sand Grains (Fast, shared-geometry particles)
+    const maxGrit = Math.max(2, 14 - this.debrisList.filter(d => d.particleType === 'micro_grit').length);
+    const gritCount = Math.min(maxGrit, 8 + Math.floor(Math.random() * 5));
+    let gritMat = this.sharedGritMaterials.get(colorConfig.grit);
+    if (!gritMat) {
+      gritMat = new THREE.MeshBasicMaterial({ color: colorConfig.grit });
+      this.sharedGritMaterials.set(colorConfig.grit, gritMat);
+    }
+
     for (let i = 0; i < gritCount; i++) {
-      const gSize = 0.022 + Math.random() * 0.024;
-      const gGeo = new THREE.BoxGeometry(gSize, gSize, gSize);
-      const mesh = new THREE.Mesh(gGeo, gritMat);
+      const mesh = new THREE.Mesh(this.sharedGritGeo, gritMat);
       mesh.position.set(
         pos.x + (Math.random() - 0.5) * 0.22,
         pos.y + 0.05 + Math.random() * 0.15,
@@ -701,18 +727,22 @@ export class MiningSystem {
       });
     }
 
-    // 3. TIER 3: Atmospheric Strata Dust / Silt Billow Puffs (4-6 soft clouds that expand & rise)
-    const dustCount = 4 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < dustCount; i++) {
-      const dRadius = 0.14 + Math.random() * 0.12;
-      const dGeo = new THREE.IcosahedronGeometry(dRadius, 1);
-      const dMat = new THREE.MeshBasicMaterial({
+    // 3. TIER 3: Atmospheric Strata Dust / Silt Billow Puffs (Shared icosahedron puffs)
+    const maxDust = Math.max(1, 8 - this.debrisList.filter(d => d.particleType === 'dust_puff').length);
+    const dustCount = Math.min(maxDust, 2 + Math.floor(Math.random() * 2));
+    let dustMat = this.sharedDustMaterials.get(colorConfig.dust);
+    if (!dustMat) {
+      dustMat = new THREE.MeshBasicMaterial({
         color: colorConfig.dust,
         transparent: true,
         opacity: 0.38,
         depthWrite: false,
       });
-      const mesh = new THREE.Mesh(dGeo, dMat);
+      this.sharedDustMaterials.set(colorConfig.dust, dustMat);
+    }
+
+    for (let i = 0; i < dustCount; i++) {
+      const mesh = new THREE.Mesh(this.sharedDustGeo, dustMat);
       mesh.position.set(
         pos.x + (Math.random() - 0.5) * 0.2,
         pos.y + 0.1 + Math.random() * 0.15,
@@ -804,12 +834,7 @@ export class MiningSystem {
 
       if (p.life >= p.maxLife) {
         this.particleGroup.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        if (Array.isArray(p.mesh.material)) {
-          p.mesh.material.forEach((m) => m.dispose());
-        } else {
-          p.mesh.material.dispose();
-        }
+        // Shared materials and shared geometries are preserved
         this.debrisList.splice(i, 1);
       }
     }
@@ -856,14 +881,21 @@ export class MiningSystem {
 
     this.debrisList.forEach((d) => {
       this.particleGroup.remove(d.mesh);
-      d.mesh.geometry.dispose();
-      if (Array.isArray(d.mesh.material)) {
-        d.mesh.material.forEach((m) => m.dispose());
-      } else {
-        d.mesh.material.dispose();
+      if (d.particleType === 'macro') {
+        d.mesh.geometry.dispose();
       }
     });
     this.debrisList = [];
+
+    // Dispose shared debris assets
+    this.sharedMacroMaterials.forEach((m) => m.dispose());
+    this.sharedMacroMaterials.clear();
+    this.sharedGritMaterials.forEach((m) => m.dispose());
+    this.sharedGritMaterials.clear();
+    this.sharedDustMaterials.forEach((m) => m.dispose());
+    this.sharedDustMaterials.clear();
+    this.sharedGritGeo.dispose();
+    this.sharedDustGeo.dispose();
 
     this.oreDrops.forEach((o) => {
       this.oreGroup.remove(o.mesh);

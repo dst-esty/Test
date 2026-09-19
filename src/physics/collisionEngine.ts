@@ -72,7 +72,7 @@ export function testPositionCollision(
       candX,
       currentGroundY,
       candZ,
-      0.65
+      0.95
     )?.inside
   );
   const startInTunnel = Boolean(
@@ -80,10 +80,23 @@ export function testPositionCollision(
       startX,
       currentGroundY,
       startZ,
-      0.65
+      0.95
     )?.inside
   );
-  const isNavigatingTunnel = isInsideTunnel || startInTunnel;
+
+  // Proximity to ANY portal (entrance or exit of pass-through) within 8.0 meters
+  const isNearAnyPortal = Boolean(
+    foliageManager?.mountainHoleManager?.holes.some((h) => {
+      const distEntCand = Math.hypot(candX - h.position.x, candZ - h.position.z);
+      const distEntStart = Math.hypot(startX - h.position.x, startZ - h.position.z);
+      const exitPos = (h.isPassThrough && h.exitPosition) ? h.exitPosition : null;
+      const distExitCand = exitPos ? Math.hypot(candX - exitPos.x, candZ - exitPos.z) : 999;
+      const distExitStart = exitPos ? Math.hypot(startX - exitPos.x, startZ - exitPos.z) : 999;
+      return Math.min(distEntCand, distEntStart, distExitCand, distExitStart) < 8.0;
+    })
+  );
+
+  const isNavigatingTunnel = isInsideTunnel || startInTunnel || isNearAnyPortal;
 
   // 1. Boundary & Perimeter Mountains Check
   const distFromCenter = Math.hypot(candX, candZ);
@@ -170,7 +183,17 @@ export function testPositionCollision(
       startZ
     );
     if (fRes.hit) {
-      if (!(isNavigatingTunnel && fRes.collider?.type === 'mountain')) {
+      if (isNavigatingTunnel) {
+        // If navigating inside an excavated tunnel, neither the mountain outcrop nor any rock intersecting the excavated bore blocks passage
+        const isRockInTunnel = fRes.collider?.type === 'mountain' || fRes.collider?.type === 'boulder';
+        if (!isRockInTunnel) {
+          return {
+            blocked: true,
+            reason: 'cactus',
+            normal: fRes.normal,
+          };
+        }
+      } else {
         return {
           blocked: true,
           reason: fRes.collider?.type === 'mountain' ? 'mountain_outcrop' : 'boulder',
@@ -184,7 +207,7 @@ export function testPositionCollision(
   if (isNavigatingTunnel && foliageManager?.mountainHoleManager?.testTunnelBoundaryCollision) {
     const tunnelCol = foliageManager.mountainHoleManager.testTunnelBoundaryCollision(
       candX,
-      candGroundY,
+      currentGroundY,
       candZ,
       PLAYER_COLLISION_RADIUS
     );
@@ -268,7 +291,7 @@ export function resolveKinematicMovement(
       startX,
       currentGroundY,
       startZ,
-      0.65
+      0.95
     )?.inside
   );
   const targetInTunnel = Boolean(
@@ -276,10 +299,22 @@ export function resolveKinematicMovement(
       directX,
       currentGroundY,
       directZ,
-      0.65
+      0.95
     )?.inside
   );
-  const isNavigatingTunnel = startInTunnel || targetInTunnel;
+
+  const isNearAnyPortal = Boolean(
+    foliageManager?.mountainHoleManager?.holes.some((h) => {
+      const distEntStart = Math.hypot(startX - h.position.x, startZ - h.position.z);
+      const distEntTarget = Math.hypot(directX - h.position.x, directZ - h.position.z);
+      const exitPos = (h.isPassThrough && h.exitPosition) ? h.exitPosition : null;
+      const distExitStart = exitPos ? Math.hypot(startX - exitPos.x, startZ - exitPos.z) : 999;
+      const distExitTarget = exitPos ? Math.hypot(directX - exitPos.x, directZ - exitPos.z) : 999;
+      return Math.min(distEntStart, distEntTarget, distExitStart, distExitTarget) < 8.5;
+    })
+  );
+
+  const isNavigatingTunnel = startInTunnel || targetInTunnel || isNearAnyPortal;
 
   if (!isNavigatingTunnel && foliageManager && typeof foliageManager.checkObstacleCollision === 'function') {
     const stuckCheck = foliageManager.checkObstacleCollision(

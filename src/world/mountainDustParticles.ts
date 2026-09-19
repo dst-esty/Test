@@ -550,6 +550,13 @@ export class MountainDustParticleSystem {
   private readonly microDustGeo: THREE.BufferGeometry;
   private readonly shockwaveGeo: THREE.BufferGeometry;
 
+  // Cached, pooled materials to prevent WebGL program re-allocation & GC freezing
+  private readonly sharedSpriteMats: Map<number, THREE.SpriteMaterial> = new Map();
+  private readonly sharedMicroMats: Map<number, THREE.MeshBasicMaterial> = new Map();
+  private readonly sharedChipMats: Map<string, THREE.MeshLambertMaterial> = new Map();
+  private readonly sharedShockMats: Map<number, THREE.MeshBasicMaterial> = new Map();
+  private sharedSparkMat: THREE.SpriteMaterial | null = null;
+
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.rootGroup = new THREE.Group();
@@ -600,9 +607,13 @@ export class MountainDustParticleSystem {
     const hardnessFactor = Math.max(0.1, config.intensity);
 
     // 1. TIER 1: Volumetric Billow Dust Cloud (Size and Density governed by material intensity)
-    const billowCount = Math.max(
-      6,
-      Math.round(config.billowCount * (0.8 + friability * 0.5) * Math.min(1.5, intensityMultiplier))
+    const maxPuffs = Math.max(3, 24 - this.dustPuffs.length);
+    const billowCount = Math.min(
+      maxPuffs,
+      Math.max(
+        4,
+        Math.round(config.billowCount * (0.8 + friability * 0.5) * Math.min(1.5, intensityMultiplier))
+      )
     );
     const cloudBloomRadius = config.baseCloudRadius * (0.75 + friability * 0.65) * Math.pow(intensityMultiplier, 0.35);
     const cloudOpacity = Math.min(0.92, config.baseOpacity * (0.85 + (1 - friability) * 0.3));
@@ -613,14 +624,18 @@ export class MountainDustParticleSystem {
     for (let i = 0; i < billowCount; i++) {
       // Pick randomized harmonious color from the material's geological spectrum
       const colorHex = config.dustColors[i % config.dustColors.length];
-      const mat = new THREE.SpriteMaterial({
-        map: this.dustTexture,
-        color: colorHex,
-        transparent: true,
-        opacity: cloudOpacity,
-        depthWrite: false,
-        fog: true,
-      });
+      let mat = this.sharedSpriteMats.get(colorHex);
+      if (!mat) {
+        mat = new THREE.SpriteMaterial({
+          map: this.dustTexture,
+          color: colorHex,
+          transparent: true,
+          opacity: 0.85,
+          depthWrite: false,
+          fog: true,
+        });
+        this.sharedSpriteMats.set(colorHex, mat);
+      }
 
       const sprite = new THREE.Sprite(mat);
 
@@ -664,13 +679,19 @@ export class MountainDustParticleSystem {
     }
 
     // 2. TIER 2: Micro-Dust / Fine Silt Powder Spray (Fine particle density)
-    const microCount = Math.round(config.microDustCount * (0.7 + friability * 0.6));
-    const microMat = new THREE.MeshBasicMaterial({
-      color: config.dustColors[0],
-      transparent: true,
-      opacity: 0.65,
-      depthWrite: false,
-    });
+    const maxMicro = Math.max(3, 20 - this.microDust.length);
+    const microCount = Math.min(maxMicro, Math.round(config.microDustCount * (0.7 + friability * 0.6)));
+    const microColor = config.dustColors[0];
+    let microMat = this.sharedMicroMats.get(microColor);
+    if (!microMat) {
+      microMat = new THREE.MeshBasicMaterial({
+        color: microColor,
+        transparent: true,
+        opacity: 0.65,
+        depthWrite: false,
+      });
+      this.sharedMicroMats.set(microColor, microMat);
+    }
 
     for (let i = 0; i < microCount; i++) {
       const mesh = new THREE.Mesh(this.microDustGeo, microMat);
@@ -699,13 +720,17 @@ export class MountainDustParticleSystem {
     }
 
     // 3. TIER 3: Flying 3D Chipped Stone Shards (Direct visual feedback that stone is physically chipped!)
-    const chipCount = Math.max(3, Math.round(config.chipCount * (0.8 + hardnessFactor * 0.4)));
+    const maxChips = Math.max(2, 14 - this.stoneChips.length);
+    const chipCount = Math.min(maxChips, Math.max(2, Math.round(config.chipCount * (0.8 + hardnessFactor * 0.4))));
     const chipColor = config.dustColors[1] || config.dustColors[0];
-    const chipMat = new THREE.MeshStandardMaterial({
-      color: chipColor,
-      roughness: config.hardness >= 5 ? 0.65 : 0.88,
-      metalness: config.hardness === 6 ? 0.45 : 0.05,
-    });
+    const chipMatKey = `${material}_${chipColor}`;
+    let chipMat = this.sharedChipMats.get(chipMatKey);
+    if (!chipMat) {
+      chipMat = new THREE.MeshLambertMaterial({
+        color: chipColor,
+      });
+      this.sharedChipMats.set(chipMatKey, chipMat);
+    }
 
     const terrainY = getTerrainHeight(hitPoint.x, hitPoint.z);
     const groundY =
@@ -721,7 +746,7 @@ export class MountainDustParticleSystem {
       const scale = config.chipScale * (0.55 + Math.random() * 0.85);
       mesh.scale.set(scale, scale, scale);
       mesh.position.copy(hitPoint).add(normal.clone().multiplyScalar(0.1));
-      mesh.castShadow = true;
+      mesh.castShadow = false; // Disable dynamic shadow map updates for fleeting debris
 
       // High ejection velocity outward along normal + hemisphere cone
       const coneJitter = new THREE.Vector3(
@@ -751,16 +776,20 @@ export class MountainDustParticleSystem {
 
     // 4. TIER 4: Incandescent Friction Sparks (Steel pickaxe striking hard crystalline rock)
     // Hard rocks (granite, basalt, quartz) emit a shower of glowing hot sparks!
-    const sparkCount = Math.round(config.sparkCount * hardnessFactor * intensityMultiplier);
+    const maxSparks = Math.max(0, 18 - this.sparks.length);
+    const sparkCount = Math.min(maxSparks, Math.round(config.sparkCount * hardnessFactor * intensityMultiplier));
     if (sparkCount > 0) {
-      const sparkMat = new THREE.SpriteMaterial({
-        map: this.sparkTexture,
-        color: config.sparkColor,
-        transparent: true,
-        opacity: 1.0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      });
+      if (!this.sharedSparkMat) {
+        this.sharedSparkMat = new THREE.SpriteMaterial({
+          map: this.sparkTexture,
+          color: config.sparkColor,
+          transparent: true,
+          opacity: 1.0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+      }
+      const sparkMat = this.sharedSparkMat;
 
       for (let i = 0; i < sparkCount; i++) {
         const sprite = new THREE.Sprite(sparkMat);
@@ -791,14 +820,19 @@ export class MountainDustParticleSystem {
 
     // 5. TIER 5: Compressive Surface Shockwave Ring
     // Visual indicator of physical pickaxe concussion traveling across the rock face
-    const shockMat = new THREE.MeshBasicMaterial({
-      map: this.shockwaveTexture,
-      color: config.dustColors[0],
-      transparent: true,
-      opacity: 0.68,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
+    const shockColor = config.dustColors[0];
+    let shockMat = this.sharedShockMats.get(shockColor);
+    if (!shockMat) {
+      shockMat = new THREE.MeshBasicMaterial({
+        map: this.shockwaveTexture,
+        color: shockColor,
+        transparent: true,
+        opacity: 0.68,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      this.sharedShockMats.set(shockColor, shockMat);
+    }
     const shockMesh = new THREE.Mesh(this.shockwaveGeo, shockMat);
     shockMesh.position.copy(hitPoint).add(normal.clone().multiplyScalar(0.04));
 
@@ -838,8 +872,6 @@ export class MountainDustParticleSystem {
 
       if (progress >= 1.0) {
         this.rootGroup.remove(p.sprite);
-        p.sprite.geometry.dispose();
-        (p.sprite.material as THREE.Material).dispose();
         this.dustPuffs.splice(i, 1);
         continue;
       }
@@ -857,16 +889,6 @@ export class MountainDustParticleSystem {
 
       // Rotation of dust puff for rolling atmospheric look
       p.sprite.material.rotation += p.rotSpeed * clampedDelta;
-
-      // Opacity: Fast attack (0 to 0.1), sustained core (0.1 to 0.4), smooth exponential fadeout (0.4 to 1.0)
-      let alpha: number;
-      if (progress < 0.1) {
-        alpha = (progress / 0.1) * p.initialOpacity;
-      } else {
-        const fadeProgress = (progress - 0.1) / 0.9;
-        alpha = p.initialOpacity * (1.0 - fadeProgress * fadeProgress);
-      }
-      p.sprite.material.opacity = Math.max(0, alpha);
     }
 
     // 2. Update Micro-Dust Silt Particles
@@ -889,9 +911,6 @@ export class MountainDustParticleSystem {
 
       const scale = THREE.MathUtils.lerp(m.initialScale, m.initialScale * 0.3, progress);
       m.mesh.scale.set(scale, scale, scale);
-
-      const mat = m.mesh.material as THREE.MeshBasicMaterial;
-      mat.opacity = (1.0 - progress) * 0.65;
     }
 
     // 3. Update Chipped Stone Fragments (Flying 3D rock shards)
@@ -902,7 +921,6 @@ export class MountainDustParticleSystem {
 
       if (progress >= 1.0) {
         this.rootGroup.remove(chip.mesh);
-        (chip.mesh.material as THREE.Material).dispose();
         this.stoneChips.splice(i, 1);
         continue;
       }
@@ -939,8 +957,6 @@ export class MountainDustParticleSystem {
 
       if (progress >= 1.0) {
         this.rootGroup.remove(spark.sprite);
-        spark.sprite.geometry.dispose();
-        (spark.sprite.material as THREE.Material).dispose();
         this.sparks.splice(i, 1);
         continue;
       }
@@ -951,10 +967,9 @@ export class MountainDustParticleSystem {
       spark.velocity.z *= 0.91;
       spark.sprite.position.addScaledVector(spark.velocity, clampedDelta);
 
-      // Fast linear scale down and alpha fade
+      // Fast linear scale down
       const scale = THREE.MathUtils.lerp(spark.initialScale, spark.initialScale * 0.2, progress);
       spark.sprite.scale.set(scale, scale, 1.0);
-      spark.sprite.material.opacity = 1.0 - progress;
     }
 
     // 5. Update Surface Concussion Shockwaves
@@ -965,7 +980,6 @@ export class MountainDustParticleSystem {
 
       if (progress >= 1.0) {
         this.rootGroup.remove(sw.mesh);
-        (sw.mesh.material as THREE.Material).dispose();
         this.shockwaves.splice(i, 1);
         continue;
       }
@@ -973,9 +987,6 @@ export class MountainDustParticleSystem {
       // Fast expansion along the rock plane
       const scale = THREE.MathUtils.lerp(sw.initialScale, sw.maxScale, Math.sqrt(progress));
       sw.mesh.scale.set(scale, scale, 1.0);
-
-      const mat = sw.mesh.material as THREE.MeshBasicMaterial;
-      mat.opacity = sw.initialOpacity * (1.0 - progress);
     }
   }
 
@@ -985,21 +996,16 @@ export class MountainDustParticleSystem {
   public dispose() {
     for (const p of this.dustPuffs) {
       this.rootGroup.remove(p.sprite);
-      p.sprite.geometry.dispose();
-      (p.sprite.material as THREE.Material).dispose();
     }
     this.dustPuffs = [];
 
     for (const s of this.sparks) {
       this.rootGroup.remove(s.sprite);
-      s.sprite.geometry.dispose();
-      (s.sprite.material as THREE.Material).dispose();
     }
     this.sparks = [];
 
     for (const c of this.stoneChips) {
       this.rootGroup.remove(c.mesh);
-      (c.mesh.material as THREE.Material).dispose();
     }
     this.stoneChips = [];
 
@@ -1010,9 +1016,22 @@ export class MountainDustParticleSystem {
 
     for (const sw of this.shockwaves) {
       this.rootGroup.remove(sw.mesh);
-      (sw.mesh.material as THREE.Material).dispose();
     }
     this.shockwaves = [];
+
+    // Dispose cached materials
+    this.sharedSpriteMats.forEach((m) => m.dispose());
+    this.sharedSpriteMats.clear();
+    this.sharedMicroMats.forEach((m) => m.dispose());
+    this.sharedMicroMats.clear();
+    this.sharedChipMats.forEach((m) => m.dispose());
+    this.sharedChipMats.clear();
+    this.sharedShockMats.forEach((m) => m.dispose());
+    this.sharedShockMats.clear();
+    if (this.sharedSparkMat) {
+      this.sharedSparkMat.dispose();
+      this.sharedSparkMat = null;
+    }
 
     for (const geo of this.chipGeos) {
       geo.dispose();
