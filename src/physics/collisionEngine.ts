@@ -22,7 +22,7 @@ export interface LandmarkObstacle {
 // Fixed iconic landmarks with solid physical geometry that cannot be walked through
 export const LANDMARK_OBSTACLES: LandmarkObstacle[] = [
   // 1. Weaver's Needle monolithic volcanic core
-  { name: "Weaver's Needle", x: 80, z: 15, radius: 21.5, height: 85 },
+  { name: "Weaver's Needle", x: 80, z: 15, radius: 19.5, height: 140 },
   // 2. Eye of the Needle rock arch pillars
   { name: 'Eye of the Needle (West Pillar)', x: 126.5, z: -40, radius: 2.2, height: 14 },
   { name: 'Eye of the Needle (East Pillar)', x: 133.5, z: -40, radius: 2.2, height: 14 },
@@ -31,18 +31,21 @@ export const LANDMARK_OBSTACLES: LandmarkObstacle[] = [
   { name: 'Lost Dutchman Portal (Right Buttress)', x: 166, z: 110, radius: 5.5, height: 18 },
   // 4. Peralta Stone Cabin (Dugout)
   { name: 'Peralta Stone Dugout Cabin', x: 30, z: -90, radius: 3.8, height: 3.5 },
-  // 5. Historic Town of Tortilla Flat buildings
-  { name: 'Tortilla Flat Saloon', x: -29.0, z: -146, radius: 4.8, height: 8.0 },
-  { name: 'Tortilla Flat Mercantile & Assayer', x: -29.0, z: -161, radius: 4.6, height: 7.0 },
-  { name: 'Tortilla Flat Territorial Jail', x: -1.0, z: -158, radius: 4.2, height: 5.5 },
-  { name: 'Tortilla Flat Livery & Barn', x: -0.5, z: -142, radius: 4.5, height: 6.5 },
-  { name: 'Tortilla Flat Water Tower', x: -27.0, z: -135, radius: 3.6, height: 12.0 },
+  // 5. Historic Town of Tortilla Flat buildings along the Salt River (town center: x: 0, z: -250)
+  { name: 'Tortilla Flat Saloon', x: -14.8, z: -246, radius: 5.0, height: 9.0 },
+  { name: 'Tortilla Flat Mercantile & Assayer', x: -14.8, z: -261.5, radius: 4.8, height: 7.5 },
+  { name: 'Tortilla Flat Territorial Jail', x: 14.8, z: -258.5, radius: 4.5, height: 6.5 },
+  { name: 'Tortilla Flat Livery & Barn', x: 14.8, z: -242.5, radius: 5.0, height: 7.5 },
+  { name: 'Tortilla Flat Water Tower', x: -13.0, z: -233.5, radius: 3.5, height: 12.0 },
+  { name: 'Concord Stagecoach', x: 0, z: -252, radius: 2.0, height: 3.2 },
+  { name: 'Salt River Project Freight Depot', x: 13.0, z: -298, radius: 4.8, height: 7.0 },
+  { name: 'Salt River Timber Pier & Boat Landing', x: -2.0, z: -304, radius: 3.8, height: 4.0 },
 ];
 
 export const PLAYER_COLLISION_RADIUS = 0.42;
-export const MAX_STEP_HEIGHT = 0.58; // Meters: allows stepping onto small curbs and gravel mounds
-export const MAX_WALKABLE_SLOPE = 1.15; // Slope ratio: ~49 degrees, steep hills and cliffs cannot be scaled on foot
-export const PERIMETER_MOUNTAIN_RADIUS = 205.0; // Perimeter mountain wall enclosing the Superstition wilderness
+export const MAX_STEP_HEIGHT = 0.65; // Meters: allows stepping onto rocks, curbs, and trail steps
+export const MAX_WALKABLE_SLOPE = 1.25; // Slope ratio: ~51 degrees, allows scrambling up mountain ridges and trails while blocking sheer vertical cliffs
+export const WORLD_BOUNDARY_RADIUS = 1500.0; // Vast explorable Superstition wilderness and perimeter mountain frontier
 
 /**
  * Checks whether a candidate (x, z) location is passable or obstructed by:
@@ -99,12 +102,37 @@ export function testPositionCollision(
   const isNavigatingTunnel = isInsideTunnel || startInTunnel || isNearAnyPortal;
 
   // 1. Boundary & Perimeter Mountains Check
+  // Natural mountain passes, saddles, and canyon corridors cut through the perimeter mountains
+  const isApacheTrailOrSaltRiver =
+    (candZ < -150 && candZ >= -235 && Math.abs(candX) < 40) || // Apache Trail pass
+    (candZ < -225 && candZ > -325 && Math.abs(candX) < 290);  // Salt River Canyon & Tortilla Flat valley
+
+  const isFremontSaddle = Math.hypot(candX - 30, candZ - 220) < 36; // Fremont Saddle (South)
+  const isTerrapinPass = Math.hypot(candX - 210, candZ - (-10)) < 34; // Terrapin Pass (East)
+  const isPeraltaPass = Math.hypot(candX - (-160), candZ - 120) < 36; // Peralta Pass (Southwest)
+  const isBluffSpringsGap = Math.hypot(candX - (-190), candZ - (-20)) < 34; // Bluff Springs Gap (West)
+  const isNeedleCanyonChasm = candX > 110 && candX < 185 && candZ > -70 && candZ < 150; // Needle Canyon chasm
+  const isFishCreekCanyon = candX < -40 && candX > -180 && candZ < -170 && candZ > -300; // Fish Creek Canyon
+
+  const isNavigablePassOrCanyon =
+    isApacheTrailOrSaltRiver ||
+    isFremontSaddle ||
+    isTerrapinPass ||
+    isPeraltaPass ||
+    isBluffSpringsGap ||
+    isNeedleCanyonChasm ||
+    isFishCreekCanyon;
+
   const distFromCenter = Math.hypot(candX, candZ);
-  if (distFromCenter > PERIMETER_MOUNTAIN_RADIUS && !isNavigatingTunnel) {
+  const isHardWorldBoundary = distFromCenter > WORLD_BOUNDARY_RADIUS;
+
+  // The perimeter mountains and endless desert are fully explorable!
+  // Sheer vertical cliffs and rock steps are naturally handled below by slope physics.
+  if (isHardWorldBoundary && !isNavigatingTunnel) {
     const normDist = distFromCenter > 0.0001 ? distFromCenter : 1;
     return {
       blocked: true,
-      reason: 'perimeter_mountain',
+      reason: 'frontier_boundary',
       normal: { x: -candX / normDist, z: -candZ / normDist },
     };
   }

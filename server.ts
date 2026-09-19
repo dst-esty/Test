@@ -295,9 +295,9 @@ async function startServer() {
       id: playerId,
       name: randomName,
       outfitColor: randomPreset.hex,
-      x: 0 + (Math.random() - 0.5) * 8,
-      y: 1.6,
-      z: 15 + (Math.random() - 0.5) * 8,
+      x: 0 + (Math.random() - 0.5) * 6,
+      y: 7.2,
+      z: -246 + (Math.random() - 0.5) * 6,
       yaw: 0,
       pitch: 0,
       action: 'idle',
@@ -522,6 +522,66 @@ async function startServer() {
             const text = String(msg.text).trim().substring(0, 160);
             if (!text) return;
 
+            const lower = text.toLowerCase();
+            if (lower === '/rain' || lower === '/light_rain') {
+              universalWeather = 'light_rain';
+              currentWeatherElapsed = 0;
+              currentWeatherDuration = 90;
+              currentWeatherLabel = 'Canyon Mist & Light Rain';
+              broadcast({
+                type: 'weather:sync',
+                weather: universalWeather,
+                timeOfDay: universalTimeOfDay,
+                label: currentWeatherLabel,
+              });
+              addChatMessage({
+                senderId: 'system_weather',
+                senderName: 'Desert Sky Watch',
+                senderColor: '#38bdf8',
+                text: '🌧️ Refreshing desert rain gathers across the mountains! Streams and pools begin to fill.',
+                type: 'system',
+              });
+              break;
+            } else if (lower === '/storm' || lower === '/monsoon') {
+              universalWeather = 'storm';
+              currentWeatherElapsed = 0;
+              currentWeatherDuration = 90;
+              currentWeatherLabel = 'Monsoon Thunderstorm';
+              broadcast({
+                type: 'weather:sync',
+                weather: universalWeather,
+                timeOfDay: universalTimeOfDay,
+                label: currentWeatherLabel,
+              });
+              addChatMessage({
+                senderId: 'system_weather',
+                senderName: 'Desert Sky Watch',
+                senderColor: '#38bdf8',
+                text: '⚡ Summer monsoon arrives! Torrential rainfall surges down the canyon washes and fills the mountain tinajas!',
+                type: 'system',
+              });
+              break;
+            } else if (lower === '/clear' || lower === '/sun') {
+              universalWeather = 'clear';
+              currentWeatherElapsed = 0;
+              currentWeatherDuration = 300;
+              currentWeatherLabel = 'Brilliant Desert Sunlight';
+              broadcast({
+                type: 'weather:sync',
+                weather: universalWeather,
+                timeOfDay: universalTimeOfDay,
+                label: currentWeatherLabel,
+              });
+              addChatMessage({
+                senderId: 'system_weather',
+                senderName: 'Desert Sky Watch',
+                senderColor: '#38bdf8',
+                text: '☀️ The rain clouds clear away. Desert sun shines over the glistening washes and rock pools.',
+                type: 'system',
+              });
+              break;
+            }
+
             addChatMessage({
               senderId: playerId,
               senderName: p.name,
@@ -529,6 +589,22 @@ async function startServer() {
               text,
               type: msg.shout ? 'shout' : 'chat',
             });
+            break;
+          }
+
+          case 'weather:change': {
+            if (msg.weather) {
+              universalWeather = msg.weather;
+              currentWeatherElapsed = 0;
+              currentWeatherDuration = 120;
+              currentWeatherLabel = msg.weather === 'storm' ? 'Monsoon Thunderstorm' : (msg.weather === 'light_rain' ? 'Desert Shower' : 'Clear Desert Sky');
+              broadcast({
+                type: 'weather:sync',
+                weather: universalWeather,
+                timeOfDay: universalTimeOfDay,
+                label: currentWeatherLabel,
+              });
+            }
             break;
           }
 

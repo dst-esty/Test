@@ -14,6 +14,7 @@ import {
   syncRemoteDugHole,
 } from '../world/terrain';
 import { createDesertFoliage, GoldDeposit, DesertFoliageManager } from '../world/foliage';
+import { EndlessTerrainManager } from '../world/endlessTerrain';
 import { createLandmarkStructures } from '../world/landmarks';
 import { MiningSystem } from '../world/mining';
 import { WildlifeManager } from '../world/wildlife';
@@ -111,6 +112,7 @@ interface WorldCanvasProps {
   onRegisterStrikeVoxelHandler?: (fn: () => void) => void;
   onRegisterPlaceTimberHandler?: (fn: () => void) => void;
   onOpenTortillaFlat?: () => void;
+  onToggleDayNight?: () => void;
   onRegisterMobileActionHandler?: (fn: () => void) => void;
   onRegisterMobileJumpHandler?: (fn: () => void) => void;
   onRegisterMobileInteractHandler?: (fn: () => void) => void;
@@ -179,6 +181,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onRegisterStrikeVoxelHandler,
   onRegisterPlaceTimberHandler,
   onOpenTortillaFlat,
+  onToggleDayNight,
   onRegisterMobileActionHandler,
   onRegisterMobileJumpHandler,
   onRegisterMobileInteractHandler,
@@ -268,8 +271,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       onRegisterRestartHandler(() => {
         isGameOverRef.current = false;
         expeditionStartTime.current = Date.now();
-        const campY = getTerrainHeight(-115, -115) + 1.7;
-        playerPos.current.set(-115, campY, -115);
+        const townY = getTerrainHeight(0, -246) + 1.7;
+        playerPos.current.set(0, townY, -246);
         playerYaw.current = 0;
         playerPitch.current = 0;
         verticalVelocity.current = 0;
@@ -305,6 +308,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const campfireFuelTimer = useRef(0);
 
   // Subsystems
+  const endlessTerrainRef = useRef<EndlessTerrainManager | null>(null);
   const foliageManagerRef = useRef<DesertFoliageManager | null>(null);
   const mountainDustParticlesRef = useRef<MountainDustParticleSystem | null>(null);
   const movableRockManagerRef = useRef<MovableRockManager | null>(null);
@@ -321,6 +325,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const voxelTimeRef = useRef<{ value: number }>({ value: 0 });
   const noiseTextureRef = useRef<THREE.Texture | null>(null);
   const remoteProspectorsRef = useRef<Map<string, RemoteProspector>>(new Map());
+  const tortillaFlatLightingRef = useRef<((timeOfDay: number, delta: number) => void) | null>(null);
+  const timeOfDayRef = useRef(timeOfDay);
+  timeOfDayRef.current = timeOfDay;
 
   // Synchronized player state reference for event callbacks
   const playerStateRef = useRef<PlayerState>(playerState);
@@ -343,6 +350,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
   const stepTimer = useRef<number>(0);
   const detectorBeepTimer = useRef<number>(0);
+  const discoveredSummitsRef = useRef<Set<string>>(new Set());
 
   // 3D Game Engine Locomotion & Physics
   const playerPos = useRef<THREE.Vector3>(
@@ -544,10 +552,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     scene.add(playerLight);
     playerLightRef.current = playerLight;
 
-    // 5. Build Desert World
-    const terrain = createTerrainMesh();
-    scene.add(terrain);
-
     // High-Fidelity Mountain Dust, Micro-silt, and Cleavage Particle System
     const mountainDustParticles = new MountainDustParticleSystem(scene);
     mountainDustParticlesRef.current = mountainDustParticles;
@@ -558,7 +562,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     foliage.manager.setDustParticleSystem(mountainDustParticles);
     foliage.manager.setGraphicsQuality(initQuality);
 
+    // 5. Build Endless Procedural Desert World (Dynamic Seamless Terrain Streaming)
+    const endlessTerrain = new EndlessTerrainManager(scene, foliage.manager);
+    endlessTerrainRef.current = endlessTerrain;
+    endlessTerrain.update(playerPos.current, 0.016);
+
     const landmarkMeshes = createLandmarkStructures(scene, landmarks);
+    if (landmarkMeshes.tortillaFlat?.userData?.updateLighting) {
+      tortillaFlatLightingRef.current = landmarkMeshes.tortillaFlat.userData.updateLighting;
+      tortillaFlatLightingRef.current(timeOfDay, 0.016);
+    }
 
     // 6. Procedural Gold Vein GLSL Fragment Shader & Noise Texture Initialization
     // Generates a multi-scale seamless procedural noise texture for realistic hydrothermal gold veins across mine voxels
@@ -579,7 +592,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     voxelUniformsRef.current = voxelUniforms;
 
     // Instantiate Granular Mining with Custom GLSL Shaded Voxels
-    const miningSystem = new MiningSystem(scene, terrain, getTerrainHeight, customVoxelMaterials);
+    const miningSystem = new MiningSystem(scene, undefined, getTerrainHeight, customVoxelMaterials);
     miningSystem.setMountainHoleManager(foliage.manager.mountainHoleManager);
     miningSystem.setDustParticleSystem(mountainDustParticles);
     miningSystemRef.current = miningSystem;
@@ -2108,8 +2121,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         // 3. Bullet impact on terrain / rocks: Play realistic ricochet sound and spark/dust puff (No mining/dynamite commands)
         if (!bulletHitTarget) {
           const impactRay = new THREE.Raycaster(cam.position, lookDir, 0.5, 80.0);
-          if (terrain && miningSystemRef.current) {
-            const hits = impactRay.intersectObject(terrain, false);
+          if (endlessTerrainRef.current && miningSystemRef.current) {
+            const hits = endlessTerrainRef.current.raycast(impactRay);
             if (hits.length > 0) {
               soundEngine.playRicochet();
               miningSystemRef.current.spawnDigDebris(hits[0].point, 'sandstone', 0.6);
@@ -2358,6 +2371,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       if (e.code === 'KeyC') {
         if (onOpenCamp) onOpenCamp();
+      }
+      if (e.code === 'KeyN') {
+        if (onToggleDayNight) onToggleDayNight();
       }
       if (e.code === 'KeyT') {
         if (undergroundLayersRef.current && undergroundLayersRef.current.currentLevel > 0) {
@@ -3163,9 +3179,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         return;
       }
 
-      // 3b. Historic Town of Tortilla Flat (Saloon, Mercantile & Campfire)
-      const distToTownFire = Math.hypot(px - (-12.5), pz - (-136.5));
-      if (distToTownFire < 3.8) {
+      // 3b. Historic Town of Tortilla Flat (Saloon, Mercantile, Campfire, Artesian Trough & Salt River Pier)
+      const distToTownFire = Math.hypot(px - 3.5, pz - (-236));
+      if (distToTownFire < 4.5) {
         const handleRestFire = () => {
           soundEngine.playCampfire();
           setPlayerState((prev) => ({
@@ -3182,12 +3198,54 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         return;
       }
 
-      const distToSaloon = Math.hypot(px - (-15), pz - (-150));
-      if (distToSaloon < 24 && onOpenTortillaFlat) {
+      // Artesian Spring Trough in Tortilla Flat
+      const distToTrough = Math.hypot(px - (-9.6), pz - (-233.5));
+      if (distToTrough < 4.0) {
+        const handleTrough = () => {
+          soundEngine.playWaterSplash();
+          soundEngine.playWaterRefill();
+          setPlayerState((prev) => ({
+            ...prev,
+            health: Math.min(100, (prev.health || 0) + 20),
+            hydration: 100,
+          }));
+          if (onShowBanner) onShowBanner('Drank pure mountain water from the Tortilla Flat Artesian Trough!');
+        };
+        if (executeAction) {
+          handleTrough();
+        } else {
+          onPromptInteract('Artesian Spring Trough: Drink & Fill Canteen [E]', handleTrough);
+        }
+        return;
+      }
+
+      const distToSaloon = Math.hypot(px - 0, pz - (-250));
+      if (distToSaloon < 28 && onOpenTortillaFlat) {
         if (executeAction) {
           onOpenTortillaFlat();
         } else {
           onPromptInteract('Enter Tortilla Flat Saloon & Mercantile [E]', () => onOpenTortillaFlat());
+        }
+        return;
+      }
+
+      // 3b-1. Salt River Landing & Pier (North of town at z = -304)
+      const distToRiverPier = Math.hypot(px - (-2.0), pz - (-304));
+      if (distToRiverPier < 6.0) {
+        const handleRiverPier = () => {
+          soundEngine.playWaterSplash();
+          soundEngine.playWaterRefill();
+          setPlayerState((prev) => ({
+            ...prev,
+            health: Math.min(100, (prev.health || 0) + 15),
+            hydration: 100,
+          }));
+          if (onShowBanner) onShowBanner('Refreshed at the Salt River Pier & drank fresh mountain river water!');
+        };
+        if (executeAction) {
+          handleRiverPier();
+        } else {
+          onPromptInteract('Salt River Landing: Drink & Fill Canteen [E]', handleRiverPier);
         }
         return;
       }
@@ -3680,6 +3738,52 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             isSprinting,
           };
         });
+
+        // Perimeter Mountain Summits & High-Altitude Lookouts Discovery
+        const curX = playerPos.current.x;
+        const curZ = playerPos.current.z;
+        const curY = playerPos.current.y;
+
+        // 1. Peters Mesa Plateau (NW Tableland, elevation > 32m)
+        if (curX < -175 && curX > -240 && curZ > 130 && curZ < 205 && curY > 32) {
+          if (!discoveredSummitsRef.current.has('peters_mesa')) {
+            discoveredSummitsRef.current.add('peters_mesa');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('🌄 Summit Reached: Peters Mesa Tableland (Elev. 2,980 ft) • Vast basalt plateau with 360° views across the Superstition wilderness!');
+            }
+          }
+        }
+        // 2. Fremont Ridge Crest (South Arête, elevation > 34m)
+        else if (curX > 40 && curX < 90 && curZ > 215 && curZ < 250 && curY > 34) {
+          if (!discoveredSummitsRef.current.has('fremont_ridge')) {
+            discoveredSummitsRef.current.add('fremont_ridge');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner("⛰️ Summit Reached: Fremont Ridge Crest (Elev. 3,120 ft) • High panoramic overlook above Weaver's Needle & the southern desert!");
+            }
+          }
+        }
+        // 3. Eastern Fault-Block Scarp Rim (East, elevation > 34m)
+        else if (curX > 215 && curX < 260 && curZ > -10 && curZ < 45 && curY > 34) {
+          if (!discoveredSummitsRef.current.has('east_scarp')) {
+            discoveredSummitsRef.current.add('east_scarp');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('🧗 Escarpment Rim Reached: Eastern Fault-Block Scarp (Elev. 2,860 ft) • Sheer 45m red-rock precipice looking into the outer badlands!');
+            }
+          }
+        }
+        // 4. Dacite Butte Peak (West, elevation > 32m)
+        else if (curX < -205 && curX > -245 && curZ > -35 && curZ < 0 && curY > 32) {
+          if (!discoveredSummitsRef.current.has('dacite_butte')) {
+            discoveredSummitsRef.current.add('dacite_butte');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('🌋 Summit Reached: Dacite Butte Peak (Elev. 2,750 ft) • Weathered volcanic crest overlooking the western canyons!');
+            }
+          }
+        }
       }
 
       // Vertical Gravity, Ladder Climbing, and Ground Clamping
@@ -4612,6 +4716,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }));
       }
 
+      // Update endless procedural terrain chunk streaming around player
+      if (endlessTerrainRef.current) {
+        endlessTerrainRef.current.update(playerPos.current, delta);
+      }
+
+      // Update Tortilla Flat historic town night lighting (torches flicker, string lights, lanterns, window radiance)
+      if (tortillaFlatLightingRef.current) {
+        tortillaFlatLightingRef.current(timeOfDayRef.current, delta);
+      }
+
       // Render scene
       renderer.render(scene, camera);
 
@@ -4702,11 +4816,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (foliageManagerRef.current && typeof foliageManagerRef.current.dispose === 'function') {
         foliageManagerRef.current.dispose();
       }
+      if (endlessTerrainRef.current) {
+        endlessTerrainRef.current.dispose();
+      }
       if (mountainDustParticlesRef.current && typeof mountainDustParticlesRef.current.dispose === 'function') {
         mountainDustParticlesRef.current.dispose();
       }
       if (movableRockManagerRef.current && typeof movableRockManagerRef.current.dispose === 'function') {
         movableRockManagerRef.current.dispose();
+      }
+      if (hydrologyEngineRef.current && typeof hydrologyEngineRef.current.dispose === 'function') {
+        hydrologyEngineRef.current.dispose();
       }
       renderer.dispose();
     };
@@ -4714,6 +4834,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
   // Update Sun & Atmosphere when timeOfDay or weather changes
   useEffect(() => {
+    timeOfDayRef.current = timeOfDay;
     if (atmosphereManagerRef.current) {
       atmosphereManagerRef.current.updateAtmosphere(
         timeOfDay,
@@ -4721,6 +4842,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         sunLightRef.current || undefined,
         hemiLightRef.current || undefined
       );
+    }
+    if (tortillaFlatLightingRef.current) {
+      tortillaFlatLightingRef.current(timeOfDay, 0.016);
     }
   }, [timeOfDay, weather]);
 

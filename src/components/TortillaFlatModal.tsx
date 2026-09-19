@@ -99,14 +99,14 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-bold font-serif text-amber-100 tracking-wide">
-                  Historic Tortilla Flat Settlement
+                  Historic Tortilla Flat & Salt River Canyon
                 </h2>
                 <span className="px-2 py-0.5 text-[10px] font-mono uppercase bg-amber-900/80 text-amber-200 border border-amber-600/50 rounded-full">
-                  Pop. 6 • Apache Trail
+                  Pop. 6 • Salt River • Apache Trail
                 </span>
               </div>
               <p className="text-xs text-amber-300/70 font-serif">
-                1880s Saloon, Mercantile Trading Post, Assayer & Overland Stagecoach Station
+                1880s Saloon, Mercantile Trading Post, Roosevelt Dam Salt River Freight Camp & Stagecoach Stop
               </p>
             </div>
           </div>
@@ -442,10 +442,10 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
               <div className="p-4 bg-stone-950/80 border border-amber-900/40 rounded-xl space-y-2">
                 <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
                   <MapPin className="w-4 h-4 text-amber-400" />
-                  Stage Driver's Warning: The Summer Apache Trail
+                  River Pilot's Account: The Salt River & Roosevelt Dam
                 </div>
                 <p className="text-xs text-stone-300 leading-relaxed italic">
-                  "Watch your canteen out in those red canyons. The heat rises off the basalt like an oven. If you ever run dry, head for the Hieroglyphic spring pool or return here to Tortilla Flat's artesian well water trough. Water is worth more than gold when the desert sun is high."
+                  "Before the big dam was finished upriver, the Salt River ran wild and cold right past this terrace. Our freight boats and mule wagons hauled tons of timber and machinery straight through the canyon gorge. Tortilla Flat was the last stop for cold beer and fresh horseshoeing before the deep narrows."
                 </p>
               </div>
             </div>

@@ -223,10 +223,8 @@ export class UndergroundLayersManager {
   public dustParticleSystem?: MountainDustParticleSystem;
   public holeManager?: MountainHoleManager;
   public wallUniformsList: {
-    uHolePositions: { value: THREE.Vector3[] };
-    uHoleDirs: { value: THREE.Vector3[] };
-    uHoleRadii: { value: Float32Array };
-    uHoleDepths: { value: Float32Array };
+    uHolePosRadius: { value: THREE.Vector4[] };
+    uHoleDirDepth: { value: THREE.Vector4[] };
     uHoleCount: { value: number };
   }[] = [];
 
@@ -273,15 +271,23 @@ export class UndergroundLayersManager {
       const sortedHoles = [...undergroundHoles].sort(
         (a, b) => Math.abs(a.position.y - layerFloorY) - Math.abs(b.position.y - layerFloorY)
       );
-      const count = Math.min(16, sortedHoles.length);
+      const count = Math.min(4, sortedHoles.length);
       uniforms.uHoleCount.value = count;
       for (let i = 0; i < count; i++) {
         const h = sortedHoles[i];
-        uniforms.uHolePositions.value[i].copy(h.position);
+        uniforms.uHolePosRadius.value[i].set(
+          h.position.x,
+          h.position.y,
+          h.position.z,
+          h.radius * 1.05
+        );
         const boreDir = new THREE.Vector3(0, 0, -1).applyQuaternion(h.group.quaternion).normalize();
-        uniforms.uHoleDirs.value[i].copy(boreDir);
-        uniforms.uHoleRadii.value[i] = h.radius * 1.05;
-        uniforms.uHoleDepths.value[i] = h.depth;
+        uniforms.uHoleDirDepth.value[i].set(
+          boreDir.x,
+          boreDir.y,
+          boreDir.z,
+          h.depth
+        );
       }
     }
   }
@@ -490,28 +496,24 @@ export class UndergroundLayersManager {
       height = 6.6;
     }
 
-    // Allocate subterranean hole cut-out uniforms for this cavern stratum
+    // Allocate subterranean hole cut-out uniforms for this cavern stratum (packed vec4[4] to prevent MAX_FRAGMENT_UNIFORM_VECTORS limits)
     const wallUniforms = {
-      uHolePositions: { value: Array.from({ length: 16 }, () => new THREE.Vector3()) },
-      uHoleDirs: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, 0, -1)) },
-      uHoleRadii: { value: new Float32Array(16) },
-      uHoleDepths: { value: new Float32Array(16) },
+      uHolePosRadius: { value: Array.from({ length: 4 }, () => new THREE.Vector4()) },
+      uHoleDirDepth: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, -1, 0)) },
       uHoleCount: { value: 0 },
     };
     this.wallUniformsList.push(wallUniforms);
 
     // Shader hook: carves seamless pass-through cutouts directly through the cavern perimeter wall & roof
     const injectCavernCutout = (mat: THREE.MeshStandardMaterial, key: string) => {
-      mat.customProgramCacheKey = () => `cavern_hole_cutout_${key}_v3`;
+      mat.customProgramCacheKey = () => `cavern_hole_cutout_${key}_v4`;
       const prevCompile = mat.onBeforeCompile;
       mat.onBeforeCompile = (shader, renderer) => {
         if (prevCompile) {
           prevCompile(shader, renderer);
         }
-        shader.uniforms.uHolePositions = wallUniforms.uHolePositions;
-        shader.uniforms.uHoleDirs = wallUniforms.uHoleDirs;
-        shader.uniforms.uHoleRadii = wallUniforms.uHoleRadii;
-        shader.uniforms.uHoleDepths = wallUniforms.uHoleDepths;
+        shader.uniforms.uHolePosRadius = wallUniforms.uHolePosRadius;
+        shader.uniforms.uHoleDirDepth = wallUniforms.uHoleDirDepth;
         shader.uniforms.uHoleCount = wallUniforms.uHoleCount;
 
         shader.vertexShader = shader.vertexShader.replace(
@@ -529,10 +531,8 @@ export class UndergroundLayersManager {
         shader.fragmentShader = shader.fragmentShader.replace(
           '#include <common>',
           `#include <common>
-          uniform vec3 uHolePositions[16];
-          uniform vec3 uHoleDirs[16];
-          uniform float uHoleRadii[16];
-          uniform float uHoleDepths[16];
+          uniform vec4 uHolePosRadius[4];
+          uniform vec4 uHoleDirDepth[4];
           uniform int uHoleCount;
           varying highp vec3 vCavernWorldPos;`
         );
@@ -540,15 +540,19 @@ export class UndergroundLayersManager {
         shader.fragmentShader = shader.fragmentShader.replace(
           '#include <clipping_planes_fragment>',
           `#include <clipping_planes_fragment>
-          for (int i = 0; i < 16; i++) {
+          for (int i = 0; i < 4; i++) {
             if (i >= uHoleCount) break;
-            vec3 toFrag = vCavernWorldPos - uHolePositions[i];
-            float distAlong = dot(toFrag, uHoleDirs[i]);
-            if (distAlong > -0.85 && distAlong < uHoleDepths[i] + 0.35) {
-              vec3 radial = toFrag - distAlong * uHoleDirs[i];
+            vec3 holePos = uHolePosRadius[i].xyz;
+            float holeRad = uHolePosRadius[i].w;
+            vec3 holeDir = uHoleDirDepth[i].xyz;
+            float holeDepth = uHoleDirDepth[i].w;
+
+            vec3 toFrag = vCavernWorldPos - holePos;
+            float distAlong = dot(toFrag, holeDir);
+            if (distAlong > -0.85 && distAlong < holeDepth + 0.35) {
+              vec3 radial = toFrag - distAlong * holeDir;
               float r2 = dot(radial, radial);
-              float rad = uHoleRadii[i];
-              if (r2 < rad * rad) {
+              if (r2 < holeRad * holeRad) {
                 discard;
               }
             }

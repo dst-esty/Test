@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { WeatherType } from '../types';
 import { CloudRain, Wind, Sun, CloudLightning, Sunset, Cloud } from 'lucide-react';
+import { multiplayer } from '../multiplayer/multiplayerService';
 
 interface WeatherCanvasOverlayProps {
   weather: WeatherType;
@@ -412,6 +413,14 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
 
   const badge = getWeatherBadge();
 
+  const handleCycleWeather = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const sequence: WeatherType[] = ['clear', 'light_rain', 'storm', 'clouds', 'sunset', 'sandstorm'];
+    const curIdx = sequence.indexOf(weather);
+    const nextWeather = sequence[(curIdx + 1) % sequence.length];
+    multiplayer.changeWeather(nextWeather);
+  };
+
   return (
     <>
       <canvas
@@ -420,11 +429,13 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
         className="absolute inset-0 pointer-events-none z-10 w-full h-full"
       />
 
-      {/* Synchronized Meteorological Status Pill */}
+      {/* Synchronized Meteorological Status Pill (Interactive to cycle weather / summon rain) */}
       <div
         id="weather-status-pill"
-        className={`absolute top-4 right-4 z-20 transition-all duration-700 pointer-events-none ${
-          badgeVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+        onClick={handleCycleWeather}
+        title="Click to cycle desert weather & summon rain!"
+        className={`absolute top-4 right-4 z-20 transition-all duration-700 pointer-events-auto cursor-pointer select-none hover:scale-105 active:scale-95 ${
+          badgeVisible ? 'opacity-100 translate-y-0' : 'opacity-85 translate-y-0 hover:opacity-100'
         }`}
       >
         <div
@@ -434,6 +445,7 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
           <div>
             <span className="font-semibold">{badge.title}</span>
             <span className="opacity-65 ml-2 hidden sm:inline text-[11px]">{badge.status}</span>
+            <span className="opacity-50 ml-1.5 hidden md:inline text-[10px] text-amber-200/80">⟳ Click to cycle</span>
           </div>
         </div>
       </div>

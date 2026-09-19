@@ -490,6 +490,20 @@ class MultiplayerService {
       detail,
     });
   }
+
+  public changeWeather(weather: WeatherType) {
+    this.state.universalWeather = weather;
+    this.sendRaw({
+      type: 'weather:change',
+      weather,
+    });
+    if (this.handlers.onWeatherSync) {
+      this.handlers.onWeatherSync({
+        weather,
+        timeOfDay: this.state.universalTimeOfDay,
+      });
+    }
+  }
 }
 
 export const multiplayer = new MultiplayerService();

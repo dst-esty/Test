@@ -22,12 +22,12 @@ export const MapModal: React.FC<MapModalProps> = ({
   if (!isOpen) return null;
 
   // Coordinate mapping:
-  // World bounds: x: [-180, 180], z: [-180, 180]
-  // Map dimensions: 500 x 500 px
+  // World bounds: x: [-180, 180], z: [-270, 180] (including the northern Salt River basin)
+  // Map dimensions: 460 x 460 px
   const toMapCoords = (x: number, z: number) => {
     const mapSize = 460;
-    const px = ((x + 180) / 360) * mapSize;
-    const py = ((z + 180) / 360) * mapSize;
+    const px = Math.max(18, Math.min(442, ((x + 180) / 360) * mapSize));
+    const py = Math.max(28, Math.min(436, ((z - (-270)) / (180 - (-270))) * (436 - 28) + 28));
     return { px, py };
   };
 
@@ -44,7 +44,7 @@ export const MapModal: React.FC<MapModalProps> = ({
               Peralta Stone Map & Expedition Chart
             </h2>
             <p className="text-xs font-serif italic text-stone-600">
-              Superstition Wilderness, Pinal County, Arizona Territory
+              Superstition Wilderness & Salt River Canyon, Arizona Territory
             </p>
           </div>
           <button
@@ -57,20 +57,67 @@ export const MapModal: React.FC<MapModalProps> = ({
 
         {/* Map Canvas Area */}
         <div className="relative flex-1 min-h-[380px] bg-[#e8dbbe] border-2 border-[#a67c52] rounded-lg overflow-hidden shadow-inner flex items-center justify-center p-2">
-          {/* Faux Topographic Contours / Mountain ridges */}
-          <svg className="absolute inset-0 w-full h-full opacity-30 pointer-events-none" viewBox="0 0 460 460">
+          {/* Faux Topographic Contours / Mountain ridges / Salt River */}
+          <svg className="absolute inset-0 w-full h-full opacity-45 pointer-events-none" viewBox="0 0 460 460">
             <defs>
               <radialGradient id="contourGrad" cx="60%" cy="50%" r="50%">
                 <stop offset="0%" stopColor="#8c6239" stopOpacity="0.8" />
                 <stop offset="100%" stopColor="#8c6239" stopOpacity="0.0" />
               </radialGradient>
             </defs>
-            <circle cx="230" cy="230" r="190" fill="none" stroke="#7a5530" strokeWidth="1" strokeDasharray="3 3" />
-            <circle cx="230" cy="230" r="120" fill="none" stroke="#7a5530" strokeWidth="1.2" />
-            <circle cx="230" cy="230" r="60" fill="none" stroke="#7a5530" strokeWidth="1.5" />
-            <path d="M 50 150 Q 180 180 320 120 T 430 220" fill="none" stroke="#684728" strokeWidth="1.5" />
-            <path d="M 80 350 Q 200 280 360 380" fill="none" stroke="#684728" strokeWidth="1.5" />
-            <ellipse cx="320" cy="250" rx="40" ry="25" fill="url(#contourGrad)" />
+
+            {/* The Salt River (Northern Canyon River) */}
+            <path d="M 0 36 Q 110 52 230 38 T 460 34" fill="none" stroke="#2563eb" strokeWidth="6" strokeOpacity="0.7" />
+            <path d="M 0 36 Q 110 52 230 38 T 460 34" fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeOpacity="0.9" />
+            <text x="230" y="24" fill="#1e3a8a" fontSize="10" fontFamily="serif" fontWeight="bold" textAnchor="middle" letterSpacing="2">
+              ~ THE SALT RIVER CANYON ~
+            </text>
+
+            {/* Historic Apache Trail Stagecoach Route cutting north to Tortilla Flat */}
+            <path d="M 230 400 L 230 260 Q 230 160 230 90 L 230 44" fill="none" stroke="#78350f" strokeWidth="2" strokeDasharray="4 3" />
+            <text x="236" y="115" fill="#78350f" fontSize="8" fontFamily="serif" fontStyle="italic">
+              Apache Trail Pass
+            </text>
+
+            {/* Mountain Rings & Ridges */}
+            <circle cx="230" cy="280" r="150" fill="none" stroke="#7a5530" strokeWidth="1" strokeDasharray="3 3" />
+            <circle cx="230" cy="280" r="95" fill="none" stroke="#7a5530" strokeWidth="1.2" />
+            <circle cx="230" cy="280" r="50" fill="none" stroke="#7a5530" strokeWidth="1.5" />
+            <path d="M 50 200 Q 180 230 320 180 T 430 260" fill="none" stroke="#684728" strokeWidth="1.5" />
+            <path d="M 80 390 Q 200 320 360 410" fill="none" stroke="#684728" strokeWidth="1.5" />
+            <ellipse cx="320" cy="290" rx="40" ry="25" fill="url(#contourGrad)" />
+
+            {/* Canyons & Mountain Topography Labels */}
+            {/* Peters Mesa (Northwest Tableland) */}
+            <rect x="70" y="90" width="70" height="40" rx="6" fill="#8c6239" fillOpacity="0.12" stroke="#7a5530" strokeWidth="1" strokeDasharray="2 2" />
+            <text x="105" y="112" fill="#5c3a21" fontSize="7.5" fontFamily="serif" fontWeight="bold" textAnchor="middle">
+              PETERS MESA
+            </text>
+            <text x="105" y="122" fill="#78350f" fontSize="6" fontFamily="serif" fontStyle="italic" textAnchor="middle">
+              (Basalt Caprock Tableland)
+            </text>
+
+            {/* Needle Canyon Gorge (East) */}
+            <path d="M 330 220 Q 345 285 365 340" fill="none" stroke="#b45309" strokeWidth="1.5" strokeDasharray="3 2" />
+            <text x="360" y="275" fill="#78350f" fontSize="7" fontFamily="serif" fontStyle="italic" transform="rotate(45 360 275)">
+              Needle Canyon Gorge
+            </text>
+
+            {/* Peralta Canyon (Southwest) */}
+            <path d="M 120 220 Q 140 280 170 360" fill="none" stroke="#b45309" strokeWidth="1.5" strokeDasharray="3 2" />
+            <text x="135" y="295" fill="#78350f" fontSize="7" fontFamily="serif" fontStyle="italic" transform="rotate(-65 135 295)">
+              Peralta Canyon Wash
+            </text>
+
+            {/* Southern Sawtooth Arêtes */}
+            <text x="230" y="420" fill="#5c3a21" fontSize="7" fontFamily="serif" fontWeight="bold" textAnchor="middle" letterSpacing="1">
+              ~ VOLCANIC KNIFE-EDGE ARÊTES ~
+            </text>
+
+            {/* Fremont Saddle (South Pass) */}
+            <text x="250" y="385" fill="#78350f" fontSize="6.5" fontFamily="serif" fontStyle="italic">
+              Fremont Saddle
+            </text>
           </svg>
 
           {/* Compass Rose in Corner */}
@@ -162,8 +209,16 @@ export const MapModal: React.FC<MapModalProps> = ({
             </span>
           </div>
 
-          <div className="text-stone-600 font-mono text-[11px]">
-            Coords: {Math.round(playerPosition.x)}E, {Math.round(playerPosition.z)}S
+          <div className="text-stone-600 font-mono text-[11px] flex items-center gap-2">
+            <span>
+              Coords: {Math.round(playerPosition.x)}E, {playerPosition.z < 0 ? `${Math.abs(Math.round(playerPosition.z))}N` : `${Math.round(playerPosition.z)}S`}
+              {playerPosition.z < -210 && playerPosition.z >= -285 ? ' (Salt River Canyon)' : ''}
+            </span>
+            {Math.hypot(playerPosition.x, playerPosition.z) > 340 && (
+              <span className="px-1.5 py-0.2 rounded bg-amber-800/20 text-amber-900 border border-amber-800/40 text-[10px] font-sans font-semibold uppercase tracking-wider">
+                Endless Frontier
+              </span>
+            )}
           </div>
         </div>
       </div>

@@ -18,6 +18,7 @@ import { ClaimStakedModal } from './components/ClaimStakedModal';
 import { RockDepotModal } from './components/RockDepotModal';
 import { TortillaFlatModal } from './components/TortillaFlatModal';
 import { GameOverModal } from './components/GameOverModal';
+import { CompassHUD } from './components/CompassHUD';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
 import { soundEngine } from './audio/soundEffects';
 import { westernMusic } from './audio/westernMusic';
@@ -33,25 +34,28 @@ import { safeLocalStorage } from './utils/storage';
 
 export default function App() {
   // Player State
-  const [playerState, setPlayerState] = useState<PlayerState>({
-    position: { x: -115, y: 8.2, z: -115 },
-    rotation: { yaw: 0.8, pitch: 0 },
-    health: 100,
-    maxHealth: 100,
-    hydration: 100,
-    isSprinting: false,
-    isInsideMine: false,
-    equippedTool: 'hands',
-    ammo: 24,
-    dynamite: 6,
-    woodPlanks: 6, // Starting seasoned timber stakes & firewood
-    goldFound: 2.0, // 2 oz starting gold from prospecting
-    blocksDug: 0,
-    bullionBars: 0,
-    activeClaim: null,
-    builtStructures: [],
-    discoveredLandmarks: ['trailhead'],
-    collectedClues: ['clue_trailhead'],
+  const [playerState, setPlayerState] = useState<PlayerState>(() => {
+    const startY = getTerrainHeight(0, -246) + 1.7;
+    return {
+      position: { x: 0, y: startY, z: -246 },
+      rotation: { yaw: 0, pitch: 0 },
+      health: 100,
+      maxHealth: 100,
+      hydration: 100,
+      isSprinting: false,
+      isInsideMine: false,
+      equippedTool: 'hands',
+      ammo: 24,
+      dynamite: 6,
+      woodPlanks: 6, // Starting seasoned timber stakes & firewood
+      goldFound: 2.0, // 2 oz starting gold from prospecting
+      blocksDug: 0,
+      bullionBars: 0,
+      activeClaim: null,
+      builtStructures: [],
+      discoveredLandmarks: ['tortilla_flat'],
+      collectedClues: ['clue_tortilla_flat'],
+    };
   });
 
   // Multiplayer State
@@ -298,6 +302,20 @@ export default function App() {
       };
     });
     showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Campfire consumed ~8h of wood fuel.");
+  }, [showBanner]);
+
+  const handleToggleDayNight = useCallback(() => {
+    setTimeOfDay((prev) => {
+      const isDay = prev >= 5.5 && prev < 19.5;
+      const nextTime = isDay ? 21.0 : 9.5;
+      soundEngine.playCampfire();
+      showBanner(
+        isDay
+          ? "🌌 Night has fallen over Tortilla Flat! Main street is illuminated with festive string lights, flickering torches, and warm boardwalk lanterns."
+          : "☀️ Morning sun crests over the Superstition Mountains! Tortilla Flat settles into daytime bustle."
+      );
+      return nextTime;
+    });
   }, [showBanner]);
 
   const handleStokeCamp = useCallback(() => {
@@ -639,11 +657,12 @@ export default function App() {
     soundEngine.playFootstep();
   };
 
-  // Restart Expedition after Fatal Death (lose all gold & claims, start over at Peralta Camp)
+  // Restart Expedition after Fatal Death (lose all gold & claims, start over at Tortilla Flat)
   const handleRestartExpedition = useCallback(() => {
+    const startY = getTerrainHeight(0, -246) + 1.7;
     setPlayerState({
-      position: { x: -115, y: 5, z: -115 },
-      rotation: { yaw: 0.8, pitch: 0 },
+      position: { x: 0, y: startY, z: -246 },
+      rotation: { yaw: 0, pitch: 0 },
       health: 100,
       maxHealth: 100,
       hydration: 100,
@@ -652,13 +671,14 @@ export default function App() {
       equippedTool: 'hands',
       ammo: 24,
       dynamite: 6,
+      woodPlanks: 6,
       goldFound: 0, // Lost all gold on death
       blocksDug: 0,
       bullionBars: 0,
       activeClaim: null, // Lost claim on death
       builtStructures: [],
-      discoveredLandmarks: ['trailhead'],
-      collectedClues: ['clue_trailhead'],
+      discoveredLandmarks: ['tortilla_flat'],
+      collectedClues: ['clue_tortilla_flat'],
     });
 
     setGameOverDetails(null);
@@ -667,7 +687,7 @@ export default function App() {
       restartHandlerRef.current();
     }
 
-    showBanner('🌅 A New Expedition Begins at Peralta Base Camp! Watch your step & keep your canteen full.');
+    showBanner('🌅 A New Expedition Begins at Historic Tortilla Flat! Provision at the Saloon & keep your canteen full.');
   }, [showBanner]);
 
   // Keyboard shortcuts (M, J, B, V, 1-9, Esc)
@@ -882,9 +902,25 @@ export default function App() {
           mobileMoveHandlerRef.current = fn;
         }}
         onOpenTortillaFlat={() => setIsTortillaFlatOpen(true)}
+        onToggleDayNight={handleToggleDayNight}
         graphicsQuality={graphicsQuality}
         onFpsUpdate={setCurrentFps}
       />
+
+      {/* Compass & Diurnal Cycle HUD with Day/Night Illumination Toggle & Endless Coordinates */}
+      {isHudVisible && (
+        <CompassHUD
+          yaw={playerState.rotation.yaw}
+          timeOfDay={timeOfDay}
+          nearestLandmarkName={nearestLandmark?.name}
+          nearestLandmarkDist={nearestLandmark?.dist}
+          hydration={playerState.hydration}
+          goldFound={playerState.goldFound}
+          isInsideMine={false}
+          onToggleDayNight={handleToggleDayNight}
+          playerCoords={{ x: playerState.position.x, z: playerState.position.z }}
+        />
+      )}
 
       {/* Real-time Frontier Multiplayer HUD & Roster Modal */}
       <MultiplayerHUD
@@ -1032,7 +1068,7 @@ export default function App() {
             </div>
 
             <p className="text-stone-700 text-sm leading-relaxed mb-4">
-              Deep in the rugged volcanic crags of Arizona&apos;s Superstition Mountains lies America&apos;s most notorious treasure: the fabled lost gold mine of German immigrant Jacob Waltz.
+              Deep in the rugged volcanic crags of Arizona&apos;s Superstition Mountains lies America&apos;s most notorious treasure: the fabled lost gold mine of German immigrant Jacob Waltz. You begin your journey at the historic settlement of <strong>Tortilla Flat</strong> on the south bank of the Salt River Canyon.
             </p>
 
             <div className="bg-[#e4d4b3] p-3.5 rounded-xl border border-[#c2aa83] text-xs text-stone-800 space-y-2 mb-6 font-sans">

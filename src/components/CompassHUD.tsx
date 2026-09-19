@@ -1,5 +1,5 @@
 import React from 'react';
-import { Compass, Sun, Moon, MapPin } from 'lucide-react';
+import { Compass, Sun, Moon, MapPin, Flame } from 'lucide-react';
 
 interface CompassHUDProps {
   yaw: number; // in radians
@@ -9,6 +9,8 @@ interface CompassHUDProps {
   hydration: number;
   goldFound: number;
   isInsideMine: boolean;
+  onToggleDayNight?: () => void;
+  playerCoords?: { x: number; z: number };
 }
 
 export const CompassHUD: React.FC<CompassHUDProps> = ({
@@ -19,6 +21,8 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   hydration,
   goldFound,
   isInsideMine,
+  onToggleDayNight,
+  playerCoords,
 }) => {
   // Convert yaw to degrees (0 to 360)
   const deg = Math.round(((-yaw * 180) / Math.PI + 360) % 360);
@@ -51,18 +55,33 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
           </span>
         </div>
 
-        {/* Time of Day */}
-        <div className="flex items-center gap-1.5 border-r border-amber-800/60 pr-4 text-xs font-mono">
+        {/* Time of Day (Interactive Day/Night & Festive Town Illumination toggle) */}
+        <button
+          id="hud-time-toggle-btn"
+          type="button"
+          onClick={onToggleDayNight}
+          title="Toggle Day/Night Cycle [N] — Tortilla Flat illuminates with torches and festive string lights at night"
+          className="pointer-events-auto flex items-center gap-1.5 border-r border-amber-800/60 pr-4 text-xs font-mono hover:text-amber-300 hover:bg-stone-800/60 px-2 py-1 -my-1 rounded-full transition-all cursor-pointer group"
+        >
           {isNight ? (
-            <Moon className="w-4 h-4 text-sky-300" />
+            <Moon className="w-4 h-4 text-sky-300 group-hover:rotate-12 transition-transform" />
           ) : (
-            <Sun className="w-4 h-4 text-amber-400" />
+            <Sun className="w-4 h-4 text-amber-400 group-hover:rotate-45 transition-transform" />
           )}
-          <span>{timeStr}</span>
+          <span className="font-semibold">{timeStr}</span>
           <span className="text-amber-500/70 text-[10px] hidden sm:inline">
             {isNight ? 'NIGHT' : isSunset ? 'SUNSET' : timeOfDay >= 12 ? 'AFTERNOON' : 'MORNING'}
           </span>
-        </div>
+          {isNight && (
+            <span className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-700/50 text-[9px] font-sans tracking-wide">
+              <Flame className="w-2.5 h-2.5 text-amber-400" />
+              TOWN LIT
+            </span>
+          )}
+          <kbd className="hidden lg:inline-block ml-1 px-1 py-0.2 text-[9px] bg-stone-800/90 text-amber-400/70 rounded border border-stone-700">
+            N
+          </kbd>
+        </button>
 
         {/* Nearest Landmark */}
         {nearestLandmarkName && (
@@ -74,6 +93,20 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
             {nearestLandmarkDist !== undefined && (
               <span className="text-amber-400/90 font-mono text-[11px]">
                 ({Math.round(nearestLandmarkDist)}m)
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Global Coordinates & Endless Territory Indicator */}
+        {playerCoords && (
+          <div className="hidden sm:flex items-center gap-1.5 border-l border-amber-800/60 pl-3 text-xs font-mono text-amber-300/80">
+            <span>
+              {Math.round(playerCoords.x)}X, {Math.round(playerCoords.z)}Z
+            </span>
+            {Math.hypot(playerCoords.x, playerCoords.z) > 340 && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 text-[9px] border border-amber-600/50 uppercase tracking-wider font-sans font-semibold">
+                Endless Frontier
               </span>
             )}
           </div>

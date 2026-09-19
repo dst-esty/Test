@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from './terrain';
 import { Landmark } from '../types';
+import { buildTortillaFlatSettlement } from './tortillaFlat';
 
 export interface LandmarkMeshes {
   weaversNeedle: THREE.Group;
@@ -13,6 +14,274 @@ export interface LandmarkMeshes {
   mineInterior: THREE.Group;
   tortillaFlat: THREE.Group;
   waterRefillPoints: THREE.Vector3[];
+}
+
+function createWeaversNeedleTexture(): THREE.CanvasTexture {
+  if (typeof document === 'undefined') {
+    return new THREE.Texture() as unknown as THREE.CanvasTexture;
+  }
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.CanvasTexture(canvas);
+
+  // Base rock terracotta warmth
+  ctx.fillStyle = '#b86638';
+  ctx.fillRect(0, 0, size, size);
+
+  // 1. Horizontal geological bedding strata
+  for (let y = 0; y < size; y++) {
+    const strataNoise = Math.sin(y * 0.08) * 0.5 + Math.cos(y * 0.22) * 0.3 + Math.sin(y * 0.02) * 0.2;
+    const brightness = 0.85 + strataNoise * 0.25;
+    const r = Math.min(255, Math.floor(180 * brightness));
+    const g = Math.min(255, Math.floor(102 * brightness));
+    const b = Math.min(255, Math.floor(58 * brightness));
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(0, y, size, 1);
+  }
+
+  // 2. Vertical basalt/dacite cooling joint striations and desert varnish runoff
+  for (let i = 0; i < 40; i++) {
+    const x = Math.floor(Math.random() * size);
+    const w = 2 + Math.floor(Math.random() * 5);
+    const alpha = 0.08 + Math.random() * 0.16;
+    const isDarkVarnish = Math.random() > 0.4;
+    ctx.fillStyle = isDarkVarnish
+      ? `rgba(45, 25, 18, ${alpha})`
+      : `rgba(230, 160, 90, ${alpha * 0.8})`;
+    ctx.fillRect(x, 0, w, size);
+  }
+
+  // 3. Fine grain rock noise and micro-grit
+  const imgData = ctx.getImageData(0, 0, size, size);
+  const data = imgData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const noise = (Math.random() - 0.5) * 28;
+    data[i] = Math.min(255, Math.max(0, data[i] + noise));
+    data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + noise * 0.8));
+    data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + noise * 0.6));
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(6, 10);
+  return texture;
+}
+
+/**
+ * Procedural Natural Sandstone Rock Arch ("Eye of the Needle")
+ * Monolithic wind- and water-eroded dacite/sandstone arch.
+ * Rooted 8 meters into the mountain ridge with zero floating gaps or boxy overhangs.
+ */
+function createEyeArchGeometry(): THREE.BufferGeometry {
+  const numSlices = 32;
+  const numRadial = 14;
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+
+  // Smooth continuous arch curve: left subterranean anchor -> arch crest -> right subterranean anchor
+  for (let i = 0; i <= numSlices; i++) {
+    const t = i / numSlices;
+    let px = 0;
+    let py = 0;
+    let pz = 0;
+    let tx = 0;
+    let ty = 1;
+    let tz = 0;
+
+    if (t <= 0.28) {
+      // Left vertical/tapered pillar
+      const u = t / 0.28;
+      px = -4.6;
+      py = -8.0 + u * 12.0; // from -8.0 to +4.0
+      tx = 0;
+      ty = 1;
+    } else if (t <= 0.72) {
+      // Arched crest spanning between -4.6 and +4.6
+      const u = (t - 0.28) / 0.44; // 0 to 1
+      const angle = Math.PI * (1.0 - u); // PI down to 0
+      px = Math.cos(angle) * 4.6;
+      py = 4.0 + Math.sin(angle) * 7.2;
+      tx = -Math.sin(angle) * 4.6;
+      ty = Math.cos(angle) * 7.2;
+    } else {
+      // Right vertical/tapered pillar
+      const u = (t - 0.72) / 0.28;
+      px = 4.6;
+      py = 4.0 - u * 12.0; // from +4.0 to -8.0
+      tx = 0;
+      ty = -1;
+    }
+
+    // Tangent normalization
+    const tLen = Math.hypot(tx, ty, tz) || 1;
+    tx /= tLen;
+    ty /= tLen;
+    tz /= tLen;
+
+    // Normal & Binormal for cross-section
+    const nx = -ty;
+    const ny = tx;
+    const nz = 0;
+    const bx = 0;
+    const by = 0;
+    const bz = 1;
+
+    // Radius along arch: wide subterranean footing (3.8m), tapering to 2.2m at apex
+    const isBase = py < 0;
+    const baseWiden = isBase ? Math.pow(Math.min(1.0, -py / 8.0), 1.5) * 1.5 : 0;
+    const archTaper = Math.max(0, py - 4.0) / 7.2;
+    const baseRadius = 2.5 + baseWiden - archTaper * 0.45;
+
+    for (let j = 0; j <= numRadial; j++) {
+      const phi = (j / numRadial) * Math.PI * 2;
+      const cosP = Math.cos(phi);
+      const sinP = Math.sin(phi);
+
+      // Geological jointing & strata
+      const facet = Math.cos(phi * 4.0) * 0.12 + Math.sin(phi * 7.0) * 0.05;
+      const strata = Math.sin(py * 2.4) * 0.06;
+      const r = baseRadius * (1.0 + facet + strata);
+
+      const vx = px + (nx * cosP + bx * sinP) * r;
+      const vy = py + (ny * cosP + by * sinP) * r;
+      const vz = pz + (nz * cosP + bz * sinP) * r;
+
+      positions.push(vx, vy, vz);
+
+      // Normal approximation
+      const normX = nx * cosP + bx * sinP;
+      const normY = ny * cosP + by * sinP;
+      const normZ = nz * cosP + bz * sinP;
+      normals.push(normX, normY, normZ);
+
+      // Vertex colors: rich terracotta sandstone with dark desert varnish near crest
+      let cr = 0.72;
+      let cg = 0.35;
+      let cb = 0.20;
+      if (py > 8.0) {
+        // Desert varnish patina
+        const vRatio = Math.min(1.0, (py - 8.0) / 3.5);
+        cr = cr * (1 - vRatio * 0.55);
+        cg = cg * (1 - vRatio * 0.45);
+        cb = cb * (1 - vRatio * 0.35);
+      } else if (py < 0) {
+        // Deep subterranean bedrock
+        cr *= 0.85;
+        cg *= 0.85;
+        cb *= 0.85;
+      }
+      colors.push(cr, cg, cb);
+    }
+  }
+
+  // Connect triangle faces
+  for (let i = 0; i < numSlices; i++) {
+    for (let j = 0; j < numRadial; j++) {
+      const a = i * (numRadial + 1) + j;
+      const b = (i + 1) * (numRadial + 1) + j;
+      const c = (i + 1) * (numRadial + 1) + (j + 1);
+      const d = i * (numRadial + 1) + (j + 1);
+
+      indices.push(a, b, d);
+      indices.push(b, c, d);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Procedural Canyon Cliff Headwall & Portal Recess for the Lost Dutchman Mine
+ * Massive, natural volcanic headwall embedded 8 meters into the mountain ridge.
+ * Natural upward-receding 80-degree cliff face with columnar jointing and strata bands.
+ * Eliminates artificial boxy overhang blocks.
+ */
+function createMineHeadwallRockGeometry(): THREE.BufferGeometry {
+  const width = 30.0;
+  const height = 26.0;
+  const depth = 16.0;
+  const geo = new THREE.BoxGeometry(width, height, depth, 24, 20, 14);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 3);
+
+  for (let i = 0; i < pos.count; i++) {
+    let px = pos.getX(i);
+    let py = pos.getY(i);
+    let pz = pos.getZ(i);
+
+    // Normalize height: py goes from -13 to +13 (translates to world y: -8 to +18)
+    const t = (py + 13.0) / 26.0;
+
+    // Upward recession: cliff face slopes naturally backward as it ascends (NO horizontal overhangs!)
+    const recede = t * 4.2;
+    if (pz > 0) {
+      pz -= recede;
+
+      // Mine portal recess: carved into front face center (|px| < 3.4, py between -13 and -7.4)
+      const isPortalX = Math.abs(px) < 3.4;
+      const isPortalY = py < -7.4;
+      if (isPortalX && isPortalY) {
+        const xNorm = Math.abs(px) / 3.4;
+        const yNorm = (py - (-13.0)) / 5.6;
+        const portalDepth = (1.0 - xNorm * xNorm) * (1.0 - Math.pow(Math.max(0, yNorm), 3.0)) * 4.4;
+        pz -= portalDepth;
+      }
+    }
+
+    // Columnar vertical rock jointing & strata
+    const joint = Math.cos(px * 0.45) * 0.45 + Math.sin(px * 1.1) * 0.22;
+    const strata = Math.sin(py * 1.6) * 0.20;
+    pz += (joint + strata) * (pz > 0 ? 0.7 : 0.3);
+    px += Math.sin(py * 0.7) * 0.35;
+
+    // Subterranean base widening so it penetrates deeply into bedrock
+    if (t < 0.22) {
+      const baseFlare = (0.22 - t) * 1.8;
+      px *= (1.0 + baseFlare * 0.25);
+      pz *= (1.0 + baseFlare * 0.25);
+    }
+
+    pos.setXYZ(i, px, py, pz);
+
+    // Weathered volcanic rock colors
+    const strataCol = Math.sin(py * 1.4) * 0.5 + 0.5;
+    let r = 0.62 + strataCol * 0.08;
+    let g = 0.33 + strataCol * 0.05;
+    let b = 0.20 + strataCol * 0.03;
+
+    if (t > 0.82) {
+      // Summit desert varnish
+      r = 0.34 + strataCol * 0.04;
+      g = 0.24 + strataCol * 0.03;
+      b = 0.19 + strataCol * 0.02;
+    } else if (py < -7.5 && Math.abs(px) < 3.2 && pz < 2.0) {
+      // Portal interior shadow
+      r = 0.20;
+      g = 0.14;
+      b = 0.10;
+    }
+
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
+  }
+
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
 }
 
 export function createLandmarkStructures(
@@ -29,15 +298,16 @@ export function createLandmarkStructures(
   // - Monolithic dacite neck with steep, near-vertical columnar jointing facets
   // - North-South elongated profile matching the real landmark
   // - Iconic summit saddle notch (the "Needle's Eye") cleanly dividing the sharp North Fang from the South Shoulder
-  // - Sweeping volcanic talus apron with radiating jagged volcanic dikes & fallen talus boulders
+  // - Sweeping volcanic talus apron anchored deeply into the bedrock with fallen talus boulders
   const needleGroup = new THREE.Group();
   const needleY = getTerrainHeight(80, 15);
   needleGroup.position.set(80, needleY, 15);
 
-  const spireHeight = 82;
-  const spireRadial = 44;
-  const spireHeightSegs = 56;
-  const spireGeo = new THREE.CylinderGeometry(3.6, 22.0, spireHeight, spireRadial, spireHeightSegs, false);
+  const spireHeight = 140;
+  const spireRadial = 64;
+  const spireHeightSegs = 84;
+  // Natural monolithic dacite volcanic plug: steep, near-vertical sheer columnar walls (5.4m top to 21.0m deep root)
+  const spireGeo = new THREE.CylinderGeometry(5.4, 21.0, spireHeight, spireRadial, spireHeightSegs, false);
   const sPos = spireGeo.attributes.position;
   const sColors = new Float32Array(sPos.count * 3);
 
@@ -46,88 +316,91 @@ export function createLandmarkStructures(
     let py = sPos.getY(i);
     let pz = sPos.getZ(i);
 
-    const t = (py + spireHeight / 2) / spireHeight; // 0.0 at base to 1.0 at summit
+    const t = (py + spireHeight / 2) / spireHeight; // 0.0 at deep base to 1.0 at summit
     const angle = Math.atan2(pz, px);
     const radius = Math.hypot(px, pz);
 
-    // 1. Talus apron flare at base (t < 0.28)
-    const talusFlaring = t < 0.28 ? 1.0 + Math.pow((0.28 - t) / 0.28, 2.2) * 1.35 : 1.0;
+    // 1. Columnar jointing fluting and natural rock strata (no unnatural horizontal flaring!)
+    const fluting = Math.cos(angle * 12.0) * 0.05 + Math.sin(angle * 24.0) * 0.02;
+    const horizontalLedges = Math.sin(py * 0.38) * 0.02;
+    const sheerFacets = 1.0 - Math.pow(Math.sin(angle * 2.0), 4.0) * 0.04;
 
-    // 2. Sheer volcanic columnar fluting and horizontal strata shelves (middle shaft)
-    const fluting = Math.cos(angle * 8.0) * 0.16 + Math.sin(angle * 16.0) * 0.06;
-    const horizontalLedges = Math.sin(t * 26.0) * 0.05 * (1.0 - t * 0.35);
-    const sheerFacets = 1.0 - Math.pow(Math.sin(angle), 4.0) * 0.14;
-
-    // 3. Iconic Summit Saddle Notch ("The Needle's Eye", t >= 0.80)
+    // 2. Iconic Summit Saddle Notch ("The Needle's Eye", t >= 0.78)
     // In real life, the summit splits along the North-South (Z) axis into:
-    // - Central V-notch saddle cleft (drops down significantly)
+    // - Central V-notch saddle cleft (the "Eye") drops down cleanly
     // - High, sharp North Fang (towers on Z > 0)
     // - Weathered South Shoulder (broad crag on Z < 0)
-    if (t >= 0.80) {
-      const s = (t - 0.80) / 0.20; // 0.0 to 1.0 within the summit zone
-      const zn = Math.sin(angle); // -1.0 (South) to +1.0 (North)
+    if (t >= 0.78) {
+      const s = (t - 0.78) / 0.22; // 0.0 to 1.0 within summit zone
+      const zn = Math.sin(angle);  // -1.0 (South) to +1.0 (North)
 
-      if (Math.abs(zn) < 0.40) {
+      if (Math.abs(zn) < 0.38) {
         // Deep V-shaped saddle notch cleft
-        const notchDepth = (1.0 - Math.pow(Math.abs(zn) / 0.40, 2.0)) * 12.0 * s;
+        const notchDepth = (1.0 - Math.pow(Math.abs(zn) / 0.38, 2.0)) * 13.0 * s;
         py -= notchDepth;
-      } else if (zn > 0.22) {
-        // North Fang (tall sharp eagle-beak needle point)
-        const fangRise = Math.pow((zn - 0.22) / 0.78, 1.4) * 8.2 * s;
+      } else if (zn > 0.16) {
+        // North Fang (tall sharp needle point)
+        const fangRise = Math.pow((zn - 0.16) / 0.84, 1.3) * 9.0 * s;
         py += fangRise;
-      } else if (zn < -0.22) {
+      } else if (zn < -0.16) {
         // South Shoulder (weathered twin crown)
-        const shoulderRise = Math.pow((-zn - 0.22) / 0.78, 1.5) * 4.2 * s;
-        py += shoulderRise + Math.sin(angle * 4.0) * 0.8 * s;
+        const shoulderRise = Math.pow((-zn - 0.16) / 0.84, 1.4) * 5.0 * s;
+        py += shoulderRise;
       }
     }
 
-    // 4. North-South Elliptical Aspect Ratio (wider along Z, narrower across X)
-    const newRadius = radius * talusFlaring * (1.0 + fluting + horizontalLedges) * sheerFacets;
-    px = Math.cos(angle) * newRadius * 0.82;
-    pz = Math.sin(angle) * newRadius * 1.34;
+    // 3. North-South Elliptical Aspect Ratio (wider along Z, narrower across X)
+    // Strictly monotonic steep profile: zero unnatural overhangs or horizontal shelves
+    const newRadius = radius * (1.0 + fluting + horizontalLedges) * sheerFacets;
+    px = Math.cos(angle) * newRadius * 0.88;
+    pz = Math.sin(angle) * newRadius * 1.24;
 
     // Micro-rock roughness displacement
-    px += Math.sin(py * 1.6 + angle * 3.0) * 0.25;
-    pz += Math.cos(py * 1.8 + angle * 4.0) * 0.25;
+    px += (Math.sin(py * 1.2 + angle * 4.0) + Math.cos(py * 2.5)) * 0.16;
+    pz += (Math.cos(py * 1.4 + angle * 5.0) + Math.sin(py * 2.8)) * 0.16;
 
     sPos.setX(i, px);
     sPos.setY(i, py);
     sPos.setZ(i, pz);
 
-    // 5. Authentic Arizona Volcanic Dacite & Desert Varnish Color Palette
-    const strataBand = Math.sin(py * 0.45) * 0.5 + 0.5;
-    const varnishStreaks = Math.cos(py * 2.2 + angle * 4.0) * 0.5 + 0.5;
+    // 4. Authentic Arizona Volcanic Dacite & Desert Varnish Color Palette
+    const strataBand = Math.sin(py * 0.32) * 0.5 + 0.5;
+    const varnishFactor = Math.max(0, -fluting / 0.08); // deeper in joint crevices
 
-    let r = 0.65;
-    let g = 0.32;
-    let b = 0.18;
+    let r = 0.66 + strataBand * 0.08;
+    let g = 0.36 + strataBand * 0.08;
+    let b = 0.22 + strataBand * 0.04;
 
+    // Blend in desert varnish in vertical fluting crevices
+    if (varnishFactor > 0) {
+      const v = Math.min(1.0, varnishFactor * 1.2);
+      r = r * (1.0 - v) + 0.30 * v;
+      g = g * (1.0 - v) + 0.18 * v;
+      b = b * (1.0 - v) + 0.13 * v;
+    }
+
+    // Blend in golden buff highlights on exposed outer ledges
+    if (strataBand > 0.6 && varnishFactor < 0.3) {
+      const buffT = (strataBand - 0.6) / 0.4;
+      r = r * (1.0 - buffT) + 0.78 * buffT;
+      g = g * (1.0 - buffT) + 0.52 * buffT;
+      b = b * (1.0 - buffT) + 0.32 * buffT;
+    }
+
+    // Subterranean and base talus scree transition
+    if (t < 0.34) {
+      const talusT = (0.34 - t) / 0.34;
+      r = r * (1.0 - talusT) + 0.72 * talusT;
+      g = g * (1.0 - talusT) + 0.54 * talusT;
+      b = b * (1.0 - talusT) + 0.38 * talusT;
+    }
+
+    // Weathered summit caprock
     if (t > 0.82) {
-      // Weathered summit crests: deep manganese patina from atmospheric exposure
-      r = 0.32 + strataBand * 0.08;
-      g = 0.22 + strataBand * 0.06;
-      b = 0.17 + strataBand * 0.04;
-    } else if (fluting < -0.04 || varnishStreaks > 0.75) {
-      // Water-erosion runoff gullies with dark desert varnish
-      r = 0.26 + varnishStreaks * 0.06;
-      g = 0.18 + varnishStreaks * 0.04;
-      b = 0.14 + varnishStreaks * 0.03;
-    } else if (strataBand > 0.65) {
-      // Golden buff welded tuff ledges
-      r = 0.76 + varnishStreaks * 0.06;
-      g = 0.52 + varnishStreaks * 0.05;
-      b = 0.32 + varnishStreaks * 0.04;
-    } else if (t < 0.26) {
-      // Basal talus scree gravel
-      r = 0.72 + strataBand * 0.05;
-      g = 0.54 + strataBand * 0.04;
-      b = 0.38 + strataBand * 0.03;
-    } else {
-      // Terracotta volcanic dacite sheer cliff walls
-      r = 0.66 + varnishStreaks * 0.05;
-      g = 0.31 + varnishStreaks * 0.04;
-      b = 0.18 + varnishStreaks * 0.03;
+      const summitT = (t - 0.82) / 0.18;
+      r = r * (1.0 - summitT) + 0.42 * summitT;
+      g = g * (1.0 - summitT) + 0.26 * summitT;
+      b = b * (1.0 - summitT) + 0.18 * summitT;
     }
 
     sColors[i * 3] = r;
@@ -138,85 +411,33 @@ export function createLandmarkStructures(
   spireGeo.setAttribute('color', new THREE.BufferAttribute(sColors, 3));
   spireGeo.computeVertexNormals();
 
+  const rockTexture = createWeaversNeedleTexture();
   const needleRockMat = new THREE.MeshStandardMaterial({
+    map: rockTexture,
     vertexColors: true,
-    roughness: 0.90,
-    metalness: 0.06,
-    side: THREE.DoubleSide,
+    roughness: 0.88,
+    metalness: 0.04,
+    side: THREE.FrontSide,
     flatShading: false,
   });
 
   const spire = new THREE.Mesh(spireGeo, needleRockMat);
-  spire.position.y = spireHeight * 0.5 - 2.0;
+  // Anchor spire base 46 meters deep into subterranean bedrock so it is 100% gapless and seamless on all slopes
+  spire.position.y = spireHeight * 0.5 - 46.0;
   spire.castShadow = true;
   spire.receiveShadow = true;
   spire.frustumCulled = false;
   needleGroup.add(spire);
 
-  // Radiating Volcanic Dike Fins & Scree Buttresses:
-  // In real Superstition geology, intrusive volcanic dikes radiate from volcanic plugs.
-  // We model 3 natural jagged knife-edge rock fins branching down the slopes.
-  const dikeConfigs = [
-    { angle: -Math.PI * 0.65, length: 36, startH: 22, endH: 3, width: 4.8 }, // Toward Needle Canyon
-    { angle: 0.15, length: 32, startH: 18, endH: 2.5, width: 4.2 },           // Toward Bluff Spring
-    { angle: Math.PI * 0.55, length: 34, startH: 20, endH: 3.2, width: 4.5 }, // Toward Peralta Ridge
-  ];
-
-  dikeConfigs.forEach((dike) => {
-    const dikeGeo = new THREE.BoxGeometry(dike.width, dike.startH, dike.length, 4, 8, 8);
-    const dPos = dikeGeo.attributes.position;
-    const dCols = new Float32Array(dPos.count * 3);
-
-    for (let j = 0; j < dPos.count; j++) {
-      let dx = dPos.getX(j);
-      let dy = dPos.getY(j);
-      let dz = dPos.getZ(j);
-
-      const zNorm = (dz + dike.length / 2) / dike.length; // 0 near needle to 1 at far tip
-      // Taper height as dike extends away from the central spire
-      dy *= (1.0 - zNorm * 0.75);
-
-      // Serrated knife-edge ridge crest on top
-      if (dy > 0) {
-        dy += Math.sin(zNorm * 18.0) * 1.4 + Math.cos(dx * 2.0) * 0.8;
-      }
-      // Stepped jointing on sides
-      dx *= (1.0 + Math.sin(dy * 1.2) * 0.2);
-
-      dPos.setX(j, dx);
-      dPos.setY(j, dy);
-      dPos.setZ(j, dz);
-
-      // Desert varnish and terracotta color
-      const isCrest = dy > dike.startH * 0.25;
-      dCols[j * 3] = isCrest ? 0.42 : 0.64;
-      dCols[j * 3 + 1] = isCrest ? 0.26 : 0.36;
-      dCols[j * 3 + 2] = isCrest ? 0.18 : 0.22;
-    }
-
-    dikeGeo.setAttribute('color', new THREE.BufferAttribute(dCols, 3));
-    dikeGeo.computeVertexNormals();
-
-    const dikeMesh = new THREE.Mesh(dikeGeo, needleRockMat);
-    const distFromCenter = 16 + dike.length * 0.42;
-    dikeMesh.position.set(
-      Math.cos(dike.angle) * distFromCenter,
-      dike.startH * 0.35,
-      Math.sin(dike.angle) * distFromCenter
-    );
-    dikeMesh.rotation.y = -dike.angle + Math.PI / 2;
-    dikeMesh.castShadow = true;
-    dikeMesh.receiveShadow = true;
-    needleGroup.add(dikeMesh);
-  });
-
-  // Giant Fallen Dacite Corestone Boulders on the talus apron
+  // Giant Fallen Dacite Corestone Boulders on the talus apron (deeply embedded into terrain)
   const talusBoulders = [
-    { x: -14, z: 12, size: 5.4, rot: 0.4 },
-    { x: 16, z: -10, size: 4.8, rot: 1.2 },
-    { x: -10, z: -18, size: 6.2, rot: 2.1 },
-    { x: 18, z: 15, size: 5.0, rot: 0.8 },
-    { x: 0, z: 22, size: 4.2, rot: 1.7 },
+    { x: -16, z: 14, size: 5.4, rot: 0.4 },
+    { x: 18, z: -12, size: 4.8, rot: 1.2 },
+    { x: -12, z: -20, size: 6.2, rot: 2.1 },
+    { x: 20, z: 18, size: 5.0, rot: 0.8 },
+    { x: 0, z: 26, size: 4.2, rot: 1.7 },
+    { x: -22, z: -8, size: 4.6, rot: 2.7 },
+    { x: 12, z: 28, size: 5.1, rot: 3.1 },
   ];
 
   talusBoulders.forEach((tb) => {
@@ -238,16 +459,20 @@ export function createLandmarkStructures(
       bPos.setY(k, by);
       bPos.setZ(k, bz);
 
-      bCols[k * 3] = 0.58 + Math.sin(k) * 0.08;
-      bCols[k * 3 + 1] = 0.32 + Math.cos(k) * 0.05;
-      bCols[k * 3 + 2] = 0.20 + Math.sin(k * 2) * 0.04;
+      bCols[k * 3] = 0.62 + Math.sin(k) * 0.05;
+      bCols[k * 3 + 1] = 0.36 + Math.cos(k) * 0.04;
+      bCols[k * 3 + 2] = 0.22 + Math.sin(k * 2) * 0.03;
     }
 
     bGeo.setAttribute('color', new THREE.BufferAttribute(bCols, 3));
     bGeo.computeVertexNormals();
 
     const boulderMesh = new THREE.Mesh(bGeo, needleRockMat);
-    boulderMesh.position.set(tb.x, tb.size * 0.42, tb.z);
+    const worldX = 80 + tb.x;
+    const worldZ = 15 + tb.z;
+    const groundY = getTerrainHeight(worldX, worldZ);
+    // Embedded firmly into the talus scree slope
+    boulderMesh.position.set(tb.x, groundY - needleY + tb.size * 0.15, tb.z);
     boulderMesh.rotation.set(0.2, tb.rot, -0.15);
     boulderMesh.castShadow = true;
     boulderMesh.receiveShadow = true;
@@ -348,8 +573,12 @@ export function createLandmarkStructures(
   const petroMat = new THREE.MeshStandardMaterial({ color: 0x2c2b2a, roughness: 0.9 });
   for (let p = 0; p < 5; p++) {
     const bAngle = (p / 5) * Math.PI * 2 + 0.3;
+    const relX = Math.cos(bAngle) * 7.5;
+    const relZ = Math.sin(bAngle) * 7.5;
+    const groundY = getTerrainHeight(-70 + relX, -20 + relZ) - spY;
     const pRock = new THREE.Mesh(new THREE.DodecahedronGeometry(1.8, 1), petroMat);
-    pRock.position.set(Math.cos(bAngle) * 7.5, 1.2, Math.sin(bAngle) * 7.5);
+    // Embedded 1.1m into the bank so no underside is exposed
+    pRock.position.set(relX, groundY + 0.7, relZ);
     pRock.castShadow = true;
     springGroup.add(pRock);
 
@@ -358,8 +587,8 @@ export function createLandmarkStructures(
       new THREE.RingGeometry(0.3, 0.45, 8),
       new THREE.MeshBasicMaterial({ color: 0xdfbc83, side: THREE.DoubleSide })
     );
-    glyph.position.set(Math.cos(bAngle) * 6.5, 1.6, Math.sin(bAngle) * 6.5);
-    glyph.lookAt(-70, spY + 1.6, -20);
+    glyph.position.set(Math.cos(bAngle) * 6.5, groundY + 1.2, Math.sin(bAngle) * 6.5);
+    glyph.lookAt(-70, spY + groundY + 1.2, -20);
     springGroup.add(glyph);
   }
 
@@ -502,25 +731,35 @@ export function createLandmarkStructures(
   const eyeY = getTerrainHeight(130, -40);
   eyeGroup.position.set(130, eyeY, -40);
 
-  // High bluff arch with a hollow center aperture
-  const archPillar1 = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 2.5, 12, 7), needleRockMat);
-  archPillar1.position.set(-3.5, 6, 0);
-  archPillar1.castShadow = true;
-  eyeGroup.add(archPillar1);
+  // Natural monolithic sandstone arch rooted deeply into the mountain ridge bedrock
+  const eyeArchGeo = createEyeArchGeometry();
+  const eyeArchMesh = new THREE.Mesh(eyeArchGeo, needleRockMat);
+  eyeArchMesh.castShadow = true;
+  eyeArchMesh.receiveShadow = true;
+  eyeGroup.add(eyeArchMesh);
 
-  const archPillar2 = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 2.5, 12, 7), needleRockMat);
-  archPillar2.position.set(3.5, 6, 0);
-  archPillar2.castShadow = true;
-  eyeGroup.add(archPillar2);
+  // Natural talus apron corestones nestled around the arch base
+  const archTalus = [
+    { x: -5.5, z: 2.2, r: 2.1, rot: 0.6 },
+    { x: 5.2, z: -1.8, r: 1.8, rot: 1.9 },
+    { x: -3.0, z: -3.5, r: 2.4, rot: 2.7 },
+  ];
+  archTalus.forEach((at) => {
+    const tGeo = new THREE.DodecahedronGeometry(at.r, 1);
+    const tMesh = new THREE.Mesh(tGeo, needleRockMat);
+    const tGroundY = getTerrainHeight(130 + at.x, -40 + at.z) - eyeY;
+    tMesh.position.set(at.x, tGroundY + at.r * 0.35, at.z);
+    tMesh.rotation.set(0.15, at.rot, -0.2);
+    tMesh.castShadow = true;
+    tMesh.receiveShadow = true;
+    eyeGroup.add(tMesh);
+  });
 
-  const archLintel = new THREE.Mesh(new THREE.BoxGeometry(9, 3, 3.5), needleRockMat);
-  archLintel.position.set(0, 12, 0);
-  archLintel.castShadow = true;
-  eyeGroup.add(archLintel);
-
-  // Golden ray pointer marker
-  const pointerPillar = new THREE.Mesh(new THREE.ConeGeometry(0.8, 2.5, 4), needleRockMat);
-  pointerPillar.position.set(0, 1.2, 4);
+  // Ancient trail pointer cairn
+  const pointerPillar = new THREE.Mesh(new THREE.ConeGeometry(0.85, 3.0, 5), needleRockMat);
+  const cairnGroundY = getTerrainHeight(130, -40 + 4) - eyeY;
+  pointerPillar.position.set(0, cairnGroundY + 1.2, 4);
+  pointerPillar.castShadow = true;
   eyeGroup.add(pointerPillar);
 
   scene.add(eyeGroup);
@@ -532,21 +771,13 @@ export function createLandmarkStructures(
   const mineY = getTerrainHeight(160, 110);
   mineGroup.position.set(160, mineY, 110);
 
-  // Imposing canyon cleft rocks surrounding the entrance
-  const cleftRock1 = new THREE.Mesh(new THREE.BoxGeometry(10, 16, 8), needleRockMat);
-  cleftRock1.position.set(-6, 8, 0);
-  cleftRock1.castShadow = true;
-  mineGroup.add(cleftRock1);
-
-  const cleftRock2 = new THREE.Mesh(new THREE.BoxGeometry(10, 16, 8), needleRockMat);
-  cleftRock2.position.set(6, 8, 0);
-  cleftRock2.castShadow = true;
-  mineGroup.add(cleftRock2);
-
-  const cliffCap = new THREE.Mesh(new THREE.BoxGeometry(12, 6, 10), needleRockMat);
-  cliffCap.position.set(0, 17, 0);
-  cliffCap.castShadow = true;
-  mineGroup.add(cliffCap);
+  // Natural canyon cliff headwall seamlessly embedded 8 meters into the mountain ridge
+  const mineHeadwallGeo = createMineHeadwallRockGeometry();
+  const mineHeadwall = new THREE.Mesh(mineHeadwallGeo, needleRockMat);
+  mineHeadwall.position.set(0, 5.0, 0);
+  mineHeadwall.castShadow = true;
+  mineHeadwall.receiveShadow = true;
+  mineGroup.add(mineHeadwall);
 
   // Heavy timber portal frame
   const beamMat = new THREE.MeshStandardMaterial({ color: 0x3d2716, roughness: 0.95 });
@@ -721,605 +952,12 @@ export function createLandmarkStructures(
   scene.add(mineInterior);
 
   // ==========================================
-  // 9. Historic Town of Tortilla Flat (1880s Frontier Settlement)
-  // Stagecoach stop along the Apache Trail with the Saloon, Mercantile,
-  // Sheriff's Jail, Concord Stagecoach, Water Tower & Spring Trough
+  // 9. Historic Town of Tortilla Flat (1880s Frontier Settlement on the Salt River)
+  // Authentic Boomtown Western Architecture, Glazed Multi-Pane Windows,
+  // Superstition Saloon, Mercantile & Post Office, Sheriff Jail, Livery Barn,
+  // Abbott-Downing Concord Stagecoach, Artesian Water Tower & Salt River Landing
   // ==========================================
-  const tortillaGroup = new THREE.Group();
-  const townX = -15;
-  const townZ = -150;
-  const townY = getTerrainHeight(townX, townZ);
-  tortillaGroup.position.set(townX, townY, townZ);
-
-  // Canvas sign texture helper for authentic 1880s Western lettering
-  function makeWoodSignTexture(title: string, sub: string = '', width = 512, height = 128) {
-    if (typeof document === 'undefined') return new THREE.Texture();
-    const cvs = document.createElement('canvas');
-    cvs.width = width;
-    cvs.height = height;
-    const ctx = cvs.getContext('2d');
-    if (ctx) {
-      ctx.fillStyle = '#2b1b11';
-      ctx.fillRect(0, 0, width, height);
-      // Outer border & inner gold pinstripe
-      ctx.strokeStyle = '#57351c';
-      ctx.lineWidth = 6;
-      ctx.strokeRect(4, 4, width - 8, height - 8);
-      ctx.strokeStyle = '#c69947';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(10, 10, width - 20, height - 20);
-
-      // Title
-      ctx.fillStyle = '#f6e4be';
-      ctx.font = 'bold 36px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(title, width / 2, sub ? height * 0.4 : height / 2);
-
-      // Subtitle
-      if (sub) {
-        ctx.font = 'italic 18px serif';
-        ctx.fillStyle = '#d4ac61';
-        ctx.fillText(sub, width / 2, height * 0.74);
-      }
-    }
-    const tex = new THREE.CanvasTexture(cvs);
-    tex.needsUpdate = true;
-    return tex;
-  }
-
-  // Shared Town Materials
-  const tfWoodDark = new THREE.MeshStandardMaterial({ color: 0x3d2616, roughness: 0.94 });
-  const tfWoodWeathered = new THREE.MeshStandardMaterial({ color: 0x543c29, roughness: 0.92 });
-  const tfWoodPlank = new THREE.MeshStandardMaterial({ color: 0x694e36, roughness: 0.88 });
-  const tfStoneWall = new THREE.MeshStandardMaterial({ color: 0x584c42, roughness: 0.95 });
-  const tfIron = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.85, roughness: 0.4 });
-  const tfBrass = new THREE.MeshStandardMaterial({ color: 0xc89832, metalness: 0.9, roughness: 0.3 });
-  const tfWaterMat = new THREE.MeshStandardMaterial({
-    color: 0x2b8ea8,
-    roughness: 0.15,
-    metalness: 0.1,
-    transparent: true,
-    opacity: 0.85,
-  });
-
-  // A. Main Street Dirt Road Bed
-  const street = new THREE.Mesh(new THREE.BoxGeometry(14, 0.08, 48), new THREE.MeshStandardMaterial({ color: 0x7a5b3e, roughness: 0.98 }));
-  street.position.set(0, 0.04, 0);
-  street.receiveShadow = true;
-  tortillaGroup.add(street);
-
-  // Wagon wheel rut impressions in dirt
-  for (const rx of [-2.4, 2.4]) {
-    const rut = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.04, 46), new THREE.MeshStandardMaterial({ color: 0x5e442c, roughness: 0.99 }));
-    rut.position.set(rx, 0.07, 0);
-    tortillaGroup.add(rut);
-  }
-
-  // B. Raised Wooden Boardwalk Porches
-  // West boardwalk (in front of Saloon & Mercantile)
-  const westBoardwalk = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.28, 38), tfWoodPlank);
-  westBoardwalk.position.set(-8.8, 0.14, 0);
-  westBoardwalk.receiveShadow = true;
-  westBoardwalk.castShadow = true;
-  tortillaGroup.add(westBoardwalk);
-
-  // East boardwalk (in front of Jail & Sheriff)
-  const eastBoardwalk = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.28, 24), tfWoodPlank);
-  eastBoardwalk.position.set(8.8, 0.14, -6);
-  eastBoardwalk.receiveShadow = true;
-  eastBoardwalk.castShadow = true;
-  tortillaGroup.add(eastBoardwalk);
-
-  // ------------------------------------------------------------------
-  // 1. THE TORTILLA FLAT SALOON & RESTAURANT
-  // ------------------------------------------------------------------
-  const saloonGroup = new THREE.Group();
-  saloonGroup.position.set(-14.5, 0, 4);
-
-  // Main Saloon Hall Building
-  const saloonBody = new THREE.Mesh(new THREE.BoxGeometry(8.5, 6.2, 12), tfWoodWeathered);
-  saloonBody.position.set(0, 3.1, 0);
-  saloonBody.castShadow = true;
-  saloonBody.receiveShadow = true;
-  saloonGroup.add(saloonBody);
-
-  // Western False-Front Stepped Parapet Facade
-  const saloonFacade = new THREE.Mesh(new THREE.BoxGeometry(0.4, 8.2, 12.4), tfWoodDark);
-  saloonFacade.position.set(4.25, 4.1, 0);
-  saloonFacade.castShadow = true;
-  saloonGroup.add(saloonFacade);
-
-  // Decorative stepped top cornice on false front
-  const corniceTop = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.2, 6.5), tfWoodDark);
-  corniceTop.position.set(4.25, 8.7, 0);
-  corniceTop.castShadow = true;
-  saloonGroup.add(corniceTop);
-
-  // Saloon Painted Front Sign
-  const saloonSignTex = makeWoodSignTexture('TORTILLA FLAT SALOON', 'EST. 1880 - COLD SARSAPARILLA & WHISKEY');
-  const saloonSign = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 1.6, 8.5),
-    new THREE.MeshStandardMaterial({ map: saloonSignTex, roughness: 0.7 })
-  );
-  saloonSign.position.set(4.55, 6.8, 0);
-  saloonSign.rotation.y = -Math.PI / 2;
-  saloonSign.castShadow = true;
-  saloonGroup.add(saloonSign);
-
-  // Covered Porch Overhang & Heavy Timber Posts
-  const porchRoof = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.25, 12.6), tfWoodDark);
-  porchRoof.position.set(5.8, 4.4, 0);
-  porchRoof.rotation.z = -0.12;
-  porchRoof.castShadow = true;
-  saloonGroup.add(porchRoof);
-
-  for (let pz = -5.2; pz <= 5.2; pz += 3.4) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.32, 4.2, 0.32), tfWoodDark);
-    post.position.set(7.4, 2.1, pz);
-    post.castShadow = true;
-    saloonGroup.add(post);
-  }
-
-  // Classic Swinging Batwing Doors
-  const doorHole = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.8), new THREE.MeshBasicMaterial({ color: 0x0a0604 }));
-  doorHole.position.set(4.47, 1.6, 0);
-  doorHole.rotation.y = Math.PI / 2;
-  saloonGroup.add(doorHole);
-
-  for (const dz of [-0.42, 0.42]) {
-    const batwing = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.3, 0.75), tfWoodPlank);
-    batwing.position.set(4.48, 1.6, dz);
-    batwing.castShadow = true;
-    saloonGroup.add(batwing);
-  }
-
-  // Porch Wooden Bench & Whiskey Barrels
-  const bench = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.55, 2.4), tfWoodPlank);
-  bench.position.set(6.4, 0.4, 3.8);
-  bench.castShadow = true;
-  saloonGroup.add(bench);
-
-  for (let b = 0; b < 3; b++) {
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 1.05, 10), tfWoodDark);
-    barrel.position.set(6.2 + (b % 2) * 0.5, 0.55, -4.2 - b * 0.7);
-    barrel.castShadow = true;
-    saloonGroup.add(barrel);
-  }
-
-  // Hitching Rail with Saddle Barstools
-  const hitchRail = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 6.5), tfWoodDark);
-  hitchRail.position.set(8.2, 1.1, 0);
-  hitchRail.rotation.x = Math.PI / 2;
-  hitchRail.castShadow = true;
-  saloonGroup.add(hitchRail);
-
-  for (const hpz of [-2.8, 0, 2.8]) {
-    const hPost = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.2, 0.18), tfWoodDark);
-    hPost.position.set(8.2, 0.6, hpz);
-    saloonGroup.add(hPost);
-  }
-
-  // Warm glowing interior porch lantern
-  const saloonLight = new THREE.PointLight(0xff9933, 2.8, 16);
-  saloonLight.position.set(5.5, 3.5, 0);
-  saloonGroup.add(saloonLight);
-
-  const saloonLanternMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.38, 6), tfBrass);
-  saloonLanternMesh.position.copy(saloonLight.position);
-  saloonGroup.add(saloonLanternMesh);
-
-  tortillaGroup.add(saloonGroup);
-
-  // ------------------------------------------------------------------
-  // 2. MERCANTILE TRADING POST & ASSAY OFFICE
-  // ------------------------------------------------------------------
-  const storeGroup = new THREE.Group();
-  storeGroup.position.set(-14.5, 0, -11);
-
-  const storeBody = new THREE.Mesh(new THREE.BoxGeometry(8.2, 5.4, 9), tfWoodPlank);
-  storeBody.position.set(0, 2.7, 0);
-  storeBody.castShadow = true;
-  storeBody.receiveShadow = true;
-  storeGroup.add(storeBody);
-
-  const storeFacade = new THREE.Mesh(new THREE.BoxGeometry(0.4, 7.0, 9.4), tfWoodDark);
-  storeFacade.position.set(4.1, 3.5, 0);
-  storeFacade.castShadow = true;
-  storeGroup.add(storeFacade);
-
-  const storeSignTex = makeWoodSignTexture('GENERAL MERCANTILE & ASSAY', 'PROVISIONS - MINING HARDWARE - ORE WEIGHED');
-  const storeSign = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 1.4, 7.8),
-    new THREE.MeshStandardMaterial({ map: storeSignTex, roughness: 0.7 })
-  );
-  storeSign.position.set(4.35, 5.8, 0);
-  storeSign.rotation.y = -Math.PI / 2;
-  storeSign.castShadow = true;
-  storeGroup.add(storeSign);
-
-  // Stacked mining dynamite crates, sacks & pickaxes
-  for (let c = 0; c < 4; c++) {
-    const crate = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.65, 0.85), tfWoodWeathered);
-    crate.position.set(5.8 + (c % 2) * 0.6, 0.45 + (c > 1 ? 0.6 : 0), -2.2 + Math.floor(c / 2) * 0.9);
-    crate.castShadow = true;
-    storeGroup.add(crate);
-  }
-
-  // Outdoor Assayer gold balance scale table
-  const assayTable = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.8, 1.8), tfWoodDark);
-  assayTable.position.set(6.2, 0.5, 2.2);
-  assayTable.castShadow = true;
-  storeGroup.add(assayTable);
-
-  const goldScale = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.08, 0.6), tfBrass);
-  goldScale.position.set(6.2, 1.1, 2.2);
-  storeGroup.add(goldScale);
-
-  tortillaGroup.add(storeGroup);
-
-  // ------------------------------------------------------------------
-  // 3. TORTILLA FLAT SHERIFF & TOWN JAIL
-  // ------------------------------------------------------------------
-  const jailGroup = new THREE.Group();
-  jailGroup.position.set(13.5, 0, -8);
-
-  const jailBody = new THREE.Mesh(new THREE.BoxGeometry(7.5, 4.8, 8.5), tfStoneWall);
-  jailBody.position.set(0, 2.4, 0);
-  jailBody.castShadow = true;
-  jailBody.receiveShadow = true;
-  jailGroup.add(jailBody);
-
-  const jailSignTex = makeWoodSignTexture('SHERIFF & TOWN JAIL', 'TORTILLA FLAT MARSHAL - TERRITORY OF ARIZONA');
-  const jailSign = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 1.2, 6.2),
-    new THREE.MeshStandardMaterial({ map: jailSignTex, roughness: 0.7 })
-  );
-  jailSign.position.set(-3.85, 4.2, 0);
-  jailSign.rotation.y = Math.PI / 2;
-  jailSign.castShadow = true;
-  jailGroup.add(jailSign);
-
-  // Iron-barred jail window
-  const barWindow = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.0), new THREE.MeshBasicMaterial({ color: 0x080808 }));
-  barWindow.position.set(-3.76, 2.5, 2.2);
-  barWindow.rotation.y = -Math.PI / 2;
-  jailGroup.add(barWindow);
-
-  for (let b = -0.4; b <= 0.4; b += 0.2) {
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.0), tfIron);
-    bar.position.set(-3.78, 2.5, 2.2 + b);
-    jailGroup.add(bar);
-  }
-
-  // Heavy timber jail door with bronze sheriff star
-  const jailDoor = new THREE.Mesh(new THREE.BoxGeometry(0.15, 2.6, 1.4), tfWoodDark);
-  jailDoor.position.set(-3.8, 1.4, -1.5);
-  jailGroup.add(jailDoor);
-
-  const starBadge = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18, 0), tfBrass);
-  starBadge.position.set(-3.9, 1.8, -1.5);
-  jailGroup.add(starBadge);
-
-  tortillaGroup.add(jailGroup);
-
-  // ------------------------------------------------------------------
-  // 4. LIVERY STABLE, CORRAL & BLACKSMITH FORGE
-  // ------------------------------------------------------------------
-  const liveryGroup = new THREE.Group();
-  liveryGroup.position.set(14.0, 0, 8);
-
-  // Open timber barn with pitched roof
-  const barnRoof = new THREE.Mesh(new THREE.BoxGeometry(8.5, 0.3, 10.5), tfWoodDark);
-  barnRoof.position.set(0, 4.4, 0);
-  barnRoof.rotation.z = 0.2;
-  barnRoof.castShadow = true;
-  liveryGroup.add(barnRoof);
-
-  // Barn timber posts
-  for (const bx of [-3.5, 3.5]) {
-    for (const bz of [-4.5, 0, 4.5]) {
-      const bPost = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4.4, 0.35), tfWoodWeathered);
-      bPost.position.set(bx, 2.2, bz);
-      bPost.castShadow = true;
-      liveryGroup.add(bPost);
-    }
-  }
-
-  // Golden Hay Bales
-  const hayMat = new THREE.MeshStandardMaterial({ color: 0xc4a045, roughness: 0.98 });
-  for (let h = 0; h < 6; h++) {
-    const bale = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.75, 0.8), hayMat);
-    bale.position.set(-1.8 + (h % 2) * 1.3, 0.4 + Math.floor(h / 2) * 0.65, -2.5 + (h % 3) * 0.4);
-    bale.castShadow = true;
-    liveryGroup.add(bale);
-  }
-
-  // Blacksmith anvil on timber stump
-  const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.45, 0.75, 8), tfWoodDark);
-  stump.position.set(1.5, 0.4, 2.5);
-  stump.castShadow = true;
-  liveryGroup.add(stump);
-
-  const anvil = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.35, 0.95), tfIron);
-  anvil.position.set(1.5, 0.9, 2.5);
-  anvil.castShadow = true;
-  liveryGroup.add(anvil);
-
-  // Wooden split-rail corral fence
-  const fenceMat = tfWoodWeathered;
-  for (let fz = -4; fz <= 6; fz += 2.5) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.4), fenceMat);
-    post.position.set(5.5, 0.7, fz);
-    liveryGroup.add(post);
-  }
-  for (let fy of [0.6, 1.1]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 10.5), fenceMat);
-    rail.position.set(5.5, fy, 1);
-    liveryGroup.add(rail);
-  }
-
-  tortillaGroup.add(liveryGroup);
-
-  // ------------------------------------------------------------------
-  // 5. ELEVATED WOODEN WATER TOWER & SPRING WATER TROUGH
-  // Connected to waterRefillPoints for 100% Canteen Hydration
-  // ------------------------------------------------------------------
-  const waterTowerGroup = new THREE.Group();
-  waterTowerGroup.position.set(-12.5, 0, 15);
-
-  // 4 Tall heavy timber stilt legs
-  for (const tx of [-1.5, 1.5]) {
-    for (const tz of [-1.5, 1.5]) {
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.38, 6.2, 0.38), tfWoodDark);
-      leg.position.set(tx, 3.1, tz);
-      leg.castShadow = true;
-      waterTowerGroup.add(leg);
-    }
-  }
-
-  // Horizontal and diagonal cross-ties
-  const platform = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.3, 4.2), tfWoodPlank);
-  platform.position.set(0, 6.2, 0);
-  platform.castShadow = true;
-  waterTowerGroup.add(platform);
-
-  // Round Cedar Water Cistern Tank
-  const tank = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.1, 2.8, 14), tfWoodWeathered);
-  tank.position.set(0, 7.7, 0);
-  tank.castShadow = true;
-  waterTowerGroup.add(tank);
-
-  // Iron compression hoops on cistern
-  for (const hy of [6.7, 7.7, 8.7]) {
-    const hoop = new THREE.Mesh(new THREE.CylinderGeometry(2.14, 2.14, 0.08, 14), tfIron);
-    hoop.position.set(0, hy, 0);
-    waterTowerGroup.add(hoop);
-  }
-
-  // Conical cedar roof
-  const tankRoof = new THREE.Mesh(new THREE.ConeGeometry(2.4, 1.2, 14), tfWoodDark);
-  tankRoof.position.set(0, 9.7, 0);
-  tankRoof.castShadow = true;
-  waterTowerGroup.add(tankRoof);
-
-  // Water downspout pipe pouring into the horse trough
-  const downspout = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5.8), tfIron);
-  downspout.position.set(2.2, 3.2, 0);
-  waterTowerGroup.add(downspout);
-
-  // Long Carved Cedar Horse Water Trough
-  const trough = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.7, 3.6), tfWoodPlank);
-  trough.position.set(3.2, 0.35, 0);
-  trough.castShadow = true;
-  waterTowerGroup.add(trough);
-
-  // Clear spring water mesh inside trough
-  const troughWater = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 3.3), tfWaterMat);
-  troughWater.position.set(3.2, 0.6, 0);
-  waterTowerGroup.add(troughWater);
-
-  // Sign on water tower: "TORTILLA FLAT ARTESIAN WELL"
-  const wellSignTex = makeWoodSignTexture('ARTESIAN WELL WATER', 'FREE SPRING WATER FOR HORSES & PROSPECTORS');
-  const wellSign = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.8, 3.4),
-    new THREE.MeshStandardMaterial({ map: wellSignTex, roughness: 0.7 })
-  );
-  wellSign.position.set(2.0, 5.4, 0);
-  wellSign.rotation.y = -Math.PI / 2;
-  waterTowerGroup.add(wellSign);
-
-  // Register water refill point in world coordinates!
-  waterRefillPoints.push(new THREE.Vector3(townX - 9.3, townY + 0.6, townZ + 15));
-
-  tortillaGroup.add(waterTowerGroup);
-
-  // ------------------------------------------------------------------
-  // 6. HISTORIC CONCORD OVERLAND STAGECOACH
-  // ------------------------------------------------------------------
-  const coachGroup = new THREE.Group();
-  coachGroup.position.set(0, 0, -2);
-  coachGroup.rotation.y = 0.08;
-
-  const coachRedMat = new THREE.MeshStandardMaterial({ color: 0x822416, roughness: 0.65 });
-  const coachYellowMat = new THREE.MeshStandardMaterial({ color: 0xd99f2b, roughness: 0.5 });
-  const coachCanvasMat = new THREE.MeshStandardMaterial({ color: 0xc8b693, roughness: 0.95 });
-
-  // Main Coach Cabin Body
-  const coachBody = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.85, 3.4), coachRedMat);
-  coachBody.position.set(0, 1.85, 0);
-  coachBody.castShadow = true;
-  coachGroup.add(coachBody);
-
-  // Curved passenger doors & windows (black insets)
-  for (const cx of [-1.06, 1.06]) {
-    const doorOutline = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.4), new THREE.MeshBasicMaterial({ color: 0x1a0805 }));
-    doorOutline.position.set(cx, 1.85, 0);
-    doorOutline.rotation.y = cx > 0 ? Math.PI / 2 : -Math.PI / 2;
-    coachGroup.add(doorOutline);
-  }
-
-  // Driver's Elevated Bench Seat & Footboard
-  const driverSeat = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.45, 0.9), coachRedMat);
-  driverSeat.position.set(0, 2.5, 1.6);
-  driverSeat.castShadow = true;
-  coachGroup.add(driverSeat);
-
-  const footboard = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.15, 0.7), tfWoodDark);
-  footboard.position.set(0, 2.05, 2.1);
-  coachGroup.add(footboard);
-
-  // Roof Luggage Railing with Canvas Covered Baggage & Trunks
-  const roofRail = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.25, 2.6), tfIron);
-  roofRail.position.set(0, 2.9, -0.3);
-  coachGroup.add(roofRail);
-
-  for (let t = 0; t < 3; t++) {
-    const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.45, 0.65), coachCanvasMat);
-    trunk.position.set((t - 1) * 0.6, 3.15, -0.3 + (t % 2) * 0.3);
-    trunk.castShadow = true;
-    coachGroup.add(trunk);
-  }
-
-  // 4 Large Spoked Wooden Wheels
-  // Rear Wheels (large, 1.6m diam)
-  for (const wx of [-1.2, 1.2]) {
-    const rWheel = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.16, 16), coachYellowMat);
-    rWheel.position.set(wx, 0.8, -1.2);
-    rWheel.rotation.z = Math.PI / 2;
-    rWheel.castShadow = true;
-    coachGroup.add(rWheel);
-  }
-
-  // Front Wheels (smaller, 1.2m diam)
-  for (const wx of [-1.15, 1.15]) {
-    const fWheel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.16, 16), coachYellowMat);
-    fWheel.position.set(wx, 0.6, 1.2);
-    fWheel.rotation.z = Math.PI / 2;
-    fWheel.castShadow = true;
-    coachGroup.add(fWheel);
-  }
-
-  // Horse Hitch Pole extending forward
-  const hitchPole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 4.2), tfWoodDark);
-  hitchPole.position.set(0, 0.5, 3.8);
-  hitchPole.rotation.x = Math.PI / 2;
-  coachGroup.add(hitchPole);
-
-  // Carriage Brass Lanterns
-  for (const lx of [-1.15, 1.15]) {
-    const cLantern = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.35, 0.2), tfBrass);
-    cLantern.position.set(lx, 2.6, 1.6);
-    coachGroup.add(cLantern);
-  }
-
-  tortillaGroup.add(coachGroup);
-
-  // ------------------------------------------------------------------
-  // 7. TOWN SQUARE CAMPFIRE & TRAVELERS' REST
-  // ------------------------------------------------------------------
-  const campGroup = new THREE.Group();
-  campGroup.position.set(2.5, 0, 13.5);
-
-  // Stone ring fire pit
-  for (let a = 0; a < 10; a++) {
-    const angle = (a / 10) * Math.PI * 2;
-    const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.26, 0), tfStoneWall);
-    stone.position.set(Math.cos(angle) * 1.1, 0.15, Math.sin(angle) * 1.1);
-    campGroup.add(stone);
-  }
-
-  // Glowing charcoal ash bed
-  const ashBed = new THREE.Mesh(
-    new THREE.CircleGeometry(0.95, 12),
-    new THREE.MeshStandardMaterial({ color: 0x1f0d06, emissive: 0xaa2200, emissiveIntensity: 0.8 })
-  );
-  ashBed.position.set(0, 0.06, 0);
-  ashBed.rotation.x = -Math.PI / 2;
-  campGroup.add(ashBed);
-
-  // Charred mesquite logs
-  for (let l = 0; l < 4; l++) {
-    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.2), tfWoodDark);
-    log.position.set(0, 0.2, 0);
-    log.rotation.x = 0.35;
-    log.rotation.y = (l * Math.PI) / 2;
-    campGroup.add(log);
-  }
-
-  // Cast iron coffee kettle on iron tripod
-  const kettle = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.4, 8), tfIron);
-  kettle.position.set(0, 0.45, 0);
-  campGroup.add(kettle);
-
-  // Flickering campfire light
-  const campLight = new THREE.PointLight(0xff6611, 2.8, 15);
-  campLight.position.set(0, 0.8, 0);
-  campGroup.add(campLight);
-
-  // Rustic split log benches for travelers
-  for (const bz of [-2.2, 2.2]) {
-    const benchLog = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.35, 0.5), tfWoodWeathered);
-    benchLog.position.set(0, 0.3, bz);
-    campGroup.add(benchLog);
-  }
-
-  tortillaGroup.add(campGroup);
-
-  // ------------------------------------------------------------------
-  // 8. TOWN WELCOME GATEWAY & HISTORIC DISTANCE SIGNPOST
-  // ------------------------------------------------------------------
-  const gateGroup = new THREE.Group();
-  gateGroup.position.set(0, 0, 23);
-
-  // Gateway tall timber posts
-  const postL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 5.5, 0.4), tfWoodDark);
-  postL.position.set(-4.5, 2.75, 0);
-  postL.castShadow = true;
-  gateGroup.add(postL);
-
-  const postR = new THREE.Mesh(new THREE.BoxGeometry(0.4, 5.5, 0.4), tfWoodDark);
-  postR.position.set(4.5, 2.75, 0);
-  postR.castShadow = true;
-  gateGroup.add(postR);
-
-  const gateLintel = new THREE.Mesh(new THREE.BoxGeometry(10.2, 0.45, 0.45), tfWoodDark);
-  gateLintel.position.set(0, 5.3, 0);
-  gateLintel.castShadow = true;
-  gateGroup.add(gateLintel);
-
-  // Arch Welcome Sign
-  const archSignTex = makeWoodSignTexture('WELCOME TO TORTILLA FLAT', 'POPULATION 6 — ELEVATION 1,720 FT — APACHE TRAIL', 600, 140);
-  const archSign = new THREE.Mesh(
-    new THREE.BoxGeometry(8.2, 1.4, 0.15),
-    new THREE.MeshStandardMaterial({ map: archSignTex, roughness: 0.7 })
-  );
-  archSign.position.set(0, 4.3, 0);
-  archSign.castShadow = true;
-  gateGroup.add(archSign);
-
-  tortillaGroup.add(gateGroup);
-
-  // Mileage Fingerpost Sign
-  const fingerpost = new THREE.Group();
-  fingerpost.position.set(4.5, 0, 18);
-
-  const fpPole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 2.8), tfWoodDark);
-  fpPole.position.set(0, 1.4, 0);
-  fingerpost.add(fpPole);
-
-  const trailSignTex = makeWoodSignTexture('← PERALTA TRAILHEAD 140m', 'WEAVERS NEEDLE: 190m | LOST MINE: 320m', 512, 128);
-  const trailSign = new THREE.Mesh(
-    new THREE.BoxGeometry(2.4, 0.7, 0.08),
-    new THREE.MeshStandardMaterial({ map: trailSignTex, roughness: 0.7 })
-  );
-  trailSign.position.set(0, 2.3, 0);
-  fingerpost.add(trailSign);
-
-  tortillaGroup.add(fingerpost);
-
-  // Add the entire historic town to the scene
-  scene.add(tortillaGroup);
+  const tortillaGroup = buildTortillaFlatSettlement(scene, waterRefillPoints);
 
   return {
     weaversNeedle: needleGroup,

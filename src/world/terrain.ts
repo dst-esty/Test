@@ -72,6 +72,11 @@ export const TERRAIN_SEG_SIZE = WORLD_SIZE / TERRAIN_SEGMENTS;
 
 export const activeDugHoles: DugHole[] = [];
 let activeTerrainMesh: THREE.Mesh | null = null;
+let activeTerrainHoleListener: ((hole: DugHole) => void) | null = null;
+
+export function setTerrainHoleListener(listener: ((hole: DugHole) => void) | null) {
+  activeTerrainHoleListener = listener;
+}
 
 /**
  * Calculates the pristine, undisturbed procedural elevation of the Superstition Mountains terrain at (x, z).
@@ -92,33 +97,230 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     const terraceBlend = Math.min(1.0, (rawElev - 6.0) / 10.0);
     const step = Math.floor(rawElev / terraceStep);
     const frac = (rawElev % terraceStep) / terraceStep;
-    // S-curve creates vertical cliff drop-offs with broad plateau shelves
-    const terraced = step * terraceStep + Math.pow(frac, 2.6) * terraceStep;
+    // Smooth Hermite blend creates continuous cliff drop-offs and broad plateau shelves without sharp polygon creases
+    const sCurve = frac * frac * (3.0 - 2.0 * frac);
+    const terraced = step * terraceStep + (frac * 0.35 + sCurve * 0.65) * terraceStep;
     rawElev = rawElev * (1.0 - terraceBlend * 0.55) + terraced * (terraceBlend * 0.55);
   }
 
-  // Winding box canyon gorge network: carved canyon passes with sheer sidewalls
-  const canyonCurve = Math.sin(x * 0.013 + 0.9) * 38 + Math.cos(x * 0.006) * 20;
-  const distToCanyon = Math.abs(z - canyonCurve);
-  let canyonCarve = 0;
-  if (distToCanyon < 26 && Math.abs(x) < 210) {
-    const cFactor = 1.0 - distToCanyon / 26;
-    canyonCarve = -Math.pow(cFactor, 0.55) * 13.5;
+  // 4. RICH CANYON NETWORK: Multiple Interconnected & Characterful Canyons
+  // (All with sheer sidewalls and navigable, smooth alluvial canyon floors)
+
+  // Canyon A: Peralta & Hieroglyphic Canyon Gorge (Southwest)
+  // Winding canyon pass from Peralta Trailhead (-120, -120) through Hieroglyphic Spring (-70, -20) to Massacre Grounds (-40, 90)
+  const peraltaCanyonX = -74 + Math.sin(z * 0.018 - 0.4) * 28 + Math.cos(z * 0.009) * 14;
+  const distToPeralta = Math.abs(x - peraltaCanyonX);
+  let peraltaCarve = 0;
+  if (distToPeralta < 28 && z > -150 && z < 140 && x < 15) {
+    const factor = 1.0 - distToPeralta / 28;
+    peraltaCarve = -Math.pow(factor, 0.48) * 15.0;
   }
 
-  // Wash / arroyo carving: dry riverbeds and alluvial fans
-  const wash = Math.sin(x * 0.015 + z * 0.01) * Math.cos(z * 0.012 - x * 0.008);
-  const arroyo = Math.abs(wash) * -7.5;
+  // Canyon B: Needle Canyon Gorge & East Chasm (East of Weaver's Needle towards Mine)
+  // Sweeps east of Weaver's Needle (80, 15) and winds between Eye Bluff and Lost Dutchman approach
+  const needleCanyonX = 118 + Math.sin(z * 0.024 + 0.6) * 30 + Math.cos(z * 0.01) * 16;
+  const distToNeedleCanyon = Math.abs(x - needleCanyonX);
+  let needleCanyonCarve = 0;
+  if (distToNeedleCanyon < 28 && z > -90 && z < 155 && x > 35) {
+    const factor = 1.0 - distToNeedleCanyon / 28;
+    needleCanyonCarve = -Math.pow(factor, 0.52) * 16.5;
+  }
 
-  // Imposing perimeter mountain wall with jagged volcanic ridges and knife-edge peaks (Superstition Massif)
+  // Canyon C: Rattlesnake Slot Canyon (Central Narrows)
+  // A tight, deep winding slot canyon cutting across the central red-rock ridge
+  const slotCanyonZ = -54 + Math.sin(x * 0.038 + 0.8) * 16 + Math.cos(x * 0.018) * 8;
+  const distToSlot = Math.abs(z - slotCanyonZ);
+  let slotCarve = 0;
+  if (distToSlot < 16 && x > -45 && x < 55) {
+    const factor = 1.0 - distToSlot / 16;
+    slotCarve = -Math.pow(factor, 0.4) * 13.0;
+  }
+
+  // Canyon D: Historic Box Canyon & East Gulch (Main Central-North Gorge)
+  const canyonCurve = Math.sin(x * 0.013 + 0.9) * 38 + Math.cos(x * 0.006) * 20;
+  const distToCanyon = Math.abs(z - canyonCurve);
+  let centralCanyonCarve = 0;
+  if (distToCanyon < 26 && Math.abs(x) < 210 && z > -165) {
+    const cFactor = 1.0 - distToCanyon / 26;
+    centralCanyonCarve = -Math.pow(cFactor, 0.55) * 13.5;
+  }
+
+  // Canyon E: Black Cross Box Canyon Amphitheater (Southeast Cleft, near Mine)
+  const distToAmphitheater = Math.hypot(x - 165, z - 145);
+  let amphitheaterCarve = 0;
+  if (distToAmphitheater < 34) {
+    const factor = 1.0 - distToAmphitheater / 34;
+    amphitheaterCarve = -Math.pow(factor, 0.6) * 14.5;
+  }
+
+  // Canyon F: Fish Creek Canyon Tributary (Northwest Gorge cutting toward Salt River)
+  const fishCreekCurve = -200 + Math.sin(x * 0.02 + 1.2) * 24 + (x + 90) * 0.65;
+  const distToFishCreek = Math.abs(z - fishCreekCurve);
+  let fishCreekCarve = 0;
+  if (distToFishCreek < 24 && x < -45 && z < -170 && z > -290) {
+    const factor = 1.0 - distToFishCreek / 24;
+    fishCreekCarve = -Math.pow(factor, 0.55) * 15.0;
+  }
+
+  // Combined Canyon Carving
+  const totalCanyonCarve = Math.min(
+    0,
+    peraltaCarve + needleCanyonCarve + slotCarve + centralCanyonCarve + amphitheaterCarve + fishCreekCarve
+  );
+
+  // 5. Wash / arroyo carving: dry riverbeds, alluvial fans, and gravel drainage
+  const wash1 = Math.sin(x * 0.015 + z * 0.01) * Math.cos(z * 0.012 - x * 0.008);
+  const wash2 = Math.sin(x * 0.028 - z * 0.02) * Math.cos(x * 0.018 + z * 0.015);
+  const arroyo = Math.abs(wash1) * -6.0 + Math.max(0, wash2) * -3.5;
+
+  // 6. Superstition Massif mountain ranges & endless Arizona desert frontier
+  // Features rich geomorphic mountain archetypes across different compass headings:
+  // - Northwest: Flat-topped Peters Mesa & Tablelands (horizontal basalt caprock with sheer cliffs)
+  // - South: Serrated Knife-Edge Volcanic Arêtes & Sawtooth Peaks
+  // - East: Asymmetric Fault-Block Monoclines & Cuestas (tilted dip-slopes with 45m fault scarps)
+  // - West: Stepped Dacite Domes & Resurgent Buttes
+  // - Mountain Passes & Saddles (Fremont Saddle, Terrapin Pass, Peralta Pass, Bluff Springs Gap)
   const distFromCenter = Math.hypot(x, z);
   let perimeterMountains = 0;
   if (distFromCenter > 200) {
-    const pDist = (distFromCenter - 200) / 140;
-    // Ridged noise for sharp knife-edge crests and serrated crags
-    const ridgeNoise = (1.0 - Math.abs(fbm(x * 0.016, z * 0.016, 3) * 2.0 - 1.0)) * 32;
-    const cragPeaks = Math.pow(fbm(x * 0.026 + 140, z * 0.026 + 140, 4), 1.9) * 42;
-    perimeterMountains = Math.pow(pDist, 1.3) * (32 + ridgeNoise + cragPeaks);
+    const angle = Math.atan2(z, x); // -PI to +PI
+
+    // Archetype 1: Peters Mesa & Flat-Topped Tablelands (Northwest / North-Northwest)
+    const mesaNoise = fbm(x * 0.012 + 25.5, z * 0.012 + 64.2, 3);
+    let mesaElev = 0;
+    if (mesaNoise > 0.46) {
+      const mFrac = (mesaNoise - 0.46) / 0.54;
+      const mesaTop = Math.min(1.0, Math.pow(mFrac * 2.2, 0.45));
+      mesaElev = mesaTop * 38.0 + Math.sin(x * 0.025 + z * 0.025) * 1.5;
+    }
+
+    // Archetype 2: Knife-Edge Volcanic Arêtes & Serrated Spires (South / Southeast)
+    const sharpArête = Math.pow(1.0 - Math.abs(fbm(x * 0.018 + 75, z * 0.018 + 75, 4) * 2.0 - 1.0), 1.6) * 44;
+    const jaggedTeeth = Math.pow(fbm(x * 0.032 + 180, z * 0.032 + 180, 4), 2.1) * 38;
+    const serratedElev = sharpArête * 0.65 + jaggedTeeth * 0.55 + 16.0;
+
+    // Archetype 3: Asymmetric Fault-Block Monoclines & Cuestas (East)
+    const dipRamp = Math.sin((x - 140) * 0.018 - z * 0.008);
+    const cuestaFactor = Math.max(0, dipRamp);
+    const faultScarp = Math.pow(cuestaFactor, 1.8) * 48 + fbm(x * 0.022, z * 0.022, 3) * 14;
+
+    // Archetype 4: Stepped Volcanic Dacite Domes & Buttes (West / Southwest)
+    const domeNoise = Math.pow(fbm(x * 0.015 - 45, z * 0.015 - 45, 4), 1.7) * 44;
+    const steppedDome = Math.floor(domeNoise / 6.5) * 6.5 + Math.min(6.0, (domeNoise % 6.5) * 1.7);
+
+    // Directional blending of mountain archetypes
+    const wNW = Math.max(0, Math.cos(angle - (-2.35)));
+    const wS = Math.max(0, Math.cos(angle - 1.57));
+    const wE = Math.max(0, Math.cos(angle - 0.2));
+    const wW = Math.max(0, Math.cos(angle - (-1.2)));
+    const totalW = (wNW + wS + wE + wW) || 1.0;
+
+    const blendedMountainArchetype =
+      (mesaElev * wNW + serratedElev * wS + faultScarp * wE + steppedDome * wW) / totalW;
+
+    // Endless procedural mountain chains & broad desert passes
+    const mountainChains = Math.pow(fbm(x * 0.005 + 12.3, z * 0.005 + 87.1, 4), 1.7) * 44;
+    const valleyPasses = Math.min(1.0, Math.max(0.15, fbm(x * 0.003 - 45.2, z * 0.003 + 33.8, 3) * 1.5));
+
+    if (distFromCenter <= 340) {
+      // The iconic historic Superstition Massif rim encircling the central wilderness
+      const pDist = (distFromCenter - 200) / 140;
+      const rimFactor = Math.sin(pDist * (Math.PI * 0.5));
+      perimeterMountains = rimFactor * Math.min(62, 22 + blendedMountainArchetype);
+    } else {
+      // Smooth transition into the endless Sonoran wilderness mountain ranges and valleys
+      const tEndless = Math.min(1.0, (distFromCenter - 340) / 120);
+      const rimElevation = Math.min(62, 22 + blendedMountainArchetype);
+      const endlessElevation = (16 + blendedMountainArchetype * 0.6 + mountainChains) * valleyPasses;
+      perimeterMountains = rimElevation * (1.0 - tEndless) + Math.min(66, endlessElevation) * tEndless;
+    }
+
+    // Authentic Mountain Passes & Wind Gaps (carved saddles allowing trail exploration):
+    let passCarveFactor = 1.0;
+
+    // 1. Fremont Saddle (South Pass, x: 30, z: 220):
+    const distFremont = Math.hypot(x - 30, z - 220);
+    if (distFremont < 36) {
+      const f = 1.0 - distFremont / 36;
+      passCarveFactor = Math.min(passCarveFactor, Math.max(0.20, 1.0 - f * 0.80));
+    }
+
+    // 2. Terrapin Pass (East Pass, x: 210, z: -10):
+    const distTerrapin = Math.hypot(x - 210, z - (-10));
+    if (distTerrapin < 34) {
+      const f = 1.0 - distTerrapin / 34;
+      passCarveFactor = Math.min(passCarveFactor, Math.max(0.22, 1.0 - f * 0.78));
+    }
+
+    // 3. Peralta Pass (Southwest Pass, x: -160, z: 120):
+    const distPeraltaPass = Math.hypot(x - (-160), z - 120);
+    if (distPeraltaPass < 36) {
+      const f = 1.0 - distPeraltaPass / 36;
+      passCarveFactor = Math.min(passCarveFactor, Math.max(0.22, 1.0 - f * 0.78));
+    }
+
+    // 4. Bluff Springs Gap (West Pass, x: -190, z: -20):
+    const distBluffPass = Math.hypot(x - (-190), z - (-20));
+    if (distBluffPass < 34) {
+      const f = 1.0 - distBluffPass / 34;
+      passCarveFactor = Math.min(passCarveFactor, Math.max(0.24, 1.0 - f * 0.76));
+    }
+
+    perimeterMountains *= passCarveFactor;
+
+    // Accessible Mountain Summit Trail Ramps & Plateau Saddles:
+    // 1. Peters Mesa Summit Pack Trail (NW): Gentle switchback ramp from Peralta Pass (x: -160, z: 120)
+    //    climbing up onto the broad, flat basalt tableland (x: -210, z: 170)
+    const distToPetersTrail = Math.hypot(x - (-185), z - 145);
+    if (distToPetersTrail < 32) {
+      const trailT = 1.0 - distToPetersTrail / 32;
+      const targetElev = 16.0 + (-(x - (-160)) * 0.42 + (z - 120) * 0.38);
+      perimeterMountains = perimeterMountains * (1.0 - trailT * 0.72) + Math.min(38, targetElev) * (trailT * 0.72);
+    }
+
+    // 2. Fremont Ridge Crest Trail (South): Gentle arête trail from Fremont Saddle (x: 30, z: 220)
+    //    ascending to the southern panoramic summit lookout (x: 65, z: 235)
+    const distToFremontRidge = Math.hypot(x - 48, z - 228);
+    if (distToFremontRidge < 26) {
+      const ridgeT = 1.0 - distToFremontRidge / 26;
+      const targetElev = 18.0 + (x - 30) * 0.65;
+      perimeterMountains = perimeterMountains * (1.0 - ridgeT * 0.65) + Math.min(42, targetElev) * (ridgeT * 0.65);
+    }
+
+    // 3. Eastern Escarpment Rim Trail (East): Ascends from Terrapin Pass (x: 210, z: -10)
+    //    up to the high fault-block scarp rim (x: 235, z: 20)
+    const distToEastRim = Math.hypot(x - 222, z - 8);
+    if (distToEastRim < 25) {
+      const rimT = 1.0 - distToEastRim / 25;
+      const targetElev = 17.0 + (x - 210) * 0.75;
+      perimeterMountains = perimeterMountains * (1.0 - rimT * 0.65) + Math.min(44, targetElev) * (rimT * 0.65);
+    }
+
+    // 4. Western Dacite Butte Trail (West): Step-ramp ascending from Bluff Springs Gap (x: -190, z: -20)
+    //    up to the weathered volcanic summit (x: -225, z: -20)
+    const distToWestButte = Math.hypot(x - (-208), z - (-20));
+    if (distToWestButte < 25) {
+      const butteT = 1.0 - distToWestButte / 25;
+      const targetElev = 18.0 + (-(x - (-190))) * 0.68;
+      perimeterMountains = perimeterMountains * (1.0 - butteT * 0.65) + Math.min(40, targetElev) * (butteT * 0.65);
+    }
+
+    // Apache Trail Mountain Pass & Northern Salt River Basin opening:
+    // Carves an authentic canyon gap connecting Superstition Wilderness to the Salt River
+    if (z < -160 && distFromCenter < 380) {
+      if (Math.abs(x) < 40 && z >= -225) {
+        // Stagecoach pass through perimeter mountains from the south
+        const passCarve = 1.0 - Math.abs(x) / 40;
+        perimeterMountains *= Math.max(0.02, 1.0 - passCarve * 0.96);
+      } else if (Math.abs(x) < 55 && z < -220 && z >= -286) {
+        // Broad, completely clear canyon basin for the Tortilla Flat settlement
+        const valleyCarve = Math.max(0, 1.0 - Math.abs(x) / 55);
+        perimeterMountains *= (1.0 - valleyCarve);
+      } else if (z < -286) {
+        // Northern Salt River canyon basin opening
+        perimeterMountains *= 0.08;
+      }
+    }
   }
 
   // Special landmark features:
@@ -150,20 +352,68 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     mineRidge = Math.sin(Math.atan2(z - 110, x - 160) * 2) * 5 + 6;
   }
 
-  // 5. Historic Town of Tortilla Flat level canyon terrace
-  const distToTortilla = Math.hypot(x - (-15), z - (-150));
-  let tortillaFlatten = 1.0;
-  if (distToTortilla < 45) {
-    tortillaFlatten = Math.min(1.0, Math.pow(distToTortilla / 45, 1.4));
+  // 5. The Grand Salt River Canyon Gorge (runs east-to-west across northern expanse, positioned north of town ~ -305)
+  const saltRiverZ = -305 + Math.sin(x * 0.016) * 9.0 + Math.cos(x * 0.008) * 5.0;
+  const distToSaltRiver = Math.abs(z - saltRiverZ);
+  let saltRiverCarve = 0;
+  if (distToSaltRiver < 28 && z < -282) {
+    const canyonFactor = 1.0 - distToSaltRiver / 28;
+    // Carve deep sheer canyon walls down to smooth riverbed
+    saltRiverCarve = -Math.pow(canyonFactor, 0.75) * 14.0;
   }
 
-  const rawHeight =
-    (rawElev + canyonCarve + arroyo + needleBase + springDepression + mineRidge) *
-      trailheadFlatten *
-      (0.35 + 0.65 * tortillaFlatten) +
-    perimeterMountains;
+  // Sheer towering northern canyon cliffs on the north wall of the Salt River
+  let northCanyonWall = 0;
+  if (z < -318) {
+    const wallDist = Math.min(1.0, (-z - 318) / 30);
+    const wallNoise = Math.pow(fbm(x * 0.022 + 200, z * 0.022 + 200, 3), 1.5) * 20;
+    northCanyonWall = wallDist * (26 + wallNoise);
+  }
 
-  return Math.max(0.4, rawHeight);
+  // 6. Historic Town of Tortilla Flat level river terrace on the south bank of the Salt River
+  // Encompasses Saloon, Mercantile, Jail, Livery Barn, Water Tower, Campfire, Street & Boardwalks.
+  // Core flat box: X: [-27, +27], Z: [-275, -225]. Entire core is strictly 7.5m with zero mountain slope.
+  let tortillaFlatBlend = 0;
+  let isRiverTrail = false;
+  let riverTrailTarget = 7.5;
+
+  if (z >= -275 && z <= -225 && Math.abs(x) <= 27) {
+    tortillaFlatBlend = 1.0;
+  } else if (z < -275 && z >= -306 && Math.abs(x) <= 16) {
+    // Gentle scenic wagon trail sloping down from town (7.5m) to Salt River Pier (2.8m)
+    isRiverTrail = true;
+    const trailT = Math.min(1.0, ((-275) - z) / 30);
+    riverTrailTarget = 7.5 * (1.0 - trailT) + 2.8 * trailT;
+    tortillaFlatBlend = 1.0;
+  } else {
+    const dxBox = Math.max(0, Math.abs(x) - 27);
+    let dzBox = 0;
+    if (z > -225) {
+      dzBox = z - (-225);
+    } else if (z < -275) {
+      dzBox = (-275) - z;
+    }
+    const distToTownBox = Math.hypot(dxBox, dzBox);
+    if (distToTownBox < 26) {
+      const t = distToTownBox / 26;
+      // Smooth Hermite S-curve
+      tortillaFlatBlend = 1.0 - (t * t * (3 - 2 * t));
+    }
+  }
+
+  let rawHeight =
+    (rawElev + totalCanyonCarve + arroyo + needleBase + springDepression + mineRidge + saltRiverCarve) *
+      trailheadFlatten +
+    perimeterMountains * (totalCanyonCarve < -1 ? Math.max(0.08, 1.0 + totalCanyonCarve / 18.0) : 1.0) +
+    northCanyonWall;
+
+  // Level out the Tortilla Flat town terrace smoothly to an elevated, dry 7.5m (or sloping river trail)
+  if (tortillaFlatBlend > 0) {
+    const targetH = isRiverTrail ? riverTrailTarget : 7.5;
+    rawHeight = rawHeight * (1.0 - tortillaFlatBlend) + targetH * tortillaFlatBlend;
+  }
+
+  return Math.max(0.6, rawHeight);
 }
 
 /**
@@ -710,6 +960,9 @@ export function digHoleInTerrain(
  * Updates terrain mesh vertices and rock-strata shading colors around a specific dug hole.
  */
 export function updateTerrainMeshForHole(hole: DugHole) {
+  if (activeTerrainHoleListener) {
+    activeTerrainHoleListener(hole);
+  }
   if (!activeTerrainMesh) return;
   const geom = activeTerrainMesh.geometry as THREE.BufferGeometry;
   const pos = geom.attributes.position as THREE.BufferAttribute;
@@ -1493,12 +1746,16 @@ export function generateTerrainNoiseTexture(size = 256): THREE.DataTexture {
 }
 
 // Shared hole cutout uniforms for terrain shader to prevent geometry tearing in carved tunnels
+// Packed into two compact vec4 arrays (Pos+Radius, Dir+SignedDepth) to strictly respect MAX_FRAGMENT_UNIFORM_VECTORS
+export const MAX_MOUNTAIN_HOLES = 4;
+
 export const terrainHoleUniforms = {
-  uMountainHolePositions: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, -9999, 0)) },
-  uMountainHoleDirs: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, 0, 1)) },
-  uMountainHoleRadii: { value: new Float32Array(16) },
-  uMountainHoleDepths: { value: new Float32Array(16) },
-  uMountainHolePassThrough: { value: new Float32Array(16) },
+  uMountainHolePosRadius: {
+    value: Array.from({ length: MAX_MOUNTAIN_HOLES }, () => new THREE.Vector4(0, -9999, 0, 0)),
+  },
+  uMountainHoleDirDepth: {
+    value: Array.from({ length: MAX_MOUNTAIN_HOLES }, () => new THREE.Vector4(0, 0, -1, 0)),
+  },
   uMountainHoleCount: { value: 0 },
 };
 
@@ -1507,17 +1764,27 @@ const _scratchTerrainBoreDir = new THREE.Vector3();
 export function updateTerrainHoleCutouts(
   holes: Array<{ position: THREE.Vector3; depth: number; radius: number; group: THREE.Group; isPassThrough?: boolean }>
 ): void {
-  const count = Math.min(16, holes.length);
+  const count = Math.min(MAX_MOUNTAIN_HOLES, holes.length);
   terrainHoleUniforms.uMountainHoleCount.value = count;
   for (let i = 0; i < count; i++) {
     const h = holes[i];
-    terrainHoleUniforms.uMountainHolePositions.value[i].copy(h.position);
+    terrainHoleUniforms.uMountainHolePosRadius.value[i].set(
+      h.position.x,
+      h.position.y,
+      h.position.z,
+      h.radius * 0.98
+    );
+
     // Bore direction points along local -Z into the mountain (zero-allocation)
     _scratchTerrainBoreDir.set(0, 0, -1).applyQuaternion(h.group.quaternion).normalize();
-    terrainHoleUniforms.uMountainHoleDirs.value[i].copy(_scratchTerrainBoreDir);
-    terrainHoleUniforms.uMountainHoleRadii.value[i] = h.radius * 0.98;
-    terrainHoleUniforms.uMountainHoleDepths.value[i] = h.depth;
-    terrainHoleUniforms.uMountainHolePassThrough.value[i] = h.isPassThrough ? 1.0 : 0.0;
+    // Negative depth encodes pass-through tunnel (clean zero-uniform-overhead encoding)
+    const signedDepth = (h.isPassThrough ? -1.0 : 1.0) * Math.max(0.05, h.depth);
+    terrainHoleUniforms.uMountainHoleDirDepth.value[i].set(
+      _scratchTerrainBoreDir.x,
+      _scratchTerrainBoreDir.y,
+      _scratchTerrainBoreDir.z,
+      signedDepth
+    );
   }
 }
 
@@ -1529,18 +1796,15 @@ export function applyMountainHoleShaderToMaterial(
   material: THREE.MeshStandardMaterial,
   cacheKeySuffix: string = 'rock'
 ): void {
-  material.customProgramCacheKey = () => `mtn_hole_cutout_${cacheKeySuffix}_v1`;
+  material.customProgramCacheKey = () => `mtn_hole_cutout_${cacheKeySuffix}_v2`;
   const prevOnBeforeCompile = material.onBeforeCompile;
 
   material.onBeforeCompile = (shader, renderer) => {
     if (prevOnBeforeCompile) {
       prevOnBeforeCompile(shader, renderer);
     }
-    shader.uniforms.uMountainHolePositions = terrainHoleUniforms.uMountainHolePositions;
-    shader.uniforms.uMountainHoleDirs = terrainHoleUniforms.uMountainHoleDirs;
-    shader.uniforms.uMountainHoleRadii = terrainHoleUniforms.uMountainHoleRadii;
-    shader.uniforms.uMountainHoleDepths = terrainHoleUniforms.uMountainHoleDepths;
-    shader.uniforms.uMountainHolePassThrough = terrainHoleUniforms.uMountainHolePassThrough;
+    shader.uniforms.uMountainHolePosRadius = terrainHoleUniforms.uMountainHolePosRadius;
+    shader.uniforms.uMountainHoleDirDepth = terrainHoleUniforms.uMountainHoleDirDepth;
     shader.uniforms.uMountainHoleCount = terrainHoleUniforms.uMountainHoleCount;
 
     shader.vertexShader = shader.vertexShader.replace(
@@ -1562,11 +1826,8 @@ export function applyMountainHoleShaderToMaterial(
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <common>',
       `#include <common>
-      uniform vec3 uMountainHolePositions[16];
-      uniform vec3 uMountainHoleDirs[16];
-      uniform float uMountainHoleRadii[16];
-      uniform float uMountainHoleDepths[16];
-      uniform float uMountainHolePassThrough[16];
+      uniform vec4 uMountainHolePosRadius[4];
+      uniform vec4 uMountainHoleDirDepth[4];
       uniform int uMountainHoleCount;
       varying highp vec3 vRockWorldPos;`
     );
@@ -1575,16 +1836,21 @@ export function applyMountainHoleShaderToMaterial(
       '#include <clipping_planes_fragment>',
       `#include <clipping_planes_fragment>
       // Cut hollow opening through rock for excavated mine portals
-      for (int i = 0; i < 16; i++) {
+      for (int i = 0; i < 4; i++) {
         if (i >= uMountainHoleCount) break;
-        vec3 toFrag = vRockWorldPos - uMountainHolePositions[i];
-        float distAlong = dot(toFrag, uMountainHoleDirs[i]);
-        float maxDepth = (uMountainHolePassThrough[i] > 0.5) ? (uMountainHoleDepths[i] + 4.0) : (uMountainHoleDepths[i] + 0.35);
+        vec3 holePos = uMountainHolePosRadius[i].xyz;
+        float holeRadius = uMountainHolePosRadius[i].w;
+        vec3 holeDir = uMountainHoleDirDepth[i].xyz;
+        float rawDepth = abs(uMountainHoleDirDepth[i].w);
+        bool isPassThrough = uMountainHoleDirDepth[i].w < 0.0;
+
+        vec3 toFrag = vRockWorldPos - holePos;
+        float distAlong = dot(toFrag, holeDir);
+        float maxDepth = isPassThrough ? (rawDepth + 4.0) : (rawDepth + 0.35);
         if (distAlong > -0.65 && distAlong < maxDepth) {
-          vec3 radial = toFrag - distAlong * uMountainHoleDirs[i];
+          vec3 radial = toFrag - distAlong * holeDir;
           float r2 = dot(radial, radial);
-          float rad = uMountainHoleRadii[i];
-          if (r2 < rad * rad) {
+          if (r2 < holeRadius * holeRadius) {
             discard;
           }
         }
@@ -1607,15 +1873,12 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
     shadowSide: THREE.FrontSide,
   });
 
-  material.customProgramCacheKey = () => 'superstition_terrain_material_v4';
+  material.customProgramCacheKey = () => 'superstition_terrain_material_v5';
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTerrainNoise = { value: noiseTexture };
-    shader.uniforms.uMountainHolePositions = terrainHoleUniforms.uMountainHolePositions;
-    shader.uniforms.uMountainHoleDirs = terrainHoleUniforms.uMountainHoleDirs;
-    shader.uniforms.uMountainHoleRadii = terrainHoleUniforms.uMountainHoleRadii;
-    shader.uniforms.uMountainHoleDepths = terrainHoleUniforms.uMountainHoleDepths;
-    shader.uniforms.uMountainHolePassThrough = terrainHoleUniforms.uMountainHolePassThrough;
+    shader.uniforms.uMountainHolePosRadius = terrainHoleUniforms.uMountainHolePosRadius;
+    shader.uniforms.uMountainHoleDirDepth = terrainHoleUniforms.uMountainHoleDirDepth;
     shader.uniforms.uMountainHoleCount = terrainHoleUniforms.uMountainHoleCount;
 
     // Vertex shader: pass 3D world position and accurate world normal with matching highp precision
@@ -1638,11 +1901,8 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
       '#include <common>',
       `#include <common>
       uniform sampler2D uTerrainNoise;
-      uniform vec3 uMountainHolePositions[16];
-      uniform vec3 uMountainHoleDirs[16];
-      uniform float uMountainHoleRadii[16];
-      uniform float uMountainHoleDepths[16];
-      uniform float uMountainHolePassThrough[16];
+      uniform vec4 uMountainHolePosRadius[4];
+      uniform vec4 uMountainHoleDirDepth[4];
       uniform int uMountainHoleCount;
       varying highp vec3 vWorldPos;
       varying highp vec3 vWorldNormal;`
@@ -1652,16 +1912,21 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <clipping_planes_fragment>',
       `#include <clipping_planes_fragment>
-      for (int i = 0; i < 16; i++) {
+      for (int i = 0; i < 4; i++) {
         if (i >= uMountainHoleCount) break;
-        vec3 toFrag = vWorldPos - uMountainHolePositions[i];
-        float distAlong = dot(toFrag, uMountainHoleDirs[i]);
-        float maxDepth = (uMountainHolePassThrough[i] > 0.5) ? (uMountainHoleDepths[i] + 4.0) : (uMountainHoleDepths[i] + 0.35);
+        vec3 holePos = uMountainHolePosRadius[i].xyz;
+        float holeRadius = uMountainHolePosRadius[i].w;
+        vec3 holeDir = uMountainHoleDirDepth[i].xyz;
+        float rawDepth = abs(uMountainHoleDirDepth[i].w);
+        bool isPassThrough = uMountainHoleDirDepth[i].w < 0.0;
+
+        vec3 toFrag = vWorldPos - holePos;
+        float distAlong = dot(toFrag, holeDir);
+        float maxDepth = isPassThrough ? (rawDepth + 4.0) : (rawDepth + 0.35);
         if (distAlong > -0.65 && distAlong < maxDepth) {
-          vec3 radial = toFrag - distAlong * uMountainHoleDirs[i];
+          vec3 radial = toFrag - distAlong * holeDir;
           float r2 = dot(radial, radial);
-          float rad = uMountainHoleRadii[i];
-          if (r2 < rad * rad) {
+          if (r2 < holeRadius * holeRadius) {
             discard;
           }
         }
@@ -1740,6 +2005,14 @@ export function createTerrainMesh(): THREE.Mesh {
     const vy = getTerrainHeight(vx, vz);
     pos.setY(i, vy);
 
+    // Compute surface slope via finite difference
+    const eps = 1.2;
+    const hL = getTerrainHeight(vx - eps, vz);
+    const hR = getTerrainHeight(vx + eps, vz);
+    const hD = getTerrainHeight(vx, vz - eps);
+    const hU = getTerrainHeight(vx, vz + eps);
+    const slope = Math.hypot(hR - hL, hU - hD) / (2.0 * eps); // > 0.8 represents sheer canyon/mountain cliff
+
     // Color computation
     const distToSpring = Math.hypot(vx - (-70), vz - (-20));
     let r = 0.82;
@@ -1752,32 +2025,46 @@ export function createTerrainMesh(): THREE.Mesh {
       r = 0.42 * factor + r * (1 - factor);
       g = 0.54 * factor + g * (1 - factor);
       b = 0.26 * factor + b * (1 - factor);
-    } else if (vy > 35) {
-      // High volcanic basalt ridge
-      r = 0.42;
-      g = 0.33;
-      b = 0.28;
-    } else if (vy > 18) {
-      // Red rock cliffs & spires
-      const strata = Math.sin(vy * 0.8) * 0.08;
-      r = 0.72 + strata;
-      g = 0.32 + strata * 0.5;
-      b = 0.18 + strata * 0.3;
-    } else if (vy > 6) {
-      // Terracotta desert slope
-      r = 0.78;
-      g = 0.48;
+    } else if (slope > 0.75) {
+      // Sheer canyon walls & mountain cliff faces: exposed layered red sandstone & desert varnish
+      const strata = Math.sin(vy * 0.95 + vx * 0.04) * 0.09;
+      const varnish = Math.sin(vx * 0.25 + vz * 0.25) > 0.4 ? -0.12 : 0.0;
+      r = 0.74 + strata + varnish;
+      g = 0.28 + strata * 0.5 + varnish * 0.6;
+      b = 0.16 + strata * 0.3 + varnish * 0.4;
+    } else if (vy > 34 && slope < 0.42 && vx < 20 && vz < -40) {
+      // Flat-topped Peters Mesa plateau caprock: weathered dark basalt & desert pavement
+      r = 0.44;
+      g = 0.36;
       b = 0.30;
+    } else if (vy > 36) {
+      // High volcanic arête ridge & craggy summit
+      const varnish = Math.sin(vx * 0.15) * 0.04;
+      r = 0.46 + varnish;
+      g = 0.36 + varnish * 0.8;
+      b = 0.30 + varnish * 0.6;
+    } else if (vy > 18) {
+      // Terracotta mountain slopes & bench ledges
+      const strata = Math.sin(vy * 0.8) * 0.07;
+      r = 0.74 + strata;
+      g = 0.42 + strata * 0.5;
+      b = 0.26 + strata * 0.3;
+    } else if (vy > 6) {
+      // Lower bajada desert slope
+      r = 0.80;
+      g = 0.54;
+      b = 0.36;
     } else {
-      // Sandy wash / arroyo floor
-      r = 0.84 + Math.sin(vx * 0.1) * 0.03;
-      g = 0.68 + Math.cos(vz * 0.1) * 0.03;
-      b = 0.48;
+      // Smooth sandy wash / canyon riverbed floor
+      const sandRipple = Math.sin(vx * 0.12) * 0.03 + Math.cos(vz * 0.12) * 0.02;
+      r = 0.86 + sandRipple;
+      g = 0.70 + sandRipple * 0.8;
+      b = 0.50 + sandRipple * 0.6;
     }
 
-    colors[i * 3] = r;
-    colors[i * 3 + 1] = g;
-    colors[i * 3 + 2] = b;
+    colors[i * 3] = Math.max(0.1, Math.min(1.0, r));
+    colors[i * 3 + 1] = Math.max(0.1, Math.min(1.0, g));
+    colors[i * 3 + 2] = Math.max(0.1, Math.min(1.0, b));
   }
 
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));

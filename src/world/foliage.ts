@@ -185,9 +185,9 @@ function createWeatheredCorestoneGeometry(): THREE.BufferGeometry {
  */
 function createVolcanicCragGeometry(): THREE.BufferGeometry {
   const height = 18.0;
-  const radialSegments = 8;
-  const heightSegments = 22;
-  const geo = new THREE.CylinderGeometry(2.4, 5.2, height, radialSegments, heightSegments);
+  const radialSegments = 10;
+  const heightSegments = 24;
+  const geo = new THREE.CylinderGeometry(2.2, 5.4, height, radialSegments, heightSegments);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colors = new Float32Array(pos.count * 3);
 
@@ -200,23 +200,21 @@ function createVolcanicCragGeometry(): THREE.BufferGeometry {
     const angle = Math.atan2(pz, px);
     const radius = Math.hypot(px, pz);
 
-    // Base talus apron (t < 0.20)
+    // Smooth, strictly monotonic profile without any sudden overhang steps
     let profileScale = 1.0;
-    if (t < 0.20) {
-      profileScale = 1.1 + Math.pow((0.20 - t) / 0.20, 2.0) * 0.9;
-    } else if (t >= 0.82) {
-      // Jagged serrated summit crest with asymmetric knife-edge fangs (NO mushroom!)
-      const crest = Math.cos(angle * 2.0 + 0.6) * 0.32;
-      profileScale = Math.max(0.25, (1.0 - (t - 0.82) / 0.18 * 0.65) * (1.0 + crest));
-      py += Math.pow(Math.max(0, Math.sin(angle * 2.0)), 2.0) * 2.4;
+    if (t >= 0.80) {
+      // Jagged summit crest with asymmetric knife-edge peaks (tapering inwards to summits)
+      const crest = Math.cos(angle * 2.0 + 0.6) * 0.25;
+      profileScale = (1.0 - (t - 0.80) / 0.20 * 0.55) * (1.0 + crest);
+      py += Math.pow(Math.max(0, Math.sin(angle * 2.0)), 2.0) * 1.8;
     } else {
-      // Sheer vertical column with subtle terracing
-      profileScale = 0.94 + Math.sin(t * 18.0) * 0.06;
+      // Continuous smooth column with subtle vertical weathering
+      profileScale = 1.0 - t * 0.12 + Math.sin(t * 12.0) * 0.03;
     }
 
     // Columnar vertical jointing & rock faceting
-    const jointFacet = Math.cos(angle * 4.0) * 0.18 + Math.sin(angle * 8.0) * 0.08;
-    const strataGroove = Math.sin(py * 3.8) * 0.06;
+    const jointFacet = Math.cos(angle * 4.0) * 0.14 + Math.sin(angle * 8.0) * 0.06;
+    const strataGroove = Math.sin(py * 2.8) * 0.04;
 
     const newRadius = radius * profileScale * (1.0 + jointFacet + strataGroove);
     px = Math.cos(angle) * newRadius;
@@ -257,10 +255,10 @@ function createVolcanicCragGeometry(): THREE.BufferGeometry {
  * Authentic flat-top caprock mesa with stepped horizontal benches and vertical drops.
  */
 function createSteppedMesaGeometry(): THREE.BufferGeometry {
-  const height = 13.0;
+  const height = 14.0;
   const radialSegments = 12;
   const heightSegments = 24;
-  const geo = new THREE.CylinderGeometry(4.5, 6.8, height, radialSegments, heightSegments);
+  const geo = new THREE.CylinderGeometry(3.8, 6.8, height, radialSegments, heightSegments);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colors = new Float32Array(pos.count * 3);
 
@@ -273,24 +271,15 @@ function createSteppedMesaGeometry(): THREE.BufferGeometry {
     const angle = Math.atan2(pz, px);
     const radius = Math.hypot(px, pz);
 
-    // Stepped horizontal benches with vertical drops
-    let profileScale = 1.0;
-    if (t < 0.18) {
-      // Talus scree base
-      profileScale = 1.05 + (0.18 - t) * 1.8;
-    } else if (t >= 0.88) {
-      // Distinct flat mesa caprock plateau
-      profileScale = 1.02;
-    } else {
-      // S-curve steps (distinct horizontal benches)
-      const stepIdx = Math.floor((t - 0.18) * 6.0);
-      const stepFrac = ((t - 0.18) * 6.0) % 1.0;
-      const stepTerrace = stepIdx * 0.07 + Math.pow(stepFrac, 3.2) * 0.07;
-      profileScale = 0.90 + stepTerrace;
-    }
+    // Natural receding geological benches (each tier steps inward, NEVER outward)
+    const terraceCount = 3.0;
+    const terraceFrac = (t * terraceCount) % 1.0;
+    const shelfRecede = Math.pow(terraceFrac, 2.5) * 0.06;
+    const generalTaper = (1.0 - t * 0.20);
+    const profileScale = generalTaper - shelfRecede;
 
     // Angular blocky corners (quadrangular mesa)
-    const blocky = Math.cos(angle * 4.0) * 0.12 + Math.sin(angle * 2.0) * 0.06;
+    const blocky = Math.cos(angle * 4.0) * 0.10 + Math.sin(angle * 2.0) * 0.05;
     const newRadius = radius * profileScale * (1.0 + blocky);
 
     px = Math.cos(angle) * newRadius;
@@ -332,9 +321,9 @@ function createSteppedMesaGeometry(): THREE.BufferGeometry {
  */
 function createFaultMonoclineGeometry(): THREE.BufferGeometry {
   const height = 15.0;
-  const radialSegments = 8;
-  const heightSegments = 20;
-  const geo = new THREE.CylinderGeometry(2.2, 4.5, height, radialSegments, heightSegments);
+  const radialSegments = 10;
+  const heightSegments = 22;
+  const geo = new THREE.CylinderGeometry(2.0, 4.8, height, radialSegments, heightSegments);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colors = new Float32Array(pos.count * 3);
 
@@ -347,11 +336,12 @@ function createFaultMonoclineGeometry(): THREE.BufferGeometry {
     const angle = Math.atan2(pz, px);
     const radius = Math.hypot(px, pz);
 
-    // Tilted monocline: shear along X axis
-    const tiltShift = Math.sin(angle) * (t * 2.8);
-    const scarpCut = Math.cos(angle) > 0.2 ? 0.85 : 1.15;
+    // Smooth tilted monocline: shear along X axis, continuous gentle taper
+    const tiltShift = Math.sin(angle) * (t * 2.2);
+    const scarpCut = Math.cos(angle) > 0.2 ? 0.90 : 1.10;
 
-    const profileScale = (t < 0.2 ? 1.2 : 0.95 - t * 0.3) * scarpCut;
+    // Continuous monotonic profile with no jump discontinuities
+    const profileScale = (1.0 - t * 0.28) * scarpCut;
     const newRadius = radius * profileScale;
 
     px = Math.cos(angle) * newRadius + tiltShift;
@@ -389,7 +379,7 @@ function createNeedleSpireGeometry(): THREE.BufferGeometry {
   const height = 21.0;
   const radialSegments = 10;
   const heightSegments = 26;
-  const geo = new THREE.CylinderGeometry(1.1, 4.8, height, radialSegments, heightSegments);
+  const geo = new THREE.CylinderGeometry(1.2, 4.6, height, radialSegments, heightSegments);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colors = new Float32Array(pos.count * 3);
 
@@ -402,14 +392,9 @@ function createNeedleSpireGeometry(): THREE.BufferGeometry {
     const angle = Math.atan2(pz, px);
     const radius = Math.hypot(px, pz);
 
-    // Continuous tapering from talus base to needle tip
-    let profileScale = 1.0;
-    if (t < 0.22) {
-      profileScale = 1.35 + Math.pow((0.22 - t) / 0.22, 1.8) * 0.85;
-    } else {
-      const fluting = Math.sin(angle * 5.0) * 0.12;
-      profileScale = (1.0 - (t - 0.22) * 0.65) * (1.0 + fluting);
-    }
+    // Completely smooth continuous taper from subterranean base to needle pinnacle
+    const fluting = Math.sin(angle * 5.0) * 0.08;
+    const profileScale = (1.0 - t * 0.35) * (1.0 + fluting);
 
     const newRadius = radius * profileScale;
     px = Math.cos(angle) * newRadius;
@@ -452,14 +437,16 @@ export interface WorldRockCollider {
 }
 
 /**
- * Ensures the Peralta Base Camp, Trailhead (-120, -120), and Player Spawn (-115, -115)
+ * Ensures the Tortilla Flat settlement (0, -252), Peralta Base Camp (-120, -120), and Player Spawns
  * are completely clear of randomly spawned boulders, cacti, scrub, and mountain outcroppings.
  */
 export function isNearPeraltaCamp(x: number, z: number, clearanceRadius: number = 22): boolean {
   const distTrailhead = Math.hypot(x - (-120), z - (-120));
   const distSpawn = Math.hypot(x - (-115), z - (-115));
   const distCenter = Math.hypot(x - (-117.5), z - (-117.5));
-  return distTrailhead < clearanceRadius || distSpawn < clearanceRadius || distCenter < clearanceRadius;
+  const distTortilla = Math.hypot(x - 0, z - (-250));
+  const isTortillaTownBox = Math.abs(x) < 30 && z < -218 && z > -285;
+  return distTrailhead < clearanceRadius || distSpawn < clearanceRadius || distCenter < clearanceRadius || distTortilla < Math.max(clearanceRadius, 48) || isTortillaTownBox;
 }
 
 const _scratchFoliageBoreDirs = Array.from({ length: 16 }, () => new THREE.Vector3());
@@ -529,26 +516,7 @@ export class DesertFoliageManager {
     const surfaceHoles = this.mountainHoleManager.holes.filter(
       (h) => h.position.y >= -1.5
     );
-    const count = Math.min(16, surfaceHoles.length);
-
-    // Precompute bore directions once for all holes without memory allocations
-    for (let i = 0; i < count; i++) {
-      _scratchFoliageBoreDirs[i].set(0, 0, -1).applyQuaternion(surfaceHoles[i].group.quaternion).normalize();
-    }
-
-    for (let u = 0; u < this.mountainHoleUniformsList.length; u++) {
-      const uniforms = this.mountainHoleUniformsList[u];
-      uniforms.uMountainHoleCount.value = count;
-      for (let i = 0; i < count; i++) {
-        const h = surfaceHoles[i];
-        uniforms.uMountainHolePositions.value[i].copy(h.position);
-        uniforms.uMountainHoleDirs.value[i].copy(_scratchFoliageBoreDirs[i]);
-        uniforms.uMountainHoleRadii.value[i] = h.radius * 0.96;
-        uniforms.uMountainHoleDepths.value[i] = h.depth;
-        uniforms.uMountainHolePassThrough.value[i] = h.isPassThrough ? 1.0 : 0.0;
-      }
-    }
-    // Also cut out hollow tunnel bore in surface terrain mesh
+    // Cut out hollow tunnel bore in surface terrain mesh and rock materials
     updateTerrainHoleCutouts(surfaceHoles);
   }
 
@@ -578,8 +546,12 @@ export class DesertFoliageManager {
       const z = Math.sin(angle) * dist;
       const y = getTerrainHeight(x, z);
 
-      // Skip steep high summits or right on top of trailhead & spawn camp
-      if (y > 45 || isNearPeraltaCamp(x, z, 18)) continue;
+      // Skip steep high summits, sheer canyon cliffs, or right on top of trailhead & spawn camp
+      const slope = Math.hypot(
+        getTerrainHeight(x + 1.2, z) - getTerrainHeight(x - 1.2, z),
+        getTerrainHeight(x, z + 1.2) - getTerrainHeight(x, z - 1.2)
+      ) / 2.4;
+      if (y > 45 || slope > 0.75 || isNearPeraltaCamp(x, z, 18)) continue;
 
       const scale = 0.7 + Math.random() * 0.8;
       const singleCactus = new THREE.Group();
@@ -718,16 +690,17 @@ export class DesertFoliageManager {
         }
         s *= arch.baseScale;
 
-        // Position on surface, sunken slightly so flat bottom is embedded in soil
-        dummy.position.set(rx, ry + s * 0.15, rz);
+        // Position on surface, sunken securely so flat bottom is deeply embedded in soil/bedrock
+        const sinkOffset = archIdx === 1 ? -s * 0.06 : -s * 0.12;
+        dummy.position.set(rx, ry + sinkOffset, rz);
 
         if (archIdx === 1) {
           // Sandstone slabs: flatter aspect ratio, subtle tilt following slope
-          dummy.scale.set(s * (1.0 + Math.random() * 0.5), s * 0.45, s * (1.0 + Math.random() * 0.5));
+          dummy.scale.set(s * (1.0 + Math.random() * 0.5), s * 0.55, s * (1.0 + Math.random() * 0.5));
           dummy.rotation.set((Math.random() - 0.5) * 0.25, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.25);
         } else {
           // Angular and corestones: natural 3D proportioning
-          dummy.scale.set(s * (0.8 + Math.random() * 0.4), s * (0.75 + Math.random() * 0.35), s * (0.8 + Math.random() * 0.4));
+          dummy.scale.set(s * (0.8 + Math.random() * 0.4), s * (0.85 + Math.random() * 0.35), s * (0.8 + Math.random() * 0.4));
           dummy.rotation.set((Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.3);
         }
 
@@ -918,28 +891,28 @@ export class DesertFoliageManager {
         geo: createVolcanicCragGeometry(),
         count: 16,
         baseHeight: 18.0,
-        heightOffsetFrac: 0.44,
+        heightOffsetFrac: 0.08,
       },
       {
         name: 'stepped_mesa',
         geo: createSteppedMesaGeometry(),
         count: 16,
-        baseHeight: 13.0,
-        heightOffsetFrac: 0.46,
+        baseHeight: 14.0,
+        heightOffsetFrac: 0.08,
       },
       {
         name: 'fault_monocline',
         geo: createFaultMonoclineGeometry(),
         count: 14,
         baseHeight: 15.0,
-        heightOffsetFrac: 0.45,
+        heightOffsetFrac: 0.08,
       },
       {
         name: 'canyon_spire',
         geo: createNeedleSpireGeometry(),
         count: 12,
         baseHeight: 21.0,
-        heightOffsetFrac: 0.42,
+        heightOffsetFrac: 0.08,
       },
     ];
 
@@ -1105,7 +1078,7 @@ export class DesertFoliageManager {
   private initSpringTrees() {
     const springLocations = [
       { id: 'hieroglyphic', name: 'Hieroglyphic Oasis Spring', x: -70, z: -20, treeCount: 8, poolRadius: 5.5 },
-      { id: 'tortilla', name: 'Tortilla Creek Spring & Wash', x: -15, z: -145, treeCount: 7, poolRadius: 6.5 },
+      { id: 'salt_river', name: 'Salt River Fremont Cottonwoods', x: 0, z: -305, treeCount: 14, poolRadius: 14.0 },
       { id: 'needle', name: "Weaver's Needle Basin Tinaja", x: 68, z: 32, treeCount: 6, poolRadius: 4.5 },
       { id: 'peralta', name: 'Peralta Canyon Tinaja', x: -35, z: 75, treeCount: 6, poolRadius: 4.0 },
     ];
