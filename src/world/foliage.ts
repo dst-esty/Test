@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getTerrainHeight } from './terrain';
+import { getTerrainHeight, updateTerrainHoleCutouts } from './terrain';
 import { DebrisType } from '../types';
 import { MountainHoleManager } from './mountainHoles';
 import { MountainDustParticleSystem } from './mountainDustParticles';
@@ -450,6 +450,17 @@ export interface WorldRockCollider {
   active: boolean;
 }
 
+/**
+ * Ensures the Peralta Base Camp, Trailhead (-120, -120), and Player Spawn (-115, -115)
+ * are completely clear of randomly spawned boulders, cacti, scrub, and mountain outcroppings.
+ */
+export function isNearPeraltaCamp(x: number, z: number, clearanceRadius: number = 22): boolean {
+  const distTrailhead = Math.hypot(x - (-120), z - (-120));
+  const distSpawn = Math.hypot(x - (-115), z - (-115));
+  const distCenter = Math.hypot(x - (-117.5), z - (-117.5));
+  return distTrailhead < clearanceRadius || distSpawn < clearanceRadius || distCenter < clearanceRadius;
+}
+
 export class DesertFoliageManager {
   public goldDeposits: GoldDeposit[] = [];
   public springTrees: HarvestableTree[] = [];
@@ -470,7 +481,10 @@ export class DesertFoliageManager {
   public dustParticleSystem?: MountainDustParticleSystem;
   public mountainHoleUniformsList: Array<{
     uMountainHolePositions: { value: THREE.Vector3[] };
+    uMountainHoleDirs: { value: THREE.Vector3[] };
     uMountainHoleRadii: { value: Float32Array };
+    uMountainHoleDepths: { value: Float32Array };
+    uMountainHolePassThrough: { value: Float32Array };
     uMountainHoleCount: { value: number };
   }> = [];
 
@@ -481,6 +495,19 @@ export class DesertFoliageManager {
     this.scene = scene;
     this.dustParticleSystem = dustParticles;
     this.mountainHoleManager = new MountainHoleManager(this.scene, dustParticles);
+    // Wire rock check callback so mountain holes can detect when they pierce through outcroppings
+    this.mountainHoleManager.setRockCheckCallback((pos: THREE.Vector3) => {
+      for (let i = 0; i < this.rockColliders.length; i++) {
+        const c = this.rockColliders[i];
+        if (!c.active || c.type !== 'mountain') continue;
+        const dx = pos.x - c.x;
+        const dz = pos.z - c.z;
+        if (Math.hypot(dx, dz) <= c.radius && pos.y >= c.y - 0.6 && pos.y <= c.y + c.height + 0.6) {
+          return true;
+        }
+      }
+      return false;
+    });
     this.init();
   }
 
@@ -494,15 +521,22 @@ export class DesertFoliageManager {
     const surfaceHoles = this.mountainHoleManager.holes.filter(
       (h) => h.position.y >= -1.5
     );
+    const count = Math.min(16, surfaceHoles.length);
     for (let u = 0; u < this.mountainHoleUniformsList.length; u++) {
       const uniforms = this.mountainHoleUniformsList[u];
-      const count = Math.min(16, surfaceHoles.length);
       uniforms.uMountainHoleCount.value = count;
       for (let i = 0; i < count; i++) {
-        uniforms.uMountainHolePositions.value[i].copy(surfaceHoles[i].position);
-        uniforms.uMountainHoleRadii.value[i] = surfaceHoles[i].radius * 0.96;
+        const h = surfaceHoles[i];
+        uniforms.uMountainHolePositions.value[i].copy(h.position);
+        const boreDir = new THREE.Vector3(0, 0, -1).applyQuaternion(h.group.quaternion).normalize();
+        uniforms.uMountainHoleDirs.value[i].copy(boreDir);
+        uniforms.uMountainHoleRadii.value[i] = h.radius * 0.96;
+        uniforms.uMountainHoleDepths.value[i] = h.depth;
+        uniforms.uMountainHolePassThrough.value[i] = h.isPassThrough ? 1.0 : 0.0;
       }
     }
+    // Also cut out hollow tunnel bore in surface terrain mesh
+    updateTerrainHoleCutouts(surfaceHoles);
   }
 
   private init() {
@@ -531,8 +565,8 @@ export class DesertFoliageManager {
       const z = Math.sin(angle) * dist;
       const y = getTerrainHeight(x, z);
 
-      // Skip steep high summits or right on top of trailhead
-      if (y > 45 || Math.hypot(x - (-120), z - (-120)) < 15) continue;
+      // Skip steep high summits or right on top of trailhead & spawn camp
+      if (y > 45 || isNearPeraltaCamp(x, z, 18)) continue;
 
       const scale = 0.7 + Math.random() * 0.8;
       const singleCactus = new THREE.Group();
@@ -608,7 +642,7 @@ export class DesertFoliageManager {
       const rx = (Math.random() - 0.5) * 360;
       const rz = (Math.random() - 0.5) * 360;
       const ry = getTerrainHeight(rx, rz);
-      if (ry > 50) continue;
+      if (ry > 50 || isNearPeraltaCamp(rx, rz, 16)) continue;
 
       const bScale = 0.5 + Math.random() * 0.7;
       dummy.position.set(rx, ry + 0.3 * bScale, rz);
@@ -652,6 +686,7 @@ export class DesertFoliageManager {
       for (let i = 0; i < arch.count; i++) {
         const rx = (Math.random() - 0.5) * 380;
         const rz = (Math.random() - 0.5) * 380;
+        if (isNearPeraltaCamp(rx, rz, 20)) continue;
         const ry = getTerrainHeight(rx, rz);
 
         // Natural scale variation: pebbles/scree (0.5), typical stones (1.0-1.8), large monolith boulders (2.0-2.8)
@@ -733,6 +768,7 @@ export class DesertFoliageManager {
     for (let i = 0; i < scrubCount; i++) {
       const rx = (Math.random() - 0.5) * 380;
       const rz = (Math.random() - 0.5) * 380;
+      if (isNearPeraltaCamp(rx, rz, 14)) continue;
       const ry = getTerrainHeight(rx, rz);
 
       const s = 0.5 + Math.random() * 0.8;
@@ -902,14 +938,20 @@ export class DesertFoliageManager {
 
       const holeUniforms = {
         uMountainHolePositions: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, -9999, 0)) },
+        uMountainHoleDirs: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, 0, 1)) },
         uMountainHoleRadii: { value: new Float32Array(16) },
+        uMountainHoleDepths: { value: new Float32Array(16) },
+        uMountainHolePassThrough: { value: new Float32Array(16) },
         uMountainHoleCount: { value: 0 },
       };
       this.mountainHoleUniformsList.push(holeUniforms);
 
       mat.onBeforeCompile = (shader) => {
         shader.uniforms.uMountainHolePositions = holeUniforms.uMountainHolePositions;
+        shader.uniforms.uMountainHoleDirs = holeUniforms.uMountainHoleDirs;
         shader.uniforms.uMountainHoleRadii = holeUniforms.uMountainHoleRadii;
+        shader.uniforms.uMountainHoleDepths = holeUniforms.uMountainHoleDepths;
+        shader.uniforms.uMountainHolePassThrough = holeUniforms.uMountainHolePassThrough;
         shader.uniforms.uMountainHoleCount = holeUniforms.uMountainHoleCount;
 
         shader.vertexShader = shader.vertexShader.replace(
@@ -933,7 +975,10 @@ export class DesertFoliageManager {
           `#include <common>
            varying vec3 vWorldPositionCustom;
            uniform vec3 uMountainHolePositions[16];
+           uniform vec3 uMountainHoleDirs[16];
            uniform float uMountainHoleRadii[16];
+           uniform float uMountainHoleDepths[16];
+           uniform float uMountainHolePassThrough[16];
            uniform int uMountainHoleCount;`
         );
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -941,8 +986,27 @@ export class DesertFoliageManager {
           `#include <dithering_fragment>
            for (int i = 0; i < 16; i++) {
              if (i >= uMountainHoleCount) break;
-             if (distance(vWorldPositionCustom, uMountainHolePositions[i]) < uMountainHoleRadii[i]) {
-               discard;
+             vec3 p = vWorldPositionCustom;
+             vec3 a = uMountainHolePositions[i];
+             vec3 dir = uMountainHoleDirs[i];
+             float d = uMountainHoleDepths[i];
+             float r = uMountainHoleRadii[i];
+             float isPass = uMountainHolePassThrough[i];
+
+             float t = dot(p - a, dir);
+             // 1. Entrance portal opening at rock face (-0.35m to +0.65m)
+             if (t >= -0.35 && t <= 0.65) {
+               vec3 axisPoint = a + dir * t;
+               if (distance(p, axisPoint) < r) {
+                 discard;
+               }
+             }
+             // 2. Exit portal opening on opposite mountain face if pass-through tunnel
+             if (isPass > 0.5 && t >= (d - 0.65) && t <= (d + 0.35)) {
+               vec3 axisPoint = a + dir * t;
+               if (distance(p, axisPoint) < r) {
+                 discard;
+               }
              }
            }`
         );
@@ -960,6 +1024,8 @@ export class DesertFoliageManager {
         const r = 45 + Math.random() * 155;
         const ox = Math.cos(angle) * r;
         const oz = Math.sin(angle) * r;
+        // Keep Peralta Base Camp and player spawn clear of soaring outcropping geometry
+        if (isNearPeraltaCamp(ox, oz, 30)) continue;
         const oy = getTerrainHeight(ox, oz);
 
         // Aspect ratio variations: some wide massif bluffs, some high soaring towers
@@ -1227,12 +1293,15 @@ export class DesertFoliageManager {
 
   /**
    * Checks horizontal distance and vertical overlap with all physical boulders, mountain outcroppings, and cacti
+   * Supports de-penetration: if player started already embedded inside this obstacle, moving away is permitted.
    */
   public checkObstacleCollision(
     x: number,
     y: number,
     z: number,
-    playerRadius: number = 0.42
+    playerRadius: number = 0.42,
+    startX?: number,
+    startZ?: number
   ): { hit: boolean; collider?: WorldRockCollider; normal?: { x: number; z: number } } {
     for (let i = 0; i < this.rockColliders.length; i++) {
       const c = this.rockColliders[i];
@@ -1245,6 +1314,15 @@ export class DesertFoliageManager {
 
       const distSq = dx * dx + dz * dz;
       if (distSq < combinedRadius * combinedRadius) {
+        // De-penetration tolerance: If player started already embedded inside this collider,
+        // and candidate position is moving further away from the collider's center, ALLOW IT!
+        if (startX !== undefined && startZ !== undefined) {
+          const startDistSq = (startX - c.x) * (startX - c.x) + (startZ - c.z) * (startZ - c.z);
+          if (startDistSq < combinedRadius * combinedRadius && distSq > startDistSq) {
+            continue; // Player is stepping out of / away from the obstacle - do not block
+          }
+        }
+
         // Vertical check: is player within elevation range of this obstacle?
         if (y >= c.y - 1.0 && y <= c.y + c.height + 0.6) {
           const dist = Math.sqrt(distSq);
@@ -1290,13 +1368,17 @@ export class DesertFoliageManager {
     const holeHit = this.mountainHoleManager.raycastMountainHoles(raycaster, maxDist);
     if (holeHit.hit && holeHit.hole) {
       const hole = holeHit.hole;
+      const strikePoint = holeHit.point || hole.position;
+      const strikeNormal = holeHit.strikeNormal || hole.normal;
       const holeRes = this.mountainHoleManager.digMountainHole(
-        hole.position,
-        hole.normal,
+        strikePoint,
+        strikeNormal,
         hole.rockColor,
         hole.rockType,
         equippedTool || 'pickaxe',
-        true
+        true,
+        hole,
+        { isBranch: holeHit.isSideWall, isCeiling: holeHit.isCeiling }
       );
       this.updateMountainHoleCutouts();
       const holeMaterial = hole.hasExposedGoldVein ? 'quartz_gold' : hole.rockType;
@@ -1304,17 +1386,17 @@ export class DesertFoliageManager {
         hit: true,
         type: 'outcropping',
         hitPoint: holeRes.hitPoint,
-        surfaceNormal: hole.normal.clone(),
+        surfaceNormal: strikeNormal.clone(),
         rockMaterial: holeMaterial,
         debrisType: holeRes.debrisType,
         blocksDug: holeRes.rocksAwarded,
         goldAwarded: holeRes.goldAwarded,
         spawnPhysicalRock: {
-          position: holeRes.hitPoint.clone().add(hole.normal.clone().multiplyScalar(0.2)),
+          position: holeRes.hitPoint.clone().add(strikeNormal.clone().multiplyScalar(0.2)),
           color: hole.rockColor,
           scale: 0.48,
           weightLbs: 12,
-          ejectionDir: hole.normal,
+          ejectionDir: strikeNormal,
           isChippedFragment: true,
         },
         message: holeRes.message,
@@ -1515,13 +1597,17 @@ export class DesertFoliageManager {
           }
 
           // Carve or deepen a real, visible physical 3D hole into the mountain rock face!
+          const groundY = getTerrainHeight(hitPoint.x, hitPoint.z);
           const holeRes = this.mountainHoleManager.digMountainHole(
             hitPoint,
             normal,
             rockColor,
             archetypeRock,
             equippedTool || 'pickaxe',
-            true
+            true,
+            undefined,
+            undefined,
+            groundY
           );
           this.updateMountainHoleCutouts();
 

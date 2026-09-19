@@ -1504,6 +1504,33 @@ export function generateTerrainNoiseTexture(size = 256): THREE.DataTexture {
   return texture;
 }
 
+// Shared hole cutout uniforms for terrain shader to prevent geometry tearing in carved tunnels
+export const terrainHoleUniforms = {
+  uMountainHolePositions: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, -9999, 0)) },
+  uMountainHoleDirs: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, 0, 1)) },
+  uMountainHoleRadii: { value: new Float32Array(16) },
+  uMountainHoleDepths: { value: new Float32Array(16) },
+  uMountainHolePassThrough: { value: new Float32Array(16) },
+  uMountainHoleCount: { value: 0 },
+};
+
+export function updateTerrainHoleCutouts(
+  holes: Array<{ position: THREE.Vector3; depth: number; radius: number; group: THREE.Group; isPassThrough?: boolean }>
+): void {
+  const count = Math.min(16, holes.length);
+  terrainHoleUniforms.uMountainHoleCount.value = count;
+  for (let i = 0; i < count; i++) {
+    const h = holes[i];
+    terrainHoleUniforms.uMountainHolePositions.value[i].copy(h.position);
+    // Bore direction points along local -Z into the mountain
+    const boreDir = new THREE.Vector3(0, 0, -1).applyQuaternion(h.group.quaternion).normalize();
+    terrainHoleUniforms.uMountainHoleDirs.value[i].copy(boreDir);
+    terrainHoleUniforms.uMountainHoleRadii.value[i] = h.radius * 0.96;
+    terrainHoleUniforms.uMountainHoleDepths.value[i] = h.depth;
+    terrainHoleUniforms.uMountainHolePassThrough.value[i] = h.isPassThrough ? 1.0 : 0.0;
+  }
+}
+
 /**
  * Creates a photorealistic PBR terrain material using GLSL shaders for slope-based rock blending,
  * sedimentary cliff strata, desert varnish, and surface micro-relief normal bump mapping.
@@ -1520,6 +1547,12 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTerrainNoise = { value: noiseTexture };
+    shader.uniforms.uMountainHolePositions = terrainHoleUniforms.uMountainHolePositions;
+    shader.uniforms.uMountainHoleDirs = terrainHoleUniforms.uMountainHoleDirs;
+    shader.uniforms.uMountainHoleRadii = terrainHoleUniforms.uMountainHoleRadii;
+    shader.uniforms.uMountainHoleDepths = terrainHoleUniforms.uMountainHoleDepths;
+    shader.uniforms.uMountainHolePassThrough = terrainHoleUniforms.uMountainHolePassThrough;
+    shader.uniforms.uMountainHoleCount = terrainHoleUniforms.uMountainHoleCount;
 
     // Vertex shader: pass true 3D world position and world normal
     shader.vertexShader = shader.vertexShader.replace(
@@ -1542,7 +1575,13 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
       `#include <common>
       uniform sampler2D uTerrainNoise;
       varying vec3 vWorldPos;
-      varying vec3 vWorldNormal;`
+      varying vec3 vWorldNormal;
+      uniform vec3 uMountainHolePositions[16];
+      uniform vec3 uMountainHoleDirs[16];
+      uniform float uMountainHoleRadii[16];
+      uniform float uMountainHoleDepths[16];
+      uniform float uMountainHolePassThrough[16];
+      uniform int uMountainHoleCount;`
     );
 
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -1595,6 +1634,38 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
       `#include <roughnessmap_fragment>
       // Sand is high roughness, basalt/sandstone cliff rock is slightly lower roughness with mineral sheen
       roughnessFactor = mix(0.94, 0.68, smoothstep(0.3, 0.7, slope));
+      `
+    );
+
+    // Carve out hollow portal openings at mountain entrance/exit without cutting the mountain ceiling or forming an open trench
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      `#include <dithering_fragment>
+      for (int i = 0; i < 16; i++) {
+        if (i >= uMountainHoleCount) break;
+        vec3 p = vWorldPos;
+        vec3 a = uMountainHolePositions[i];
+        vec3 dir = uMountainHoleDirs[i];
+        float d = uMountainHoleDepths[i];
+        float r = uMountainHoleRadii[i];
+        float isPass = uMountainHolePassThrough[i];
+
+        float t = dot(p - a, dir);
+        // 1. Entrance portal: discard terrain face at the entrance doorway
+        if (t >= -0.35 && t <= 0.65) {
+          vec3 axisPoint = a + dir * t;
+          if (distance(p, axisPoint) < r) {
+            discard;
+          }
+        }
+        // 2. Exit portal: if tunnel pierced through to daylight, cut open the exit portal
+        if (isPass > 0.5 && t >= (d - 0.65) && t <= (d + 0.35)) {
+          vec3 axisPoint = a + dir * t;
+          if (distance(p, axisPoint) < r) {
+            discard;
+          }
+        }
+      }
       `
     );
   };

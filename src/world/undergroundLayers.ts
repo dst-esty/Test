@@ -224,7 +224,9 @@ export class UndergroundLayersManager {
   public holeManager?: MountainHoleManager;
   public wallUniformsList: {
     uHolePositions: { value: THREE.Vector3[] };
+    uHoleDirs: { value: THREE.Vector3[] };
     uHoleRadii: { value: Float32Array };
+    uHoleDepths: { value: Float32Array };
     uHoleCount: { value: number };
   }[] = [];
 
@@ -267,8 +269,12 @@ export class UndergroundLayersManager {
       const count = Math.min(8, sortedHoles.length);
       uniforms.uHoleCount.value = count;
       for (let i = 0; i < count; i++) {
-        uniforms.uHolePositions.value[i].copy(sortedHoles[i].position);
-        uniforms.uHoleRadii.value[i] = sortedHoles[i].radius * 0.98;
+        const h = sortedHoles[i];
+        uniforms.uHolePositions.value[i].copy(h.position);
+        const boreDir = new THREE.Vector3(0, 0, -1).applyQuaternion(h.group.quaternion).normalize();
+        uniforms.uHoleDirs.value[i].copy(boreDir);
+        uniforms.uHoleRadii.value[i] = h.radius * 1.04;
+        uniforms.uHoleDepths.value[i] = h.depth;
       }
     }
   }
@@ -482,25 +488,22 @@ export class UndergroundLayersManager {
 
     const holeUniforms = {
       uHolePositions: {
-        value: [
-          new THREE.Vector3(),
-          new THREE.Vector3(),
-          new THREE.Vector3(),
-          new THREE.Vector3(),
-          new THREE.Vector3(),
-          new THREE.Vector3(),
-          new THREE.Vector3(),
-          new THREE.Vector3(),
-        ],
+        value: Array.from({ length: 8 }, () => new THREE.Vector3(0, -9999, 0)),
+      },
+      uHoleDirs: {
+        value: Array.from({ length: 8 }, () => new THREE.Vector3(0, 0, 1)),
       },
       uHoleRadii: { value: new Float32Array(8) },
+      uHoleDepths: { value: new Float32Array(8) },
       uHoleCount: { value: 0 },
     };
     this.wallUniformsList.push(holeUniforms);
 
     wallMat.onBeforeCompile = (shader) => {
       shader.uniforms.uHolePositions = holeUniforms.uHolePositions;
+      shader.uniforms.uHoleDirs = holeUniforms.uHoleDirs;
       shader.uniforms.uHoleRadii = holeUniforms.uHoleRadii;
+      shader.uniforms.uHoleDepths = holeUniforms.uHoleDepths;
       shader.uniforms.uHoleCount = holeUniforms.uHoleCount;
 
       shader.vertexShader = shader.vertexShader.replace(
@@ -519,7 +522,9 @@ export class UndergroundLayersManager {
         `#include <common>
          varying vec3 vWorldPositionCustom;
          uniform vec3 uHolePositions[8];
+         uniform vec3 uHoleDirs[8];
          uniform float uHoleRadii[8];
+         uniform float uHoleDepths[8];
          uniform int uHoleCount;`
       );
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -527,7 +532,15 @@ export class UndergroundLayersManager {
         `#include <dithering_fragment>
          for (int i = 0; i < 8; i++) {
            if (i >= uHoleCount) break;
-           if (distance(vWorldPositionCustom, uHolePositions[i]) < uHoleRadii[i]) {
+           vec3 p = vWorldPositionCustom;
+           vec3 a = uHolePositions[i];
+           vec3 dir = uHoleDirs[i];
+           float d = uHoleDepths[i];
+           float r = uHoleRadii[i];
+
+           float t = clamp(dot(p - a, dir), -0.6, d + 0.35);
+           vec3 axisPoint = a + dir * t;
+           if (distance(p, axisPoint) < r) {
              discard;
            }
          }`
@@ -630,7 +643,9 @@ export class UndergroundLayersManager {
     const caveRoof = new THREE.Mesh(roofGeo, roofMat);
     caveRoof.position.y = height;
     caveRoof.rotation.x = Math.PI / 2;
+    caveRoof.name = `cavern_roof_level_${layer.level}`;
     group.add(caveRoof);
+    this.cavernWallMeshes.push(caveRoof);
 
     // Thick solid rock cap above the ceiling to completely block any exterior daylight or sky
     const capGeo = new THREE.RingGeometry(1.72, radius * 1.35, 36);
@@ -2334,6 +2349,9 @@ export class UndergroundLayersManager {
     mesh?: THREE.Mesh;
     distance?: number;
     existingHole?: MountainHole;
+    isCeiling?: boolean;
+    isSideWall?: boolean;
+    isBackFace?: boolean;
   } {
     if (this.currentLevel === 0) return { hit: false };
 
@@ -2344,18 +2362,35 @@ export class UndergroundLayersManager {
         return {
           hit: true,
           point: holeHit.point,
-          normal: holeHit.hole.normal.clone(),
+          normal: holeHit.strikeNormal ? holeHit.strikeNormal.clone() : holeHit.hole.normal.clone(),
           distance: holeHit.distance,
           existingHole: holeHit.hole,
+          isCeiling: holeHit.isCeiling,
+          isSideWall: holeHit.isSideWall,
+          isBackFace: holeHit.isBackFace,
         };
       }
     }
 
-    // 2. Test intersection with cavern perimeter wall meshes
+    // 2. Test intersection with cavern perimeter wall or roof meshes
     if (this.cavernWallMeshes.length > 0) {
       const hits = raycaster.intersectObjects(this.cavernWallMeshes, false);
       if (hits.length > 0 && hits[0].distance <= maxDistance) {
         const hit = hits[0];
+        const isRoofMesh = (hit.object.name && hit.object.name.startsWith('cavern_roof')) || raycaster.ray.direction.y > 0.45;
+
+        if (isRoofMesh) {
+          // Overhead ceiling strike: normal points straight down into cavern
+          return {
+            hit: true,
+            point: hit.point,
+            normal: new THREE.Vector3(0, -1, 0),
+            mesh: hit.object as THREE.Mesh,
+            distance: hit.distance,
+            isCeiling: true,
+          };
+        }
+
         // Calculate inward normal from wall face pointing into cavern toward shaft center (never into the rock)
         const toShaft = new THREE.Vector3(
           this.surfacePos.x - hit.point.x,
@@ -2486,22 +2521,16 @@ export class UndergroundLayersManager {
     let holeResult: { goldAwarded: number; message: string } | null = null;
 
     if (this.holeManager) {
-      const targetHole =
-        existingHoleTarget ||
-        this.holeManager.findNearbyHole(hitPoint, 2.2) ||
-        this.holeManager.isInsideMountainTunnel(hitPoint.x, hitPoint.y, hitPoint.z, 1.2)?.hole;
-
-      const digTargetPos = targetHole ? targetHole.position : hitPoint;
-      const digTargetNormal = targetHole ? targetHole.normal : wallNormal;
-      const digTargetColor = targetHole ? targetHole.rockColor : wallColorHex;
-      const digTargetType = targetHole ? targetHole.rockType : particleMatType;
+      const digTargetColor = wallColorHex;
+      const digTargetType = particleMatType;
 
       const digRes = this.holeManager.digMountainHole(
-        digTargetPos,
-        digTargetNormal,
+        hitPoint,
+        wallNormal,
         digTargetColor,
         digTargetType,
-        tool
+        tool,
+        false
       );
       createdHole = digRes.hole;
       holeDepth = digRes.depthReached;

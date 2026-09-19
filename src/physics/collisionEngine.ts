@@ -72,13 +72,22 @@ export function testPositionCollision(
       candX,
       currentGroundY,
       candZ,
-      0.35
+      0.65
     )?.inside
   );
+  const startInTunnel = Boolean(
+    foliageManager?.mountainHoleManager?.isInsideMountainTunnel(
+      startX,
+      currentGroundY,
+      startZ,
+      0.65
+    )?.inside
+  );
+  const isNavigatingTunnel = isInsideTunnel || startInTunnel;
 
   // 1. Boundary & Perimeter Mountains Check
   const distFromCenter = Math.hypot(candX, candZ);
-  if (distFromCenter > PERIMETER_MOUNTAIN_RADIUS && !isInsideTunnel) {
+  if (distFromCenter > PERIMETER_MOUNTAIN_RADIUS && !isNavigatingTunnel) {
     const normDist = distFromCenter > 0.0001 ? distFromCenter : 1;
     return {
       blocked: true,
@@ -93,7 +102,7 @@ export function testPositionCollision(
   const dh = candGroundY - currentGroundY;
 
   // When moving uphill:
-  if (dh > 0 && !isInsideTunnel) {
+  if (dh > 0 && !isNavigatingTunnel) {
     // A sudden vertical elevation step higher than knee height cannot be walked through
     if (dh > MAX_STEP_HEIGHT && !isAirborne) {
       const stepDist = Math.hypot(candX - startX, candZ - startZ);
@@ -107,8 +116,9 @@ export function testPositionCollision(
     }
 
     // A slope steeper than MAX_WALKABLE_SLOPE (~49 degrees) is an impassable hill/mountain
+    // Only evaluate slope for vertical rises exceeding natural foot/gravel clearance (> 0.28m)
     const stepDist = Math.hypot(candX - startX, candZ - startZ);
-    if (stepDist > 0.001) {
+    if (stepDist > 0.001 && dh > 0.28) {
       const slope = dh / stepDist;
       if (slope > MAX_WALKABLE_SLOPE) {
         return {
@@ -131,6 +141,12 @@ export function testPositionCollision(
 
     const distSq = dx * dx + dz * dz;
     if (distSq < combinedRad * combinedRad) {
+      // De-penetration tolerance: if player started already embedded inside landmark,
+      // allow movements that step away from the center
+      const startDistSq = (startX - lm.x) ** 2 + (startZ - lm.z) ** 2;
+      if (startDistSq < combinedRad * combinedRad && distSq > startDistSq) {
+        continue;
+      }
       const dist = Math.sqrt(distSq);
       return {
         blocked: true,
@@ -149,16 +165,35 @@ export function testPositionCollision(
       candX,
       candGroundY,
       candZ,
-      PLAYER_COLLISION_RADIUS
+      PLAYER_COLLISION_RADIUS,
+      startX,
+      startZ
     );
     if (fRes.hit) {
-      if (!(isInsideTunnel && fRes.collider?.type === 'mountain')) {
+      if (!(isNavigatingTunnel && fRes.collider?.type === 'mountain')) {
         return {
           blocked: true,
           reason: fRes.collider?.type === 'mountain' ? 'mountain_outcrop' : 'boulder',
           normal: fRes.normal,
         };
       }
+    }
+  }
+
+  // 4b. Tunnel Wall & Back Working Face Boundary Check (keeps player inside the excavated corridor)
+  if (isNavigatingTunnel && foliageManager?.mountainHoleManager?.testTunnelBoundaryCollision) {
+    const tunnelCol = foliageManager.mountainHoleManager.testTunnelBoundaryCollision(
+      candX,
+      candGroundY,
+      candZ,
+      PLAYER_COLLISION_RADIUS
+    );
+    if (tunnelCol.blocked) {
+      return {
+        blocked: true,
+        reason: tunnelCol.reason || 'tunnel_wall',
+        normal: tunnelCol.normal,
+      };
     }
   }
 
@@ -188,10 +223,18 @@ export function testPositionCollision(
       PLAYER_COLLISION_RADIUS
     );
     if (bRes.hit) {
-      return {
-        blocked: true,
-        reason: bRes.structure?.type || 'mine_structure',
-      };
+      const bStartRes = mineBuildingSystem.checkCollision(
+        startX,
+        currentGroundY,
+        startZ,
+        PLAYER_COLLISION_RADIUS
+      );
+      if (!bStartRes.hit) {
+        return {
+          blocked: true,
+          reason: bRes.structure?.type || 'mine_structure',
+        };
+      }
     }
   }
 
@@ -215,8 +258,53 @@ export function resolveKinematicMovement(
   mineBuildingSystem?: MineBuildingSystem | null,
   isAirborne: boolean = false
 ): CollisionResult {
+  // 0. Automatic Embedded Unstuck / De-penetration:
+  // If the player starts embedded inside any obstacle, eject them outward EXCEPT when they are navigating an excavated mountain tunnel!
   const directX = startX + targetDx;
   const directZ = startZ + targetDz;
+
+  const startInTunnel = Boolean(
+    foliageManager?.mountainHoleManager?.isInsideMountainTunnel(
+      startX,
+      currentGroundY,
+      startZ,
+      0.65
+    )?.inside
+  );
+  const targetInTunnel = Boolean(
+    foliageManager?.mountainHoleManager?.isInsideMountainTunnel(
+      directX,
+      currentGroundY,
+      directZ,
+      0.65
+    )?.inside
+  );
+  const isNavigatingTunnel = startInTunnel || targetInTunnel;
+
+  if (!isNavigatingTunnel && foliageManager && typeof foliageManager.checkObstacleCollision === 'function') {
+    const stuckCheck = foliageManager.checkObstacleCollision(
+      startX,
+      currentGroundY,
+      startZ,
+      PLAYER_COLLISION_RADIUS
+    );
+    if (stuckCheck.hit && stuckCheck.collider) {
+      const c = stuckCheck.collider;
+      const dx = startX - c.x;
+      const dz = startZ - c.z;
+      const dist = Math.hypot(dx, dz);
+      const safeRadius = c.radius + PLAYER_COLLISION_RADIUS + 0.2;
+      const dirX = dist > 0.001 ? dx / dist : (targetDx !== 0 ? Math.sign(targetDx) : 1);
+      const dirZ = dist > 0.001 ? dz / dist : (targetDz !== 0 ? Math.sign(targetDz) : 0);
+      return {
+        x: c.x + dirX * safeRadius,
+        z: c.z + dirZ * safeRadius,
+        isBlocked: true,
+        slid: true,
+        blockedReason: 'freed_from_obstacle',
+      };
+    }
+  }
 
   // 1. First attempt: Direct movement
   const directCheck = testPositionCollision(

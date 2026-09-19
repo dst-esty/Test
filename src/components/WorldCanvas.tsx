@@ -346,7 +346,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
   // 3D Game Engine Locomotion & Physics
   const playerPos = useRef<THREE.Vector3>(
-    new THREE.Vector3(playerState.position.x, playerState.position.y, playerState.position.z)
+    new THREE.Vector3(
+      playerState.position.x,
+      Math.max(playerState.position.y, getTerrainHeight(playerState.position.x, playerState.position.z) + 1.7),
+      playerState.position.z
+    )
   );
   const playerYaw = useRef<number>(playerState.rotation.yaw);
   const playerPitch = useRef<number>(playerState.rotation.pitch);
@@ -1021,7 +1025,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       // B. Check if striking Desert Foliage, Boulders, Sandstone Hoodoos, or Gold Quartz Veins
       if (foliageManagerRef.current) {
         const raycaster = new THREE.Raycaster(origin, dir, 0.1, 7.5);
-        const fRes = foliageManagerRef.current.strikeFoliageOrRock(raycaster, 6.8);
+        const equippedTool = playerStateRef.current.equippedTool || 'pickaxe';
+        const fRes = foliageManagerRef.current.strikeFoliageOrRock(raycaster, 6.8, equippedTool);
         if (fRes.hit) {
           if (fRes.type === 'outcropping') {
             soundEngine.playRockChisel();
@@ -1841,7 +1846,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }));
 
           // Spawn physical chipped rocks identical to surface mountain excavation
-          if (movableRockManagerRef.current && cavernHit.point) {
+          if (movableRockManagerRef.current && typeof movableRockManagerRef.current.spawnLooseRock === 'function' && cavernHit.point) {
             const ejectionDir = cavernHit.normal ? cavernHit.normal.clone() : new THREE.Vector3(0, 0.5, 0);
             ejectionDir.y = 0.45;
             ejectionDir.normalize();
@@ -2288,7 +2293,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
 
       keysPressed.current[e.code] = true;
-      if (e.key) keysPressed.current[e.key] = true;
+      if (e.key) {
+        keysPressed.current[e.key] = true;
+        keysPressed.current[e.key.toLowerCase()] = true;
+        keysPressed.current[e.key.toUpperCase()] = true;
+      }
       soundEngine.startAmbiance();
 
       if (e.code === 'Escape') {
@@ -2306,7 +2315,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       if (e.code === 'Space') {
         const uLayers = undergroundLayersRef.current;
-        if (uLayers && uLayers.isNearShaftLadder(playerPos.current, 1.45)) {
+        const activeHoleMgr = (uLayers?.currentLevel || 0) > 0 ? uLayers?.holeManager : foliageManagerRef.current?.mountainHoleManager;
+        const nearRaise = activeHoleMgr?.isNearRaiseLadder(playerPos.current, 1.45);
+        if ((uLayers && uLayers.isNearShaftLadder(playerPos.current, 1.45)) || (nearRaise && nearRaise.near)) {
           isClimbingLadderRef.current = true;
           isGrounded.current = false;
         } else if (isGrounded.current) {
@@ -2885,8 +2896,24 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             if (cavernHit.hit) {
               const hole = cavernHit.existingHole;
               let wallLabel = `⛏️ Dig Cavern Wall into Bedrock [Left Click / E]`;
-              if (hole) {
-                if (hole.hasExposedGoldVein) {
+              if (cavernHit.isCeiling) {
+                if (hole && hole.holeType === 'raise') {
+                  wallLabel = `⛏️ Excavate Upward Stope Chimney (+${hole.depth.toFixed(1)}m, Ladder Erected) [Left Click / E]`;
+                } else {
+                  wallLabel = `⛏️ Dig Upward Raise Chimney into Roof (+Cribbing & Ladder) [Left Click / E]`;
+                }
+              } else if (cavernHit.isSideWall) {
+                if (hole && hole.holeType === 'branch') {
+                  wallLabel = `⛏️ Advance Side Branch Cross-Cut (-${hole.depth.toFixed(1)}m) [Left Click / E]`;
+                } else {
+                  wallLabel = `⛏️ Carve Branching Side Tunnel (Timber Portal Frame) [Left Click / E]`;
+                }
+              } else if (hole) {
+                if (hole.holeType === 'raise') {
+                  wallLabel = `⛏️ Advance Upward Stope Overhead (+${hole.depth.toFixed(1)}m) [Left Click / E]`;
+                } else if (hole.holeType === 'branch') {
+                  wallLabel = `⛏️ Advance Side Branch Cross-Cut (-${hole.depth.toFixed(1)}m) [Left Click / E]`;
+                } else if (hole.hasExposedGoldVein) {
                   wallLabel = `⛏️ Deepen Mine Drift (Exposed Gold Vein, -${hole.depth.toFixed(1)}m) [Left Click / E]`;
                 } else {
                   wallLabel = `⛏️ Dig Deeper into Cavern Wall (-${hole.depth.toFixed(1)}m) [Left Click / E]`;
@@ -3306,6 +3333,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const isUndergroundNow = (currentULayers?.currentLevel || 0) > 0;
       const mtnMgr = isUndergroundNow ? currentULayers?.holeManager : foliageManagerRef.current?.mountainHoleManager;
       if (mtnMgr) {
+        // Check if standing near an upward raise ladder
+        const raiseCheck = mtnMgr.isNearRaiseLadder(playerPos.current, 1.6);
+        if (raiseCheck && raiseCheck.near && raiseCheck.hole) {
+          const raiseH = raiseCheck.hole;
+          const ladderPrompt = `🪜 Upward Raise Ladder (+${raiseH.depth.toFixed(1)}m): [W / Space] Climb Up to Stope  •  [S] Climb Down`;
+          if (!executeAction) {
+            onPromptInteract(ladderPrompt, () => checkInteractions(true));
+            return;
+          }
+        }
+
         const tunnelStatus = mtnMgr.isInsideMountainTunnel(
           playerPos.current.x,
           playerPos.current.y,
@@ -3319,12 +3357,19 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         if (mtnHole) {
           const isDeepAdit = mtnHole.depth >= 2.0;
           const veinText = mtnHole.hasExposedGoldVein ? ' | ✨ High-Grade Gold Vein' : '';
-          const aditType = isUndergroundNow ? 'Mine Drift' : 'Mountain Adit';
+          let aditType = isUndergroundNow ? 'Mine Drift' : 'Mountain Adit';
+          if (mtnHole.holeType === 'raise') {
+            aditType = 'Upward Raise Chimney';
+          } else if (mtnHole.holeType === 'branch') {
+            aditType = 'Branching Side Cross-Cut';
+          }
+
+          const depthPrefix = mtnHole.holeType === 'raise' ? '+' : '-';
           const label = tunnelStatus.inside
-            ? `⛏️ Inside ${aditType} (Bore: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Working-Face with Pickaxe [3] or Blast Dynamite [5]]`
+            ? `⛏️ Inside ${aditType} (${depthPrefix}${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Working-Face with Pickaxe [3] or Blast Dynamite [5]]`
             : isDeepAdit
-            ? `🚪 ${aditType} Portal (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Step Inside or Strike to Bore Deeper]`
-            : `⛏️ ${aditType} Excavation (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Pickaxe to Bore Deeper]`;
+            ? `🚪 ${aditType} Portal (${depthPrefix}${mtnHole.depth.toFixed(1)}m${veinText}) [Step Inside or Strike to Advance]`
+            : `⛏️ ${aditType} Excavation (${depthPrefix}${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Pickaxe to Advance]`;
 
           if (executeAction) {
             if (mtnHole.hasExposedGoldVein && Math.random() < 0.4) {
@@ -3334,14 +3379,20 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               }));
               soundEngine.playOreChime();
               if (onShowBanner) {
-                onShowBanner(`✨ Chiseled 1 oz Native Gold Specimen from deep mountain cavity!`);
+                onShowBanner(`✨ Chiseled 1 oz Native Gold Specimen from deep quartz vein!`);
               }
             } else if (onShowBanner) {
-              onShowBanner(
-                isDeepAdit
-                  ? `⛏️ Mountain Adit: -${mtnHole.depth.toFixed(1)}m deep. Step inside to explore timbered drift, or strike the back face to bore further!`
-                  : `⛏️ Mountain Hole: -${mtnHole.depth.toFixed(1)}m deep. Strike with Pickaxe [3] or toss Dynamite [5] to expand into a walk-in adit!`
-              );
+              if (mtnHole.holeType === 'raise') {
+                onShowBanner(`⛏️ Upward Raise: +${mtnHole.depth.toFixed(1)}m overhead stope. Climb ladder [W / Space] or strike ceiling to mine upward!`);
+              } else if (mtnHole.holeType === 'branch') {
+                onShowBanner(`⛏️ Branch Drift: -${mtnHole.depth.toFixed(1)}m lateral cross-cut. Strike the face to advance or branch further!`);
+              } else {
+                onShowBanner(
+                  isDeepAdit
+                    ? `⛏️ Mine Adit: -${mtnHole.depth.toFixed(1)}m deep. Step inside to explore timbered drift, or strike the back face to bore further!`
+                    : `⛏️ Mine Excavation: -${mtnHole.depth.toFixed(1)}m deep. Strike with Pickaxe [3] or toss Dynamite [5] to expand into a walk-in adit!`
+                );
+              }
             }
           } else {
             onPromptInteract(label, () => checkInteractions(true));
@@ -3474,7 +3525,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         } else {
           // Terrain slope, steep hills, boulders, and mountain outcropping collision resolution with smooth wall sliding
-          const currentGroundY = getTerrainHeight(playerPos.current.x, playerPos.current.z);
+          const tunnelCheck = foliageManagerRef.current?.mountainHoleManager?.isInsideMountainTunnel(
+            playerPos.current.x,
+            playerPos.current.y,
+            playerPos.current.z,
+            0.65
+          );
+          const currentGroundY = (tunnelCheck?.inside && tunnelCheck.floorY !== undefined)
+            ? tunnelCheck.floorY
+            : getTerrainHeight(playerPos.current.x, playerPos.current.z);
+
           const colRes = resolveKinematicMovement(
             playerPos.current.x,
             playerPos.current.z,
@@ -3546,7 +3606,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       // Vertical Gravity, Ladder Climbing, and Ground Clamping
       const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
       const uLayers = undergroundLayersRef.current;
+      const activeHoleMgr = isUnderground ? uLayers?.holeManager : foliageManagerRef.current?.mountainHoleManager;
       const nearShaftLadder = !!(uLayers && uLayers.isNearShaftLadder(playerPos.current, 1.45));
+      const raiseLadderCheck = activeHoleMgr?.isNearRaiseLadder(playerPos.current, 1.5);
 
       // Handle real-time shaft ladder climbing
       if (nearShaftLadder) {
@@ -3653,6 +3715,82 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         } else if (isClimbingLadderRef.current) {
           // Player holding onto ladder rungs
+          verticalVelocity.current = 0;
+          isGrounded.current = false;
+        }
+      } else if (raiseLadderCheck && raiseLadderCheck.near && raiseLadderCheck.ladderPos) {
+        // Handle climbing upward raise ladders into overhead stopes and chimneys
+        const wantsClimbUp = !isUIOpenRef.current && !isGameOverRef.current && (keys['KeyW'] || keys['ArrowUp'] || keys['w'] || keys['W'] || (virtualJoystickInput.current.forward > 0.15));
+        const wantsClimbDown = !isUIOpenRef.current && !isGameOverRef.current && (keys['KeyS'] || keys['ArrowDown'] || keys['s'] || keys['S'] || keys['ShiftLeft'] || keys['ShiftRight'] || (virtualJoystickInput.current.forward < -0.15));
+        const wantsStepOff = !isUIOpenRef.current && !isGameOverRef.current && (keys['KeyA'] || keys['KeyD'] || keys['a'] || keys['d'] || keys['Space'] || Math.abs(virtualJoystickInput.current.strafe) > 0.35);
+
+        const ladderPos = raiseLadderCheck.ladderPos;
+        const baseGroundY = isUnderground && uLayers
+          ? uLayers.getFloorElevationForPosition(playerPos.current.x, playerPos.current.z, uLayers.currentLevel)
+          : getTerrainHeight(playerPos.current.x, playerPos.current.z);
+        const bottomDismountY = baseGroundY + 1.7;
+        const topDismountY = (raiseLadderCheck.maxY !== undefined ? raiseLadderCheck.maxY : (ladderPos.y + 2.0)) + 0.45;
+
+        if (wantsStepOff && isClimbingLadderRef.current) {
+          // Dismount / jump away from ladder
+          isClimbingLadderRef.current = false;
+          isGrounded.current = false;
+          if (keys['Space']) {
+            verticalVelocity.current = 6.0;
+          }
+        } else if (wantsClimbUp) {
+          if (!isClimbingLadderRef.current) {
+            soundEngine.playLadderInitiate(true);
+          }
+          isClimbingLadderRef.current = true;
+          isGrounded.current = false;
+          verticalVelocity.current = 0;
+          const climbSpeed = (isSprinting ? 5.2 : 3.8) * delta;
+          playerPos.current.y += climbSpeed;
+
+          // Gentle alignment to ladder centerline without rigid locking
+          playerPos.current.x = THREE.MathUtils.lerp(playerPos.current.x, ladderPos.x, 0.08);
+          playerPos.current.z = THREE.MathUtils.lerp(playerPos.current.z, ladderPos.z, 0.08);
+
+          ladderClimbAudioTimer.current += delta;
+          if (ladderClimbAudioTimer.current >= 0.28) {
+            ladderClimbAudioTimer.current = 0;
+            soundEngine.playLadderClimb(true);
+          }
+
+          if (playerPos.current.y >= topDismountY) {
+            playerPos.current.y = topDismountY;
+            isGrounded.current = true;
+            isClimbingLadderRef.current = false;
+            verticalVelocity.current = 0;
+          }
+        } else if (wantsClimbDown) {
+          if (!isClimbingLadderRef.current) {
+            soundEngine.playLadderInitiate(true);
+          }
+          isClimbingLadderRef.current = true;
+          isGrounded.current = false;
+          verticalVelocity.current = 0;
+          const climbSpeed = (isSprinting ? 5.2 : 3.8) * delta;
+          playerPos.current.y -= climbSpeed;
+
+          playerPos.current.x = THREE.MathUtils.lerp(playerPos.current.x, ladderPos.x, 0.08);
+          playerPos.current.z = THREE.MathUtils.lerp(playerPos.current.z, ladderPos.z, 0.08);
+
+          ladderClimbAudioTimer.current += delta;
+          if (ladderClimbAudioTimer.current >= 0.28) {
+            ladderClimbAudioTimer.current = 0;
+            soundEngine.playLadderClimb(true);
+          }
+
+          // Dismount cleanly onto cavern floor beneath the ladder
+          if (playerPos.current.y <= bottomDismountY) {
+            playerPos.current.y = bottomDismountY;
+            isGrounded.current = true;
+            isClimbingLadderRef.current = false;
+            verticalVelocity.current = 0;
+          }
+        } else if (isClimbingLadderRef.current) {
           verticalVelocity.current = 0;
           isGrounded.current = false;
         }

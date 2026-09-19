@@ -326,9 +326,11 @@ export class MiningSystem {
     if (this.mountainHoleManager) {
       const mtnHit = this.mountainHoleManager.raycastMountainHoles(raycaster, 6.5);
       if (mtnHit.hit && mtnHit.hole) {
+        const strikePoint = mtnHit.point || mtnHit.hole.position;
+        const strikeNormal = mtnHit.strikeNormal || mtnHit.hole.normal;
         const res = this.mountainHoleManager.digMountainHole(
-          mtnHit.hole.position,
-          mtnHit.hole.normal,
+          strikePoint,
+          strikeNormal,
           mtnHit.hole.rockColor,
           mtnHit.hole.rockType,
           'pickaxe'

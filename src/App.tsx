@@ -33,7 +33,7 @@ import { isMobileDevice } from './utils/device';
 export default function App() {
   // Player State
   const [playerState, setPlayerState] = useState<PlayerState>({
-    position: { x: -115, y: 5, z: -115 },
+    position: { x: -115, y: 8.2, z: -115 },
     rotation: { yaw: 0.8, pitch: 0 },
     health: 100,
     maxHealth: 100,
@@ -104,6 +104,7 @@ export default function App() {
   const [clues, setClues] = useState<ClueItem[]>(INITIAL_CLUES);
 
   // Modals & UI States
+  const [hasShownWelcome, setHasShownWelcome] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [isJournalOpen, setIsJournalOpen] = useState(false);
   const [isGuidebookOpen, setIsGuidebookOpen] = useState(false);
@@ -161,6 +162,7 @@ export default function App() {
   } | null>(null);
 
   const isAnyModalOpen =
+    !hasShownWelcome ||
     isMapOpen ||
     isJournalOpen ||
     isGuidebookOpen ||
@@ -476,7 +478,6 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [viewMode, setViewMode] = useState<'first' | 'third'>('first');
   const [interactionPrompt, setInteractionPrompt] = useState<string | undefined>(undefined);
-  const [hasShownWelcome, setHasShownWelcome] = useState(false);
 
   // Global HUD Visibility and Wilderness Telegraph State
   const [isHudVisible, setIsHudVisible] = useState(true);
@@ -1057,10 +1058,14 @@ export default function App() {
             </div>
 
             <button
+              id="begin-expedition-btn"
               onClick={() => {
                 setHasShownWelcome(true);
                 soundEngine.startAmbiance();
                 westernMusic.play();
+                if (document.activeElement instanceof HTMLElement) {
+                  document.activeElement.blur();
+                }
               }}
               className="w-full py-3 bg-[#5c3e21] hover:bg-[#432a13] text-amber-100 font-bold text-sm tracking-wider uppercase rounded-xl shadow-lg transition flex items-center justify-center gap-2 font-sans cursor-pointer"
             >
