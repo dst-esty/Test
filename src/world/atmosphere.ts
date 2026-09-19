@@ -907,6 +907,9 @@ export class AtmosphereManager {
         const yOffset = isTopBillow ? (domeElevation + Math.random() * 4) : (-4 + Math.random() * 3);
 
         sprite.position.set(xOffset, yOffset, zOffset);
+        // Optimize: sub-sprites are stationary within cluster group, disable per-frame auto matrix computation
+        sprite.matrixAutoUpdate = false;
+        sprite.updateMatrix();
         clusterGroup.add(sprite);
 
         if (isTopBillow) {
@@ -946,7 +949,7 @@ export class AtmosphereManager {
    * - Dynamic lighting: reactive to sunrise, golden hour, midday sun, stormy skies, and silver moonlight.
    */
   private spawnOutOfBoundsClouds() {
-    const clusterCount = 36;
+    const clusterCount = 28;
     for (let i = 0; i < clusterCount; i++) {
       const clusterGroup = new THREE.Group();
       const topSprites: THREE.Sprite[] = [];
@@ -968,22 +971,22 @@ export class AtmosphereManager {
         ? 28 + Math.random() * 30
         : 55 + Math.random() * 65;
 
-      // Organic cluster composition: 12 to 16 large billow puffs
-      const puffCount = 12 + Math.floor(Math.random() * 5);
-      const clusterWidth = isInnerRidgeCloud ? 95 + Math.random() * 45 : 130 + Math.random() * 60;
-      const clusterDepth = isInnerRidgeCloud ? 60 + Math.random() * 35 : 85 + Math.random() * 45;
+      // Voluminous cluster composition: 8 to 11 expansive billow puffs
+      const puffCount = 8 + Math.floor(Math.random() * 4);
+      const clusterWidth = isInnerRidgeCloud ? 110 + Math.random() * 50 : 150 + Math.random() * 65;
+      const clusterDepth = isInnerRidgeCloud ? 70 + Math.random() * 40 : 95 + Math.random() * 50;
 
       for (let p = 0; p < puffCount; p++) {
         // Classify puffs: mist (low base wisp), base (dense mid-body), top (sunlit dome)
-        const isMist = p < 4;
-        const isTop = !isMist && p >= puffCount - 5;
+        const isMist = p < 3;
+        const isTop = !isMist && p >= puffCount - 4;
         const isBase = !isMist && !isTop;
 
         const puffSize = isMist
-          ? (55 + Math.random() * 35)
+          ? (65 + Math.random() * 40)
           : isTop
-          ? (42 + Math.random() * 32)
-          : (50 + Math.random() * 40);
+          ? (55 + Math.random() * 38)
+          : (62 + Math.random() * 45);
 
         const puffMat = new THREE.SpriteMaterial({
           map: this.cloudTexture,
@@ -994,7 +997,7 @@ export class AtmosphereManager {
         });
 
         const sprite = new THREE.Sprite(puffMat);
-        const scaleX = puffSize * (isMist ? 1.6 : (0.9 + Math.random() * 0.3));
+        const scaleX = puffSize * (isMist ? 1.8 : (1.0 + Math.random() * 0.35));
         const scaleY = puffSize * (isMist ? 0.55 : (0.75 + Math.random() * 0.25));
         sprite.scale.set(scaleX, scaleY, 1);
         initialScales.push({ sprite, scaleX, scaleY });
@@ -1014,6 +1017,9 @@ export class AtmosphereManager {
         sprite.position.set(xOffset, yOffset, zOffset);
         // Slight random rotation for varied cloud puff silhouettes
         sprite.material.rotation = (Math.random() - 0.5) * Math.PI;
+        // Optimize: sub-sprites are stationary within parent cluster, avoid per-frame CPU matrix math
+        sprite.matrixAutoUpdate = false;
+        sprite.updateMatrix();
         clusterGroup.add(sprite);
 
         if (isMist) {
@@ -1479,10 +1485,8 @@ export class AtmosphereManager {
       c.mesh.position.z = Math.sin(c.angle) * c.radius;
       c.mesh.position.y = c.baseY + Math.sin(this.elapsedTime * c.bobSpeed + c.bobPhase) * 3.8;
 
-      const breathe = 1.0 + Math.sin(this.elapsedTime * (c.bobSpeed * 1.5) + c.bobPhase) * 0.06;
-      c.initialScales.forEach(({ sprite, scaleX, scaleY }) => {
-        sprite.scale.set(scaleX * breathe, scaleY * breathe, 1);
-      });
+      const breathe = 1.0 + Math.sin(this.elapsedTime * (c.bobSpeed * 1.5) + c.bobPhase) * 0.05;
+      c.mesh.scale.set(breathe, breathe, 1);
     });
 
     // 2. Underground attenuation

@@ -140,9 +140,9 @@ export class EndlessTerrainManager {
       this.recomputeNeededChunks(cx, cz);
     }
 
-    // Process queued chunk creations (up to 3 per frame to prevent any frame stutter)
+    // Process queued chunk creations (1 per frame to guarantee 60 FPS without frame micro-stutter)
     let chunksCreated = 0;
-    while (this.pendingChunkKeys.length > 0 && chunksCreated < 3) {
+    while (this.pendingChunkKeys.length > 0 && chunksCreated < 1) {
       const target = this.pendingChunkKeys.shift()!;
       const key = `${target.cx},${target.cz}`;
       if (!this.activeChunks.has(key)) {

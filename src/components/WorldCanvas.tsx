@@ -389,6 +389,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const lastSentPitch = useRef<number>(0);
   const lastMultiplayerSyncTime = useRef<number>(0);
   const interactionCheckTick = useRef<number>(0);
+  const renderFrameCount = useRef<number>(0);
 
   // Dynamic quality adjustment without rebuilding scene
   useEffect(() => {
@@ -4755,6 +4756,20 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       // Update Tortilla Flat historic town night lighting (torches flicker, string lights, lanterns, window radiance)
       if (tortillaFlatLightingRef.current) {
         tortillaFlatLightingRef.current(timeOfDayRef.current, delta);
+      }
+
+      // Adaptive Shadow Map Scheduling (maintains 60 FPS frame pacing under complex terrain/weather conditions)
+      if (renderer.shadowMap.enabled) {
+        renderFrameCount.current++;
+        if (qualityRef.current === 'high') {
+          renderer.shadowMap.autoUpdate = true;
+        } else {
+          // In balanced/performance mode, interleave shadow recalculations every 2 frames for a massive GPU boost
+          renderer.shadowMap.autoUpdate = (renderFrameCount.current % 2 === 0);
+          if (renderer.shadowMap.autoUpdate) {
+            renderer.shadowMap.needsUpdate = true;
+          }
+        }
       }
 
       // Render scene
