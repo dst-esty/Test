@@ -12,6 +12,7 @@ export interface MountainHole {
   rockType: string;        // 'volcanic_crag' | 'stepped_mesa' | 'fault_monocline' | 'canyon_spire' | 'granite';
   hasExposedGoldVein: boolean;
   goldAwardedTotal: number;
+  isSurface?: boolean;
   group: THREE.Group;
   rimMesh: THREE.Mesh;
   cavityMesh: THREE.Mesh;
@@ -178,7 +179,8 @@ export class MountainHoleManager {
     surfaceNormal: THREE.Vector3,
     rockColor: number = 0x8a4528,
     rockType: string = 'volcanic_crag',
-    tool: string = 'pickaxe'
+    tool: string = 'pickaxe',
+    isSurface: boolean = false
   ): DigMountainHoleResult {
     // Clean and normalize normal vector
     const normal = surfaceNormal.clone();
@@ -186,6 +188,12 @@ export class MountainHoleManager {
       normal.set(0, 0, 1);
     } else {
       normal.normalize();
+    }
+
+    // Reverse surface excavation vector so the tunnel burrows subterranean into the mountain/rock
+    // instead of poking out on the surface into the air
+    if (isSurface) {
+      normal.negate();
     }
 
     // Check if an existing hole is close enough to be deepened
@@ -206,6 +214,7 @@ export class MountainHoleManager {
 
     if (existing) {
       existing.strikes += 1;
+      existing.isSurface = isSurface || existing.isSurface;
       // Auto-correct orientation if normal was previously inverted or misaligned
       if (normal.lengthSq() > 0.01 && existing.normal.dot(normal) < 0.2) {
         existing.normal.copy(normal);
@@ -213,8 +222,9 @@ export class MountainHoleManager {
         const quat = new THREE.Quaternion().setFromUnitVectors(defaultNormal, normal);
         existing.group.quaternion.copy(quat);
       }
-      // Max depth up to 25.0m into the mountain bedrock!
-      existing.depth = Math.min(25.0, existing.depth + baseDepthIncrement);
+      // Max depth up to 25.0m (capped at 14.0m on surface so it does not puncture out the back of outcroppings)
+      const maxDepth = isSurface ? 14.0 : 25.0;
+      existing.depth = Math.min(maxDepth, existing.depth + baseDepthIncrement);
       // Radius expands to a walk-in adit passage (~1.4m - 1.85m radius = ~2.8m - 3.7m wide tunnel)
       existing.radius = Math.min(1.85, Math.max(1.15, existing.radius + baseRadiusIncrement));
 
@@ -293,6 +303,7 @@ export class MountainHoleManager {
       rockType,
       hasExposedGoldVein: hasGoldVein,
       goldAwardedTotal: initialGold,
+      isSurface,
       group: holeGroup,
       rimMesh: undefined as unknown as THREE.Mesh,
       cavityMesh: undefined as unknown as THREE.Mesh,

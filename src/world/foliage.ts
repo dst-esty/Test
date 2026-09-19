@@ -1440,12 +1440,14 @@ export class DesertFoliageManager {
           }
 
           // Carve or deepen a real, visible physical 3D hole into the mountain rock face!
+          // isSurface is true: reverses excavation vector so the tunnel burrows subterranean instead of poking out
           const holeRes = this.mountainHoleManager.digMountainHole(
             hitPoint,
             normal,
             rockColor,
             archetypeRock,
-            equippedTool || 'pickaxe'
+            equippedTool || 'pickaxe',
+            true
           );
 
           // Trigger particle system with exact material intensity
@@ -1749,13 +1751,14 @@ export class DesertFoliageManager {
             if (Math.random() < 0.35) goldBlasted += 1;
             destroyedPoints.push({ pos: pos.clone(), type: 'sandstone' });
 
-            const blastNormal = center.clone().sub(pos).normalize();
+            const blastNormal = pos.clone().sub(center).normalize();
             this.mountainHoleManager.digMountainHole(
               center,
               blastNormal.lengthSq() > 0.1 ? blastNormal : new THREE.Vector3(0, 1, 0),
               0x7c3820,
               'volcanic_crag',
-              'dynamite'
+              'dynamite',
+              true
             );
           }
         }
