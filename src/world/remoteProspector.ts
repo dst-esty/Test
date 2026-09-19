@@ -139,7 +139,17 @@ export class RemoteProspector {
     // Rounded card background
     ctx.fillStyle = this.isPardner ? 'rgba(35, 24, 10, 0.92)' : 'rgba(18, 14, 11, 0.82)';
     ctx.beginPath();
-    ctx.roundRect(16, 12, canvas.width - 32, canvas.height - 24, 18);
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(16, 12, canvas.width - 32, canvas.height - 24, 18);
+    } else {
+      const x = 16, y = 12, w = canvas.width - 32, h = canvas.height - 24, r = 18;
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
     ctx.fill();
 
     // Border with player outfit color or bright gold for pardners

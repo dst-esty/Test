@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { PlayerState, Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
+import { DialogueNPCInfo } from './TownfolkDialogueOverlay';
 
 interface TortillaFlatModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ interface TortillaFlatModalProps {
   onFastTravel?: (target: Vector3D) => void;
   onShowBanner?: (msg: string) => void;
   initialTab?: 'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery';
+  onOpenTownfolkDialogue?: (npc: DialogueNPCInfo) => void;
 }
 
 export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
@@ -40,6 +42,7 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
   onFastTravel,
   onShowBanner,
   initialTab = 'mercantile',
+  onOpenTownfolkDialogue,
 }) => {
   const [activeTab, setActiveTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery'>(initialTab);
   const [editingMountName, setEditingMountName] = useState(false);
@@ -472,6 +475,108 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
                   "Before the big dam was finished upriver, the Salt River ran wild and cold right past this terrace. Our freight boats and mule wagons hauled tons of timber and machinery straight through the canyon gorge. Tortilla Flat was the last stop for cold beer and fresh horseshoeing before the deep narrows."
                 </p>
               </div>
+
+              {/* Real Voice Dialogue with Saloon Patrons */}
+              {onOpenTownfolkDialogue && (
+                <div className="p-4 bg-gradient-to-r from-amber-950/60 via-stone-900 to-amber-950/60 border border-amber-600/50 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-mono uppercase text-amber-400 font-bold flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-amber-400" />
+                      Frontier Voice Conversations (Gemini Audio)
+                    </div>
+                    <span className="text-[11px] font-mono text-stone-400">Speak & Listen</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        onClose();
+                        onOpenTownfolkDialogue({
+                          id: 'barkeep_hank',
+                          name: "Hank 'Dutch' Miller",
+                          title: 'Superstition Saloon Keeper',
+                          role: 'barkeep',
+                          initialGreeting: "Welcome to the Superstition Saloon! Cold sarsaparilla, warm stew, and hot rumors straight from the diggings. What'll it be?",
+                        });
+                      }}
+                      className="p-2.5 bg-stone-900 hover:bg-stone-800 border border-amber-800/60 hover:border-amber-500 rounded-lg text-left transition-colors flex items-center gap-2.5"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-amber-900/80 border border-amber-500 flex items-center justify-center text-amber-200 text-sm">
+                        🍺
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-amber-100">Barkeep Hank Miller</div>
+                        <div className="text-[10px] text-stone-400">Ask about miners, gold & whiskey</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        onClose();
+                        onOpenTownfolkDialogue({
+                          id: 'old_dusty_pete',
+                          name: 'Old Dusty Pete',
+                          title: 'Veteran Gold Prospector',
+                          role: 'prospector',
+                          initialGreeting: "Heh! You got that hungry look in your eyes, greenhorn. Weaver's Needle don't give up its gold easy. Ask me what you want to know.",
+                        });
+                      }}
+                      className="p-2.5 bg-stone-900 hover:bg-stone-800 border border-amber-800/60 hover:border-amber-500 rounded-lg text-left transition-colors flex items-center gap-2.5"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-amber-900/80 border border-amber-500 flex items-center justify-center text-amber-200 text-sm">
+                        ⛏️
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-amber-100">Old Dusty Pete</div>
+                        <div className="text-[10px] text-stone-400">Lost Dutchman mine lore & clues</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        onClose();
+                        onOpenTownfolkDialogue({
+                          id: 'sheriff_wyatt',
+                          name: 'Sheriff Wyatt Vance',
+                          title: 'Territorial Lawman',
+                          role: 'sheriff',
+                          initialGreeting: "Keep your iron holstered in town, stranger. Out in Needle Canyon you're on your own, but here in Tortilla Flat, the law stands firm.",
+                        });
+                      }}
+                      className="p-2.5 bg-stone-900 hover:bg-stone-800 border border-amber-800/60 hover:border-amber-500 rounded-lg text-left transition-colors flex items-center gap-2.5"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-amber-900/80 border border-amber-500 flex items-center justify-center text-amber-200 text-sm">
+                        ⭐
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-amber-100">Sheriff Wyatt Vance</div>
+                        <div className="text-[10px] text-stone-400">Outlaws, claims & mountain perils</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        onClose();
+                        onOpenTownfolkDialogue({
+                          id: 'assayer_walker',
+                          name: 'Judge Hiram Walker',
+                          title: 'U.S. Mineral Assayer',
+                          role: 'assayer',
+                          initialGreeting: "Standard bullion rate is twenty dollars sixty-seven cents per ounce under the Coinage Act. Have you struck honest bonanza rock?",
+                        });
+                      }}
+                      className="p-2.5 bg-stone-900 hover:bg-stone-800 border border-amber-800/60 hover:border-amber-500 rounded-lg text-left transition-colors flex items-center gap-2.5"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-amber-900/80 border border-amber-500 flex items-center justify-center text-amber-200 text-sm">
+                        ⚖️
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-amber-100">Assayer Hiram Walker</div>
+                        <div className="text-[10px] text-stone-400">Gold grades, patents & assaying</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

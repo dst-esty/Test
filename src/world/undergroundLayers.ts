@@ -412,6 +412,7 @@ export class UndergroundLayersManager {
         this.undergroundAmbient.intensity = 0.8;
       }
     }
+    this.updateLanternVisibility(level);
     if (level > 0) {
       const activeLayer = this.layers.find((l) => l.level === level) || this.layers[0];
       this.voxelEngine.generateLevelVoxels(level, this.surfacePos, this.surfaceY, activeLayer.depthMeters);
@@ -419,6 +420,15 @@ export class UndergroundLayersManager {
       // Surface shaft collar mini-voxels
       this.voxelEngine.generateLevelVoxels(0, this.surfacePos, this.surfaceY, 0);
     }
+  }
+
+  private updateLanternVisibility(level: number) {
+    if (this.undergroundAmbient) {
+      this.undergroundAmbient.visible = level > 0;
+    }
+    this.lanternLights.forEach((light) => {
+      light.visible = (level > 0 && light.userData?.level === level);
+    });
   }
 
   public rebuildAllLayers() {
@@ -451,6 +461,7 @@ export class UndergroundLayersManager {
     });
 
     this.updateCavernWallHoleCutouts();
+    this.updateLanternVisibility(this.currentLevel);
   }
 
   // Create authentic 3D subterranean chamber for a geological layer
@@ -697,6 +708,8 @@ export class UndergroundLayersManager {
     // Central Shaft Station Overhead Lantern illuminating the breakthrough and pit
     const stationLantern = new THREE.PointLight(layer.level >= 5 ? 0x88ccff : 0xffa442, 2.8, 22, 1.4);
     stationLantern.position.set(0, height - 0.85, 0);
+    stationLantern.userData = { level: layer.level };
+    stationLantern.visible = (this.currentLevel === layer.level);
     group.add(stationLantern);
     this.lanternLights.push(stationLantern);
 
@@ -771,16 +784,13 @@ export class UndergroundLayersManager {
       cap.castShadow = true;
       group.add(cap);
 
-      // Hanging miner brass/iron lantern
-      const lanternMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.22, 6), ironMat);
+      // Hanging miner brass/iron lantern with warm glowing burner
+      const lanternMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.1, 0.22, 6),
+        new THREE.MeshBasicMaterial({ color: layer.level >= 6 ? 0x88ccff : 0xffa442 })
+      );
       lanternMesh.position.set(tx, height * 0.72, tz);
       group.add(lanternMesh);
-
-      // Warm atmospheric kerosene amber lighting (2200K)
-      const lanternLight = new THREE.PointLight(layer.level >= 6 ? 0x88ccff : 0xffa442, 1.8, 18, 2.0);
-      lanternLight.position.set(tx, height * 0.7, tz);
-      group.add(lanternLight);
-      this.lanternLights.push(lanternLight);
     });
 
     // 7. Central Shaft Pit Collar and Floor Bedrock Plate for Digging Down
@@ -1015,11 +1025,13 @@ export class UndergroundLayersManager {
         group.add(bentCap);
       }
 
-      // Hanging Lantern at end of excavated drift
-      const driftLantern = new THREE.PointLight(0xffb855, 1.6, 12);
-      driftLantern.position.set(0, tunnelHeight - 0.6, -tunnelLength + 1.5);
-      group.add(driftLantern);
-      this.lanternLights.push(driftLantern);
+      // Hanging glowing lantern at end of excavated drift
+      const driftLanternMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.1, 0.22, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffb855 })
+      );
+      driftLanternMesh.position.set(0, tunnelHeight - 0.6, -tunnelLength + 1.5);
+      group.add(driftLanternMesh);
 
       // Rich Exposed Ore Nodes at back of chamber
       const goldMat = new THREE.MeshStandardMaterial({
@@ -1171,10 +1183,6 @@ export class UndergroundLayersManager {
     );
     lanternGlobe.position.set(0, -0.02, 0);
     lanternGroup.add(lanternGlobe);
-
-    const collarLanternLight = new THREE.PointLight(0xff8822, 1.2, 4.8);
-    collarLanternLight.position.set(0, -0.02, 0);
-    lanternGroup.add(collarLanternLight);
     this.shaftGroup.add(lanternGroup);
 
     // Helper: determine if an elevation Y falls within an open stope/chamber level

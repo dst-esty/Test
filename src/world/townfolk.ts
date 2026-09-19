@@ -21,6 +21,28 @@ export interface TownNPCData {
   };
 }
 
+function safeRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    let radius = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+  }
+}
+
 /**
  * Creates a stylized, high-contrast 1880s Western nameplate sprite
  */
@@ -34,20 +56,20 @@ function createNameplateTexture(name: string, title: string, badgeSymbol: string
   // Rounded plaque background with Western aged parchment / dark wood
   ctx.fillStyle = 'rgba(22, 14, 9, 0.88)';
   ctx.beginPath();
-  ctx.roundRect(10, 10, 492, 120, 24);
+  safeRoundRect(ctx, 10, 10, 492, 120, 24);
   ctx.fill();
 
   // Ornate double border
   ctx.strokeStyle = '#d4af37'; // Antique Gold
   ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.roundRect(14, 14, 484, 112, 20);
+  safeRoundRect(ctx, 14, 14, 484, 112, 20);
   ctx.stroke();
 
   ctx.strokeStyle = 'rgba(212, 175, 55, 0.4)';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.roundRect(22, 22, 468, 96, 14);
+  safeRoundRect(ctx, 22, 22, 468, 96, 14);
   ctx.stroke();
 
   // Name
@@ -73,17 +95,67 @@ function createNameplateTexture(name: string, title: string, badgeSymbol: string
   return texture;
 }
 
+/**
+ * Creates an animated speech bubble indicator sprite when the NPC is talking
+ */
+function createSpeechBubbleTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.CanvasTexture(canvas);
+
+  // Background bubble
+  ctx.fillStyle = 'rgba(24, 15, 8, 0.94)';
+  ctx.beginPath();
+  safeRoundRect(ctx, 8, 8, 304, 80, 20);
+  ctx.fill();
+
+  // Border
+  ctx.strokeStyle = '#f59e0b';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  safeRoundRect(ctx, 10, 10, 300, 76, 18);
+  ctx.stroke();
+
+  // Inner glow
+  ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  safeRoundRect(ctx, 14, 14, 292, 68, 14);
+  ctx.stroke();
+
+  // Text with speaker symbol
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fef08a';
+  ctx.font = 'bold 30px "Georgia", serif';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+  ctx.shadowBlur = 6;
+  ctx.fillText('🔊 Speaking...', 160, 48);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  return texture;
+}
+
 export class TownNPC {
   public data: TownNPCData;
   public group: THREE.Group;
   public headGroup: THREE.Group;
+  public jawGroup: THREE.Group;
   public leftArmGroup: THREE.Group;
   public rightArmGroup: THREE.Group;
   public leftLegGroup: THREE.Group;
   public rightLegGroup: THREE.Group;
   public torsoGroup: THREE.Group;
   public nameplateSprite: THREE.Sprite;
+  public speechBubbleSprite: THREE.Sprite;
   
+  public isSpeaking: boolean = false;
+  public speakTimer: number = 0;
+  public speakClock: number = 0;
+
   private dialogueIdx: number = 0;
   private animClock: number = Math.random() * 10;
   private currentDirection: number = 1;
@@ -101,6 +173,7 @@ export class TownNPC {
     // --- Build Anatomic Articulated 3D Model ---
     this.torsoGroup = new THREE.Group();
     this.headGroup = new THREE.Group();
+    this.jawGroup = new THREE.Group();
     this.leftArmGroup = new THREE.Group();
     this.rightArmGroup = new THREE.Group();
     this.leftLegGroup = new THREE.Group();
@@ -120,6 +193,19 @@ export class TownNPC {
     this.nameplateSprite.scale.set(2.4, 0.65, 1.0);
     this.nameplateSprite.position.set(0, 2.3, 0);
     this.group.add(this.nameplateSprite);
+
+    // Attach Speech Bubble Sprite (visible when talking)
+    const speechTex = createSpeechBubbleTexture();
+    const speechMat = new THREE.SpriteMaterial({
+      map: speechTex,
+      transparent: true,
+      depthTest: false,
+    });
+    this.speechBubbleSprite = new THREE.Sprite(speechMat);
+    this.speechBubbleSprite.scale.set(1.6, 0.48, 1.0);
+    this.speechBubbleSprite.position.set(0, 2.85, 0);
+    this.speechBubbleSprite.visible = false;
+    this.group.add(this.speechBubbleSprite);
   }
 
   private buildCharacterMesh() {
@@ -287,15 +373,33 @@ export class TownNPC {
     nose.position.set(0, 0.09, 0.125);
     this.headGroup.add(nose);
 
+    // --- Articulated Lower Jaw & Mouth ---
+    this.jawGroup.position.set(0, 0.02, 0.02);
+    this.headGroup.add(this.jawGroup);
+
+    // Chin / Lower Jaw
+    const chin = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.12), skinMat);
+    chin.position.set(0, -0.01, 0.04);
+    chin.castShadow = true;
+    this.jawGroup.add(chin);
+
+    // Mouth cavity interior
+    const mouthCavity = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.025, 0.03),
+      new THREE.MeshStandardMaterial({ color: 0x3d1717, roughness: 0.9 })
+    );
+    mouthCavity.position.set(0, 0.02, 0.07);
+    this.jawGroup.add(mouthCavity);
+
     // Beard / Mustache
     const hairColor = role === 'prospector' ? 0xb5b8ba : role === 'barkeep' ? 0x1f1915 : 0x483221;
     const beardMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.95 });
 
     if (role === 'prospector') {
-      // Big Bushy Prospector Sourdough Beard
+      // Big Bushy Prospector Sourdough Beard (attached to jaw so it articulates when talking!)
       const beard = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.24, 0.14), beardMat);
-      beard.position.set(0, -0.02, 0.09);
-      this.headGroup.add(beard);
+      beard.position.set(0, -0.03, 0.08);
+      this.jawGroup.add(beard);
     } else if (role === 'barkeep') {
       // Handlebar Mustache
       const mustache = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.05, 0.06), beardMat);
@@ -643,6 +747,60 @@ export class TownNPC {
       this.leftArmGroup.rotation.set(0.08 + Math.sin(this.animClock) * 0.04, 0, 0.08);
       this.rightArmGroup.rotation.set(0.08 - Math.sin(this.animClock) * 0.04, 0, -0.08);
     }
+
+    // --- Speaking Articulation & Animation ---
+    if (this.isSpeaking) {
+      this.speakClock += delta;
+      this.speakTimer -= delta;
+
+      if (this.speakTimer <= 0) {
+        this.stopSpeaking();
+      } else {
+        if (this.speechBubbleSprite) {
+          this.speechBubbleSprite.visible = true;
+          // Pulse the speech indicator bubble gently
+          const bubblePulse = 1.6 + Math.sin(this.speakClock * 8) * 0.08;
+          this.speechBubbleSprite.scale.set(bubblePulse, bubblePulse * 0.3, 1.0);
+        }
+
+        // Move jaw up and down realistically
+        const jawOpen = Math.abs(Math.sin(this.speakClock * 14)) * 0.045 + Math.sin(this.speakClock * 7) * 0.015;
+        this.jawGroup.position.y = 0.02 - Math.max(0, jawOpen);
+
+        // Expressive head nod and tilt with speech cadence
+        this.headGroup.rotation.x += Math.sin(this.speakClock * 10) * 0.03;
+        this.headGroup.rotation.z = Math.cos(this.speakClock * 6) * 0.025;
+
+        // Expressive hand gesturing while talking (if not holding heavy tools)
+        if (!this.data.isSeated && this.data.role !== 'blacksmith') {
+          this.rightArmGroup.rotation.x = -0.45 + Math.sin(this.speakClock * 6) * 0.18;
+          this.rightArmGroup.rotation.z = -0.2 + Math.cos(this.speakClock * 5) * 0.1;
+        }
+      }
+    } else {
+      if (this.speechBubbleSprite) this.speechBubbleSprite.visible = false;
+      this.jawGroup.position.y = 0.02;
+    }
+  }
+
+  public startSpeaking(durationSeconds: number = 4.0) {
+    this.isSpeaking = true;
+    this.speakTimer = Math.max(1.5, durationSeconds);
+    this.speakClock = 0;
+    if (this.speechBubbleSprite) {
+      this.speechBubbleSprite.visible = true;
+    }
+  }
+
+  public stopSpeaking() {
+    this.isSpeaking = false;
+    this.speakTimer = 0;
+    if (this.speechBubbleSprite) {
+      this.speechBubbleSprite.visible = false;
+    }
+    if (this.jawGroup) {
+      this.jawGroup.position.y = 0.02;
+    }
   }
 
   public getNextDialogue(): string {
@@ -680,6 +838,10 @@ export class TownfolkManager {
     scene.add(this.root);
 
     this.spawnTownfolk();
+  }
+
+  public getNPCById(id: string): TownNPC | null {
+    return this.npcs.find((n) => n.data.id === id) || null;
   }
 
   private spawnTownfolk() {

@@ -389,7 +389,7 @@ export function createMountedSignboard(
 
 export interface TortillaTorch {
   group: THREE.Group;
-  light: THREE.PointLight;
+  light?: THREE.PointLight | null;
   flameMesh: THREE.Mesh;
   flameCore: THREE.Mesh;
   baseIntensity: number;
@@ -406,7 +406,7 @@ export interface TortillaStringLight {
 
 export interface TortillaLantern {
   group: THREE.Group;
-  light: THREE.PointLight;
+  light?: THREE.PointLight | null;
   baseIntensity: number;
 }
 
@@ -471,6 +471,7 @@ function createFrontierTorch(
     height?: number;
     wallMounted?: boolean;
     baseIntensity?: number;
+    hasLight?: boolean;
   } = {}
 ): THREE.Group {
   const group = new THREE.Group();
@@ -558,11 +559,14 @@ function createFrontierTorch(
   flameCore.position.set(0, topY + 0.36, 0);
   group.add(flameCore);
 
-  // Warm orange/amber torch PointLight
+  // Optional warm orange/amber torch PointLight (controlled to prevent WebGL uniform overflow)
+  let torchLight: THREE.PointLight | null = null;
   const baseIntensity = options.baseIntensity || 2.8;
-  const torchLight = new THREE.PointLight(0xff7722, baseIntensity, 13, 1.8);
-  torchLight.position.set(0, topY + 0.48, 0);
-  group.add(torchLight);
+  if (options.hasLight) {
+    torchLight = new THREE.PointLight(0xff7722, baseIntensity, 13, 1.8);
+    torchLight.position.set(0, topY + 0.48, 0);
+    group.add(torchLight);
+  }
 
   torchesList.push({
     group,
@@ -587,7 +591,7 @@ function createFestoonStringLights(
   sag: number,
   stringLightsList: TortillaStringLight[],
   glowTexture: THREE.CanvasTexture,
-  options: { baseIntensity?: number } = {}
+  options: { baseIntensity?: number; hasLight?: boolean } = {}
 ): THREE.Group {
   const group = new THREE.Group();
   const cableMat = new THREE.MeshStandardMaterial({ color: 0x1b1814, roughness: 0.95 });
@@ -652,13 +656,16 @@ function createFestoonStringLights(
     group.add(sprite);
   }
 
-  // 3. Central ambient PointLight illuminating the thoroughfare below
-  const midPt = new THREE.Vector3().lerpVectors(p1, p2, 0.5);
-  midPt.y -= sag + 0.15;
+  // 3. Optional central ambient PointLight illuminating the thoroughfare below
+  let spanLight: THREE.PointLight | null = null;
   const baseIntensity = options.baseIntensity || 2.0;
-  const spanLight = new THREE.PointLight(0xffaa44, baseIntensity, 15, 1.8);
-  spanLight.position.copy(midPt);
-  group.add(spanLight);
+  if (options.hasLight) {
+    const midPt = new THREE.Vector3().lerpVectors(p1, p2, 0.5);
+    midPt.y -= sag + 0.15;
+    spanLight = new THREE.PointLight(0xffaa44, baseIntensity, 24, 1.6);
+    spanLight.position.copy(midPt);
+    group.add(spanLight);
+  }
 
   stringLightsList.push({
     group,
@@ -679,7 +686,7 @@ function createBoardwalkLanternPost(
   z: number,
   facingAngle: number,
   lanternsList: TortillaLantern[],
-  options: { baseIntensity?: number } = {}
+  options: { baseIntensity?: number; hasLight?: boolean } = {}
 ): THREE.Group {
   const group = new THREE.Group();
   group.position.set(x, 0.38, z); // Mounted directly on boardwalk curb deck
@@ -747,11 +754,14 @@ function createBoardwalkLanternPost(
   burner.position.set(0, 0.015, 0);
   lampGroup.add(burner);
 
-  // Warm amber PointLight
+  // Optional warm amber PointLight
+  let light: THREE.PointLight | null = null;
   const baseIntensity = options.baseIntensity || 1.8;
-  const light = new THREE.PointLight(0xffb844, baseIntensity, 10, 1.8);
-  light.position.set(0, 0.04, 0);
-  lampGroup.add(light);
+  if (options.hasLight) {
+    light = new THREE.PointLight(0xffb844, baseIntensity, 14, 1.8);
+    light.position.set(0, 0.04, 0);
+    lampGroup.add(light);
+  }
 
   group.add(lampGroup);
 
@@ -1040,11 +1050,6 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
     saloonGroup.add(bigWin);
   }
 
-  // Interior Saloon tavern glow spilling through windows and batwing doors
-  const saloonInteriorLight = new THREE.PointLight(0xffa233, 3.2, 14, 1.8);
-  saloonInteriorLight.position.set(2.5, 2.4, 0);
-  saloonGroup.add(saloonInteriorLight);
-
   // Classic Saloon Entry Vestibule & Batwing Doors
   const doorRecess = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.8, 2.0), woodClapboardDark);
   doorRecess.position.set(4.4, 1.4, 0);
@@ -1194,11 +1199,6 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
     win.rotation.y = Math.PI / 2;
     storeGroup.add(win);
   }
-
-  // Interior warm amber general store glow
-  const storeInteriorLight = new THREE.PointLight(0xffb844, 2.8, 12, 1.8);
-  storeInteriorLight.position.set(2.4, 2.2, 0);
-  storeGroup.add(storeInteriorLight);
 
   // Paneled Store Entry Door with Glass Transom
   const storeDoor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.6, 1.4), woodTrimWalnut);
@@ -1444,10 +1444,6 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
   forgeFire.position.set(-3.2, 0.91, 3.8);
   forgeFire.rotation.x = -Math.PI / 2;
   liveryGroup.add(forgeFire);
-
-  const forgeLight = new THREE.PointLight(0xff5500, 2.8, 12);
-  forgeLight.position.set(-3.2, 1.4, 3.8);
-  liveryGroup.add(forgeLight);
 
   // Heavy Iron Blacksmith Anvil on Mesquite Tree Stump
   const anvilStump = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.75, 10), woodTrimWalnut);
@@ -1966,7 +1962,7 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
     )
   );
 
-  // Swag 3: Main Street Center (over Stagecoach stop) Catenary
+  // Swag 3: Main Street Center (over Stagecoach stop) Catenary with Main Thoroughfare Illuminating Light
   festoonGroup.add(
     createFestoonStringLights(
       new THREE.Vector3(-7.2, 5.4, 2.5),
@@ -1975,7 +1971,7 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
       0.8,
       townStringLights,
       glowTexture,
-      { baseIntensity: 2.4 }
+      { baseIntensity: 2.8, hasLight: true }
     )
   );
 
@@ -2050,7 +2046,10 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
   const eastLanternZs = [12.0, 5.0, -2.0, -9.0, -16.0];
   for (const lz of eastLanternZs) {
     boardwalkLanternsGroup.add(
-      createBoardwalkLanternPost(7.15, lz, Math.PI, townLanterns, { baseIntensity: 1.8 })
+      createBoardwalkLanternPost(7.15, lz, Math.PI, townLanterns, {
+        baseIntensity: 2.0,
+        hasLight: lz === -2.0, // Primary East boardwalk light outside Marshal office
+      })
     );
   }
 
@@ -2148,7 +2147,9 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
         1.0 +
         0.16 * Math.sin(animClock * 9.5 + offset) +
         0.08 * Math.cos(animClock * 23.3 + offset * 2.1);
-      t.light.intensity = t.baseIntensity * (0.15 + 0.85 * nightFactor) * flicker;
+      if (t.light) {
+        t.light.intensity = t.baseIntensity * (0.15 + 0.85 * nightFactor) * flicker;
+      }
 
       const scaleY = 1.0 + 0.22 * Math.sin(animClock * 11.2 + offset);
       const scaleXZ = 1.0 + 0.12 * Math.cos(animClock * 14.0 + offset);
@@ -2172,8 +2173,10 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
     // 3. Update Boardwalk Carriage Post Lanterns: steady kerosene glow
     for (let i = 0; i < townLanterns.length; i++) {
       const l = townLanterns[i];
-      const lFlicker = 1.0 + 0.04 * Math.sin(animClock * 5.2 + i * 1.4);
-      l.light.intensity = l.baseIntensity * (0.08 + 0.92 * nightFactor) * lFlicker;
+      if (l.light) {
+        const lFlicker = 1.0 + 0.04 * Math.sin(animClock * 5.2 + i * 1.4);
+        l.light.intensity = l.baseIntensity * (0.08 + 0.92 * nightFactor) * lFlicker;
+      }
     }
 
     // 4. Update Glazed Windows: cozy tavern and mercantile radiation into the street

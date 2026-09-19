@@ -3,6 +3,7 @@ import http from "http";
 import path from "path";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
+import { GoogleGenAI, Modality } from "@google/genai";
 
 interface RemotePlayer {
   id: string;
@@ -83,9 +84,75 @@ const PROSPECTOR_NAMES = [
 
 async function startServer() {
   const app = express();
+  app.use(express.json());
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
   const PORT = 3000;
+
+  // Lazy Gemini AI Client Initialization
+  let aiClient: GoogleGenAI | null = null;
+  function getGeminiClient(): GoogleGenAI | null {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) return null;
+    if (!aiClient) {
+      aiClient = new GoogleGenAI({
+        apiKey: key,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
+    }
+    return aiClient;
+  }
+
+  // Townfolk Frontier Personalities for Chat
+  const NPC_PROMPTS: Record<string, string> = {
+    old_dusty_pete: "You are Old Dusty Pete, an 1880s grizzled veteran gold prospector in Tortilla Flat, Arizona Territory. You have searched the Superstition Mountains for decades. You know about Weaver's Needle, Peralta stone maps, flash floods, and panning for gold. Speak with authentic 1880s frontier miner jargon ('reckon', 'pardner', 'placer', 'color', 'by gum'). Keep your spoken answer under 3 sentences, vivid, and memorable.",
+    barkeep_hank: "You are Hank 'Dutch' Miller, the jovial, hearty saloonkeeper of the historic Tortilla Flat Saloon in 1880s Arizona. You serve cold sarsaparilla, beans, canteens, and mining gear while listening to prospectors' tall tales. Keep your spoken answer under 3 sentences in a warm Western barkeep voice.",
+    hostler_silas: "You are Silas 'Red' McCurdy, the energetic Irish-American wrangler and hostler at the Tortilla Flat Livery. You know pack burros, mules, trail saddles, and water holes like family. Keep your spoken answer under 3 sentences with hearty horseman charm.",
+    sheriff_wyatt: "You are Sheriff Wyatt Vance, steady territorial lawman of Tortilla Flat. You respect registered mining claims, enforce peace without nonsense, and warn miners of canyon ambushers and heat exhaustion. Keep your spoken answer under 3 sentences with quiet, firm authority.",
+    assayer_walker: "You are Judge Hiram Walker, U.S. Mineral Assayer in Tortilla Flat. You use precision balances and acid reagents to test gold ore vs fool's gold. You speak eloquently with educated 1880s territorial dignity. Keep your spoken answer under 3 sentences.",
+    stage_jedediah: "You are Jedediah 'Whip' Cole, weathered Concord stagecoach driver on the Apache Trail. You know every hairpin curve from Apache Junction to the Salt River. Keep your spoken answer under 3 sentences.",
+    clara_miller: "You are Clara Miller, frontier homesteader and desert herbalist in Tortilla Flat. You know agave roasting, desert barrel cactus water, and rattlesnake remedies. Keep your spoken answer under 3 sentences with gentle frontier wisdom.",
+    gus_blacksmith: "You are Gus Trombley, the robust town blacksmith and farrier in Tortilla Flat. You forge tempered pickaxes, shoring bolts, and horseshoes with an anvil's roar. Keep your spoken answer under 3 sentences.",
+  };
+
+  // Fallback responses if Gemini API key is not configured or network fails
+  const NPC_FALLBACKS: Record<string, string[]> = {
+    old_dusty_pete: [
+      "Keep yer eyes peeled for red hematite float in the dry washes, pardner! Where there's hematite and black magnetic sand, heavy yellow gold is resting right on the bedrock.",
+      "Weaver's Needle casts a long shadow when the sun drops low. The old Peralta maps claim that shadow points straight to the sealed shaft, but mind the canyon sidewinders!",
+      "Jacob Waltz was a secretive German devil. He'd come into town with coarse high-grade ore wrapped in buckskin, pay his tab in raw nuggets, and disappear before dawn into the needle spires.",
+    ],
+    barkeep_hank: [
+      "Welcome into the Saloon, friend! Dust your boots and pull up a cedar stool. Fresh canteens and hot salt-pork beans are on the counter whenever you need replenishment.",
+      "I hear all kinds of talk over these floorboards. Just yesterday a team from Phoenix swore they spotted ancient carved stone markers high above Peters Canyon!",
+      "Rule number one out here: never head into the Superstition canyons without at least two full canteens and a pack of matches. The desert heat has claimed many a brave prospector.",
+    ],
+    hostler_silas: [
+      "Treat yer pack burro kindly and she'll haul two hundred pounds of quartz ore without a whimper! Feed 'em desert oats and check their hooves after rocky scree scrambles.",
+      "A good burro can scent a subterranean water seep half a mile off. If she stops and snorts at dry wash gravel, start diggin'—there's water underneath!",
+    ],
+    sheriff_wyatt: [
+      "Keep your sidearm holstered on the boardwalk, traveler. We keep lawful order here in Tortilla Flat, and every legitimate mining claim deed must be respected under territorial statute.",
+      "Watch the high ridges if you venture east toward Needle Canyon. Outlaws and Apache lookouts know those canyons better than any mapmaker.",
+    ],
+    assayer_walker: [
+      "Pure placer gold is malleable and does not tarnish in nitric acid. Pyrite will shatter beneath a prospector's hammer, but genuine 24-karat gold flattens into a rich leaf.",
+      "Bring me any mineral specimens you chip from bedrock veins. I can calculate the Troy ounces per ton and verify if your vein is commercially viable.",
+    ],
+    stage_jedediah: [
+      "Stagecoach runs dawn and dusk across the canyon pass. Hang onto yer hat when we whip around Fish Creek Hill—it's a thousand-foot drop to the canyon floor!",
+    ],
+    clara_miller: [
+      "If you're parched and your canteen runs dry, look for the ribbed barrel cactus. Cut the cap off and mash the pulp for cool liquid that will save your life.",
+    ],
+    gus_blacksmith: [
+      "I temper every pickaxe with cold canyon spring water and high-carbon steel! A dull pick will break your wrist on granite, but my iron will slice through quartz like butter.",
+    ],
+  };
 
   wss.on("error", (err) => {
     console.warn("[WSS] Handled WebSocket server error:", err);
@@ -140,6 +207,129 @@ async function startServer() {
       universalWeather,
       universalTimeOfDay,
     });
+  });
+
+  // Townfolk Frontier Voice TTS API (powered by gemini-3.1-flash-tts-preview)
+  app.post("/api/townfolk/tts", async (req, res) => {
+    try {
+      const { text, voiceName, characterId } = req.body;
+      if (!text || typeof text !== "string") {
+        return res.status(400).json({ error: "Text is required" });
+      }
+
+      const ai = getGeminiClient();
+      if (!ai) {
+        return res.json({ status: "fallback", message: "GEMINI_API_KEY not set" });
+      }
+
+      const voice = voiceName || "Puck";
+      const cleanText = text.replace(/\[.*?\]/g, "").replace(/["“”]/g, "").trim();
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-flash-tts-preview",
+        contents: [{ parts: [{ text: cleanText }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voice },
+            },
+          },
+        },
+      });
+
+      const audioPcmBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (audioPcmBase64) {
+        return res.json({
+          status: "ok",
+          audioPcmBase64,
+          sampleRate: 24000,
+        });
+      }
+
+      res.json({ status: "fallback", message: "No audio stream returned" });
+    } catch (err: any) {
+      console.warn("[Townfolk TTS API] Gemini TTS error:", err?.message || err);
+      res.json({ status: "fallback", error: err?.message || "TTS error" });
+    }
+  });
+
+  // Townfolk Frontier Interactive Chat & AI Response API (powered by gemini-3.8-flash + gemini-3.1-flash-tts-preview)
+  app.post("/api/townfolk/chat", async (req, res) => {
+    try {
+      const { characterId, characterName, userQuestion, voiceName } = req.body;
+      if (!userQuestion || typeof userQuestion !== "string") {
+        return res.status(400).json({ error: "userQuestion is required" });
+      }
+
+      const charKey = characterId || "old_dusty_pete";
+      const systemPrompt = NPC_PROMPTS[charKey] || "You are an 1880s Arizona Territory frontier miner in Tortilla Flat. Answer in 2-3 sentences.";
+      const fallbacks = NPC_FALLBACKS[charKey] || NPC_FALLBACKS.old_dusty_pete;
+
+      const ai = getGeminiClient();
+      if (!ai) {
+        // Deterministic thematic fallback
+        const reply = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        return res.json({
+          status: "ok",
+          reply,
+          audioPcmBase64: null,
+          note: "Fallback dialogue (API key unset)",
+        });
+      }
+
+      // 1. Generate in-character response using gemini-3.1-flash-lite
+      const chatResponse = await ai.models.generateContent({
+        model: "gemini-3.1-flash-lite",
+        contents: [
+          {
+            parts: [
+              {
+                text: `${systemPrompt}\n\nA prospector traveler approaches you in Tortilla Flat and asks:\n"${userQuestion}"\n\nRespond directly to them in character (maximum 2-3 sentences, 1880s frontier vernacular, no markdown asterisks or formatting):`,
+              },
+            ],
+          },
+        ],
+      });
+
+      const replyText = chatResponse.text?.trim() || fallbacks[0];
+
+      // 2. Attempt to synthesize speech for the reply using gemini-3.1-flash-tts-preview
+      let audioPcmBase64: string | null = null;
+      try {
+        const cleanSpeech = replyText.replace(/\[.*?\]/g, "").replace(/["“”]/g, "").trim();
+        const ttsResponse = await ai.models.generateContent({
+          model: "gemini-3.1-flash-tts-preview",
+          contents: [{ parts: [{ text: cleanSpeech }] }],
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: voiceName || "Puck" },
+              },
+            },
+          },
+        });
+        audioPcmBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+      } catch (ttsErr) {
+        console.warn("[Townfolk Chat API] TTS failed for reply:", ttsErr);
+      }
+
+      res.json({
+        status: "ok",
+        reply: replyText,
+        audioPcmBase64,
+        sampleRate: 24000,
+      });
+    } catch (err: any) {
+      console.warn("[Townfolk Chat API] Error:", err?.message || err);
+      const fallbacks = NPC_FALLBACKS[req.body?.characterId] || NPC_FALLBACKS.old_dusty_pete;
+      res.json({
+        status: "ok",
+        reply: fallbacks[Math.floor(Math.random() * fallbacks.length)],
+        audioPcmBase64: null,
+      });
+    }
   });
 
   // Authoritative Universal Weather & Celestial Sky Simulation

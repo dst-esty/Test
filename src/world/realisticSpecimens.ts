@@ -112,11 +112,6 @@ export function createRealisticGoldNuggetMesh(value: number = 1): THREE.Group {
     group.add(glint);
   }
 
-  // Golden point light aura
-  const light = new THREE.PointLight(0xffb81c, 1.3, 3.2);
-  light.position.set(0, 0.1, 0);
-  group.add(light);
-
   return group;
 }
 
@@ -180,11 +175,6 @@ export function createRealisticQuartzGoldMesh(value: number = 1): THREE.Group {
   wireMesh.scale.set(1.4, 0.6, 1.2);
   group.add(wireMesh);
 
-  // Glowing point light
-  const light = new THREE.PointLight(0xffaa00, 1.4, 3.5);
-  light.position.set(0, 0.1, 0);
-  group.add(light);
-
   return group;
 }
 
@@ -211,10 +201,6 @@ export function createRealisticSilverChunkMesh(value: number = 1): THREE.Group {
   subCube.position.set(0.07 * scaleMult, 0.08 * scaleMult, -0.05 * scaleMult);
   subCube.rotation.set(-0.1, 0.4, 0.2);
   group.add(subCube);
-
-  const light = new THREE.PointLight(0x7090b0, 1.2, 3.0);
-  light.position.set(0, 0.1, 0);
-  group.add(light);
 
   return group;
 }

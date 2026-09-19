@@ -90,9 +90,10 @@ export class CombatManager {
     rifleGroup.rotation.x = -0.2;
     group.add(rifleGroup);
 
-    // Muzzle Flash light
+    // Muzzle Flash light (hidden until fired to avoid WebGL uniform exhaustion)
     const flash = new THREE.PointLight(0xffaa22, 0, 12);
     flash.position.set(0.28, 1.15, 1.4);
+    flash.visible = false;
     group.add(flash);
 
     // Legs
@@ -202,14 +203,14 @@ export class CombatManager {
     // Red dynamite stick model with brass band and burning wick
     const stick = new THREE.Mesh(
       new THREE.CylinderGeometry(0.06, 0.06, 0.35, 8),
-      new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.6 })
+      new THREE.MeshStandardMaterial({
+        color: 0xb91c1c,
+        roughness: 0.6,
+        emissive: 0x450a0a,
+        emissiveIntensity: 0.4,
+      })
     );
     group.add(stick);
-
-    // Burning wick spark light
-    const wickLight = new THREE.PointLight(0xffaa00, 1.5, 4);
-    wickLight.position.set(0, 0.22, 0);
-    group.add(wickLight);
 
     this.combatGroup.add(group);
 
@@ -259,6 +260,7 @@ export class CombatManager {
     b.mesh.rotation.x = Math.PI / 2;
     b.mesh.position.y -= 0.6;
     b.muzzleFlash.intensity = 0;
+    b.muzzleFlash.visible = false;
   }
 
   // Update loop for bandits AI, bullet tracers, and dynamites
@@ -295,9 +297,11 @@ export class CombatManager {
           soundEngine.playBanditShot();
 
           // Flash muzzle
+          b.muzzleFlash.visible = true;
           b.muzzleFlash.intensity = 3;
           setTimeout(() => {
             b.muzzleFlash.intensity = 0;
+            b.muzzleFlash.visible = false;
           }, 80);
 
           // Calculate bullet path

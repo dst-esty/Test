@@ -1,6 +1,6 @@
 {
   "name": "Superstition Mountains: Lost Dutchman Expedition",
-  "description": "A 3D open-world desert survival exploration game in Arizona's Superstition Wilderness with historic Tortilla Flat townfolk NPCs, dynamic desert hydrology, flash floods, wilderness camping, real-time multiplayer, and underground mining.",
+  "description": "A 3D open-world desert survival exploration game in Arizona's Superstition Wilderness with voiced historic Tortilla Flat townfolk NPCs, dynamic desert hydrology, flash floods, wilderness camping, real-time multiplayer, and underground mining.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

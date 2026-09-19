@@ -17,6 +17,7 @@ import { ClaimDeedModal } from './components/ClaimDeedModal';
 import { ClaimStakedModal } from './components/ClaimStakedModal';
 import { RockDepotModal } from './components/RockDepotModal';
 import { TortillaFlatModal } from './components/TortillaFlatModal';
+import { TownfolkDialogueOverlay, DialogueNPCInfo } from './components/TownfolkDialogueOverlay';
 import { GameOverModal } from './components/GameOverModal';
 import { CompassHUD } from './components/CompassHUD';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
@@ -120,12 +121,14 @@ export default function App() {
   const [isDepotOpen, setIsDepotOpen] = useState(false);
   const [isTortillaFlatOpen, setIsTortillaFlatOpen] = useState(false);
   const [tortillaFlatTab, setTortillaFlatTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery'>('mercantile');
+  const [activeDialogueNPC, setActiveDialogueNPC] = useState<DialogueNPCInfo | null>(null);
   const [activeBuildingType, setActiveBuildingType] = useState<MineStructureType>('timber_portal');
   const [gameOverDetails, setGameOverDetails] = useState<GameOverDetails | null>(null);
   const [claimPrompt, setClaimPrompt] = useState<{ name: string; position: Vector3D } | null>(null);
   const [payDirtAlert, setPayDirtAlert] = useState<{ ounces: number } | null>(null);
   const payDirtTimerRef = useRef<NodeJS.Timeout | null>(null);
   const restartHandlerRef = useRef<(() => void) | null>(null);
+  const teleportHandlerRef = useRef<((pos: Vector3D) => void) | null>(null);
   const mobileActionHandlerRef = useRef<(() => void) | null>(null);
   const mobileJumpHandlerRef = useRef<(() => void) | null>(null);
   const mobileInteractHandlerRef = useRef<(() => void) | null>(null);
@@ -178,6 +181,7 @@ export default function App() {
     isClaimDeedOpen ||
     isDepotOpen ||
     isTortillaFlatOpen ||
+    Boolean(activeDialogueNPC) ||
     Boolean(claimPrompt) ||
     Boolean(activeClueDialog) ||
     Boolean(gameOverDetails);
@@ -658,10 +662,14 @@ export default function App() {
   const handleEnterMine = useCallback(() => {
     soundEngine.playDiscovery();
     const mineY = getTerrainHeight(160, 110);
+    const dest = { x: 160, y: mineY - 0.5, z: 132 };
+    if (teleportHandlerRef.current) {
+      teleportHandlerRef.current(dest);
+    }
     setPlayerState((prev) => ({
       ...prev,
       isInsideMine: true,
-      position: { x: 160, y: mineY - 0.5, z: 132 },
+      position: dest,
     }));
 
     // Mark mine landmark and clue as discovered
@@ -677,9 +685,13 @@ export default function App() {
 
   // Fast travel from Map
   const handleFastTravel = (targetPos: Vector3D) => {
+    const dest = { x: targetPos.x + 1, y: targetPos.y, z: targetPos.z + 1 };
+    if (teleportHandlerRef.current) {
+      teleportHandlerRef.current(dest);
+    }
     setPlayerState((prev) => ({
       ...prev,
-      position: { x: targetPos.x + 1, y: targetPos.y, z: targetPos.z + 1 },
+      position: dest,
     }));
     setIsMapOpen(false);
     soundEngine.playFootstep();
@@ -909,6 +921,9 @@ export default function App() {
         onRegisterRestartHandler={(fn) => {
           restartHandlerRef.current = fn;
         }}
+        onRegisterTeleportHandler={(fn) => {
+          teleportHandlerRef.current = fn;
+        }}
         trackedPlayerPos={trackedPlayerPos}
         onUpdateShaftSinkingStats={setShaftSinkingStats}
         onRegisterStrikeVoxelHandler={(fn) => {
@@ -932,6 +947,9 @@ export default function App() {
         onOpenTortillaFlat={(tab) => {
           setTortillaFlatTab(tab || 'mercantile');
           setIsTortillaFlatOpen(true);
+        }}
+        onOpenTownfolkDialogue={(npc) => {
+          setActiveDialogueNPC(npc);
         }}
         onToggleDayNight={handleToggleDayNight}
         graphicsQuality={graphicsQuality}
@@ -1285,7 +1303,21 @@ export default function App() {
         onUpdatePlayerState={setPlayerState}
         onFastTravel={handleFastTravel}
         onShowBanner={showBanner}
+        onOpenTownfolkDialogue={(npc) => {
+          setIsTortillaFlatOpen(false);
+          setActiveDialogueNPC(npc);
+        }}
       />
+
+      {/* Townfolk Real Voice Interactive Dialogue Overlay */}
+      {activeDialogueNPC && (
+        <TownfolkDialogueOverlay
+          npc={activeDialogueNPC}
+          isOpen={Boolean(activeDialogueNPC)}
+          onClose={() => setActiveDialogueNPC(null)}
+          onShowBanner={showBanner}
+        />
+      )}
 
       {/* Mining Claim Deed & Certificate Modal */}
       <ClaimDeedModal

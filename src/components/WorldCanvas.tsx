@@ -54,6 +54,8 @@ import { MountainDustParticleSystem } from '../world/mountainDustParticles';
 import { friendshipService } from '../services/friendshipService';
 import { MountManager } from '../world/mountManager';
 import { TownfolkManager } from '../world/townfolk';
+import { townfolkVoice } from '../services/townfolkVoiceService';
+import { DialogueNPCInfo } from './TownfolkDialogueOverlay';
 import { createPostProcessingPipeline, PostProcessingPipeline } from '../world/postProcessing';
 
 interface WorldCanvasProps {
@@ -118,6 +120,7 @@ interface WorldCanvasProps {
   onRegisterStrikeVoxelHandler?: (fn: () => void) => void;
   onRegisterPlaceTimberHandler?: (fn: () => void) => void;
   onOpenTortillaFlat?: (tab?: 'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery') => void;
+  onOpenTownfolkDialogue?: (npc: DialogueNPCInfo) => void;
   onToggleDayNight?: () => void;
   onRegisterMobileActionHandler?: (fn: () => void) => void;
   onRegisterMobileJumpHandler?: (fn: () => void) => void;
@@ -128,6 +131,7 @@ interface WorldCanvasProps {
   onAimingRifleChange?: (aiming: boolean, zoom: number) => void;
   onRegisterToggleScopeHandler?: (fn: () => void) => void;
   onRegisterScopeZoomHandler?: (fn: (delta: number) => void) => void;
+  onRegisterTeleportHandler?: (fn: (pos: Vector3D) => void) => void;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
@@ -190,6 +194,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onRegisterStrikeVoxelHandler,
   onRegisterPlaceTimberHandler,
   onOpenTortillaFlat,
+  onOpenTownfolkDialogue,
   onToggleDayNight,
   onRegisterMobileActionHandler,
   onRegisterMobileJumpHandler,
@@ -200,6 +205,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onAimingRifleChange,
   onRegisterToggleScopeHandler,
   onRegisterScopeZoomHandler,
+  onRegisterTeleportHandler,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
@@ -307,6 +313,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         expeditionStartTime.current = Date.now();
         const townY = getTerrainHeight(0, -246) + 1.7;
         playerPos.current.set(0, townY, -246);
+        lastSentPos.current.set(0, townY, -246);
+        currentHydrationRef.current = 100;
+        currentHealthRef.current = 100;
         playerYaw.current = 0;
         playerPitch.current = 0;
         verticalVelocity.current = 0;
@@ -325,6 +334,24 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       });
     }
   }, [onRegisterRestartHandler, viewMode]);
+
+  // Register fast teleport handler for external UI teleports (Map fast travel, Mine Shaft entry)
+  useEffect(() => {
+    if (onRegisterTeleportHandler) {
+      onRegisterTeleportHandler((targetPos: Vector3D) => {
+        const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
+        const uLayers = undergroundLayersRef.current;
+        const groundY =
+          isUnderground && uLayers
+            ? uLayers.getFloorElevationForPosition(targetPos.x, targetPos.z, uLayers.currentLevel)
+            : getTerrainHeight(targetPos.x, targetPos.z);
+        playerPos.current.set(targetPos.x, groundY + 1.7, targetPos.z);
+        lastSentPos.current.set(targetPos.x, groundY + 1.7, targetPos.z);
+        verticalVelocity.current = 0;
+        isGrounded.current = true;
+      });
+    }
+  }, [onRegisterTeleportHandler]);
 
   // References for render loop state
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -375,6 +402,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const playerStateRef = useRef<PlayerState>(playerState);
   useEffect(() => {
     playerStateRef.current = playerState;
+    if (typeof playerState.hydration === 'number' && Math.abs(currentHydrationRef.current - playerState.hydration) > 2) {
+      currentHydrationRef.current = playerState.hydration;
+    }
+    if (typeof playerState.health === 'number' && Math.abs(currentHealthRef.current - playerState.health) > 2) {
+      currentHealthRef.current = playerState.health;
+    }
     // Update ghost preview when tool changes
     if (mineBuildingRef.current) {
       if (playerState.equippedTool === 'stake') {
@@ -427,9 +460,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     lowFpsCount: 0,
   });
   const lastHudSyncTime = useRef<number>(0);
-  const lastSentPos = useRef<THREE.Vector3>(new THREE.Vector3());
-  const lastSentYaw = useRef<number>(0);
-  const lastSentPitch = useRef<number>(0);
+  const lastSentPos = useRef<THREE.Vector3>(
+    new THREE.Vector3(playerState.position.x, playerState.position.y, playerState.position.z)
+  );
+  const lastSentYaw = useRef<number>(playerState.rotation?.yaw || 0);
+  const lastSentPitch = useRef<number>(playerState.rotation?.pitch || 0);
+  const currentHydrationRef = useRef<number>(playerState.hydration ?? 100);
+  const currentHealthRef = useRef<number>(playerState.health ?? 100);
   const lastMultiplayerSyncTime = useRef<number>(0);
   const interactionCheckTick = useRef<number>(0);
   const renderFrameCount = useRef<number>(0);
@@ -474,10 +511,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
   // Sync external position changes (e.g. fast travel or mine teleport)
   useEffect(() => {
-    if (
-      Math.abs(playerPos.current.x - playerState.position.x) > 2 ||
-      Math.abs(playerPos.current.z - playerState.position.z) > 2
-    ) {
+    // Only teleport if the position was changed EXTERNALLY by another component (Map fast travel, mine enter, etc.),
+    // not by WorldCanvas's own internal locomotion loop.
+    const distFromLastSent = Math.hypot(
+      playerState.position.x - lastSentPos.current.x,
+      playerState.position.z - lastSentPos.current.z
+    );
+
+    if (distFromLastSent > 0.5) {
       const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
       const uLayers = undergroundLayersRef.current;
       const groundY =
@@ -493,6 +534,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         groundY + 1.7,
         playerState.position.z
       );
+      lastSentPos.current.set(
+        playerState.position.x,
+        groundY + 1.7,
+        playerState.position.z
+      );
       verticalVelocity.current = 0;
       isGrounded.current = true;
     }
@@ -501,7 +547,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   // Sync tool lights (Lantern)
   useEffect(() => {
     if (playerLightRef.current) {
-      playerLightRef.current.intensity = playerState.equippedTool === 'lantern' ? 2.5 : 0;
+      const isLantern = playerState.equippedTool === 'lantern';
+      playerLightRef.current.visible = isLantern;
+      playerLightRef.current.intensity = isLantern ? 2.5 : 0;
     }
     if (cameraRef.current) {
       // Binoculars zoom FOV
@@ -609,8 +657,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     scene.add(sunLight);
     sunLightRef.current = sunLight;
 
-    // Player Lantern Light
+    // Player Lantern Light (hidden unless lantern is equipped)
     const playerLight = new THREE.PointLight(0xffaa44, 0, 20);
+    playerLight.visible = false;
     scene.add(playerLight);
     playerLightRef.current = playerLight;
 
@@ -3464,7 +3513,28 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             if (onShowBanner) {
               onShowBanner(`🗣️ ${nearestNPC.data.name} (${nearestNPC.data.title}): "${speech}"`);
             }
-            if (nearestNPC.data.actionTab && onOpenTortillaFlat) {
+
+            // Articulated 3D jaw animation and voice speech synthesis
+            const estDuration = Math.max(2.8, speech.length / 13);
+            nearestNPC.startSpeaking(estDuration);
+
+            townfolkVoice.speak(
+              nearestNPC.data.id,
+              speech,
+              () => nearestNPC.startSpeaking(estDuration),
+              () => nearestNPC.stopSpeaking()
+            );
+
+            // Open interactive dialogue overlay if callback provided
+            if (onOpenTownfolkDialogue) {
+              onOpenTownfolkDialogue({
+                id: nearestNPC.data.id,
+                name: nearestNPC.data.name,
+                title: nearestNPC.data.title,
+                role: nearestNPC.data.role,
+                initialGreeting: speech,
+              });
+            } else if (nearestNPC.data.actionTab && onOpenTortillaFlat) {
               onOpenTortillaFlat(nearestNPC.data.actionTab);
             }
           };
@@ -4023,41 +4093,32 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
 
         // Hydration drain - balanced rate so the player does not become dehydrated too quickly (Riding saves stamina!)
-        setPlayerState((prev) => {
-          if (isGameOverRef.current) return prev;
+        if (!isGameOverRef.current) {
           const isRaining = weather === 'storm' || weather === 'light_rain';
           const rainRelief = isRaining ? 0.2 : 1.0;
           const ridingRelief = isRiding ? 0.45 : 1.0;
           const drainRate = (isSprinting ? 0.35 : 0.12) * delta * rainRelief * ridingRelief;
-          const nextHydration = Math.max(0, prev.hydration - drainRate);
-          let nextHealth = prev.health;
+          currentHydrationRef.current = Math.max(0, currentHydrationRef.current - drainRate);
 
           // Gradual sunstroke damage if completely out of water
-          if (nextHydration <= 0) {
-            nextHealth = Math.max(0, prev.health - delta * 2.5);
-            if (nextHealth <= 0 && prev.health > 0) {
+          if (currentHydrationRef.current <= 0) {
+            currentHealthRef.current = Math.max(0, currentHealthRef.current - delta * 2.5);
+            if (currentHealthRef.current <= 0 && (playerStateRef.current.health || 0) > 0) {
               soundEngine.playPlayerDeath();
               triggerDeath({
                 reason: 'dehydration',
                 title: 'Perished of Sunstroke',
                 subtitle: 'Exhausted Under the Scorching Arizona Sun',
                 cause: 'Blistering desert heat and an empty canteen brought fatal sunstroke in the Superstition wilderness. Always keep your canteen filled at mountain springs or the base camp water barrel!',
-                goldFound: prev.goldFound || 0,
-                blocksDug: prev.blocksDug || 0,
-                landmarksDiscovered: prev.discoveredLandmarks?.length || 1,
+                goldFound: playerStateRef.current.goldFound || 0,
+                blocksDug: playerStateRef.current.blocksDug || 0,
+                landmarksDiscovered: playerStateRef.current.discoveredLandmarks?.length || 1,
                 timeSurvivedSeconds: Math.floor((Date.now() - expeditionStartTime.current) / 1000),
                 coordinates: { x: playerPos.current.x, y: playerPos.current.y, z: playerPos.current.z },
               });
             }
           }
-
-          return {
-            ...prev,
-            hydration: nextHydration,
-            health: nextHealth,
-            isSprinting,
-          };
-        });
+        }
 
         // Perimeter Mountain Summits & High-Altitude Lookouts Discovery
         const curX = playerPos.current.x;
@@ -5152,18 +5213,23 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         checkInteractions(false);
       }
 
-      // 8. Update State for HUD (Throttled to ~10Hz or on movement threshold to eliminate 60Hz React re-render churn!)
+      // 8. Update State for HUD (Throttled to ~10Hz on movement or on stopping threshold)
       const nowMs = performance.now();
       const posDistSq = lastSentPos.current.distanceToSquared(playerPos.current);
       const yawDiff = Math.abs(lastSentYaw.current - playerYaw.current);
       const pitchDiff = Math.abs(lastSentPitch.current - playerPitch.current);
       const timeSinceLastSync = nowMs - lastHudSyncTime.current;
 
-      if (timeSinceLastSync > 100 || posDistSq > 0.08 || yawDiff > 0.05 || pitchDiff > 0.05) {
+      const hasMoved = posDistSq > 0.08 || yawDiff > 0.05 || pitchDiff > 0.05;
+      const shouldSync = (hasMoved && timeSinceLastSync > 90) || (!hasMoved && timeSinceLastSync > 250 && posDistSq > 0.0001);
+
+      if (shouldSync) {
         lastHudSyncTime.current = nowMs;
         lastSentPos.current.copy(playerPos.current);
         lastSentYaw.current = playerYaw.current;
         lastSentPitch.current = playerPitch.current;
+
+        const currentSprint = Boolean(keysPressed.current['ShiftLeft'] || keysPressed.current['ShiftRight']);
 
         setPlayerState((prev) => ({
           ...prev,
@@ -5176,6 +5242,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             yaw: playerYaw.current,
             pitch: playerPitch.current,
           },
+          hydration: Math.round(currentHydrationRef.current * 10) / 10,
+          health: Math.round(currentHealthRef.current * 10) / 10,
+          isSprinting: currentSprint,
         }));
       }
 
@@ -5319,6 +5388,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         townfolkManagerRef.current.dispose();
         townfolkManagerRef.current = null;
       }
+      townfolkVoice.stop();
       if (postProcessingRef.current) {
         postProcessingRef.current.dispose();
         postProcessingRef.current = null;
@@ -5343,6 +5413,27 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
     }
   }, [playerState.ownedMount, playerState.mountName, playerState.isRidingMount]);
+
+  // Synchronize townfolk jaw articulation with voice playback service
+  useEffect(() => {
+    const unsub = townfolkVoice.subscribeSpeakingChange((speakingId, text) => {
+      if (!townfolkManagerRef.current) return;
+      if (speakingId) {
+        const npc = townfolkManagerRef.current.getNPCById(speakingId);
+        if (npc) {
+          const estDuration = text ? Math.max(2.8, text.length / 13) : 4.0;
+          npc.startSpeaking(estDuration);
+        }
+      } else {
+        for (const n of townfolkManagerRef.current.npcs) {
+          n.stopSpeaking();
+        }
+      }
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
 
   // Update Sun & Atmosphere when timeOfDay or weather changes
   useEffect(() => {
