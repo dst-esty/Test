@@ -339,13 +339,25 @@ export const GuidebookModal: React.FC<GuidebookModalProps> = ({
               <div className="p-4 rounded-xl bg-[#fffdf8] border border-[#cbb793] space-y-2">
                 <h3 className="font-bold text-[#4a2e14] flex items-center gap-2 text-base">
                   <Shovel className="w-5 h-5 text-amber-700" />
-                  Claim Staking & Mine Construction
+                  Claim Staking & District Land Office
                 </h3>
                 <p className="text-stone-700 text-xs">
                   Once you discover rich pay-dirt, equip your <strong>Claim Stake [9]</strong> to establish a
-                  legal 20-acre mining claim. Staking territory unlocks the <strong>Mine Builder [B]</strong>,
+                  legal 40-acre mining patent. Staking territory unlocks the <strong>Mine Builder [B]</strong>,
                   allowing you to erect permanent timber portals, ore headframes, tool sheds, and stamp mills.
                 </p>
+                <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-300/80 text-[11px] text-amber-950 font-sans space-y-1">
+                  <p className="font-bold">📜 District Claims & Deeds Exchange [K]:</p>
+                  <p>
+                    Open the Land Exchange with <strong>[K]</strong> or visit the Land Office at Tortilla Flat. You can:
+                  </p>
+                  <ul className="list-disc list-inside space-y-0.5 text-stone-700">
+                    <li><strong>Direct Buyout</strong>: Purchase established mineral patents using Cash ($) or Raw Gold Ore.</li>
+                    <li><strong>Syndicate Buyout</strong>: Surrender unwanted claims for instant cash based on verified yield & depth.</li>
+                    <li><strong>Market Listings</strong>: Post your deed with asking prices and promotional prospectus descriptions.</li>
+                    <li><strong>Barter Tenders</strong>: Propose claim-for-claim swaps with cash and gold ore sweeteners.</li>
+                  </ul>
+                </div>
               </div>
 
               <div className="p-3.5 rounded-xl bg-[#fffdf8] border border-[#cbb793] space-y-2">

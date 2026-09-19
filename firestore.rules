@@ -49,6 +49,20 @@ service cloud.firestore {
         && data.createdAt is number;
     }
 
+    function isValidTradeOffer(data) {
+      return data.keys().hasAll(['id', 'claimId', 'claimName', 'targetOwnerId', 'buyerId', 'buyerName', 'cashOffered', 'goldOffered', 'status', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.claimId is string && data.claimId.size() <= 128
+        && data.claimName is string && data.claimName.size() <= 64
+        && data.targetOwnerId is string && data.targetOwnerId.size() <= 64
+        && data.buyerId is string && data.buyerId.size() <= 64
+        && data.buyerName is string && data.buyerName.size() <= 64
+        && data.cashOffered is number
+        && data.goldOffered is number
+        && data.status in ['pending', 'accepted', 'declined', 'cancelled']
+        && data.createdAt is number;
+    }
+
     // Territory Claims collection
     match /territory_claims/{claimId} {
       // Anyone can view registered claims to see boundaries on map & in 3D
@@ -57,13 +71,12 @@ service cloud.firestore {
       // Staking a claim: validate data format
       allow create: if isValidId(claimId) && isValidClaim(request.resource.data);
 
-      // Updating claim stats (gold extracted, blocks dug) or owner updates
+      // Updating claim stats (gold extracted, blocks dug), listing for sale, or ownership conveyance
       allow update: if isValidId(claimId)
         && isValidClaim(request.resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.x == resource.data.x
-        && request.resource.data.z == resource.data.z
-        && request.resource.data.ownerId == resource.data.ownerId;
+        && request.resource.data.z == resource.data.z;
 
       // Deleting claim: owner can abandon claim
       allow delete: if isValidId(claimId);
@@ -82,6 +95,14 @@ service cloud.firestore {
       allow create: if isValidId(friendshipId) && isValidFriendship(request.resource.data);
       allow update: if isValidId(friendshipId) && isValidFriendship(request.resource.data);
       allow delete: if isValidId(friendshipId);
+    }
+
+    // Claim Trade Offers collection (tenders and market proposals)
+    match /claim_trade_offers/{offerId} {
+      allow get, list: if true;
+      allow create: if isValidId(offerId) && isValidTradeOffer(request.resource.data);
+      allow update: if isValidId(offerId) && isValidTradeOffer(request.resource.data);
+      allow delete: if isValidId(offerId);
     }
   }
 }

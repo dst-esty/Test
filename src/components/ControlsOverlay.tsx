@@ -895,6 +895,21 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   <span className="text-[9px] text-orange-400/80 group-hover:text-stone-950/80 font-mono">[C]</span>
                 </button>
               </div>
+
+              {/* Claims & Deeds District Exchange Entry Button */}
+              {onOpenClaimDeed && (
+                <button
+                  onClick={onOpenClaimDeed}
+                  className="w-full mt-0.5 flex items-center justify-between px-2.5 py-1.5 rounded-xl border border-amber-600/60 bg-gradient-to-r from-amber-950/60 via-stone-850 to-stone-900 hover:border-amber-400 text-amber-200 hover:text-amber-100 transition-all cursor-pointer font-bold text-[11px] shadow-md group"
+                  title="Open Mineral Claims, Deeds & District Claims Exchange [K]"
+                >
+                  <div className="flex items-center gap-1.5 truncate">
+                    <Scroll className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+                    <span className="truncate">Claims, Deeds & Exchange</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-amber-400/90 font-bold group-hover:text-amber-300 shrink-0 ml-1">[K]</span>
+                </button>
+              )}
             </div>
           )}
 

@@ -26,6 +26,14 @@ export interface ClaimInfo {
   ownerName?: string;
   stakedAt?: number;
   isWildcatOrigin?: boolean;
+  forSale?: boolean;
+  priceDollars?: number;
+  priceGoldOunces?: number;
+  description?: string;
+  listedAt?: number;
+  lastTransferPrice?: number;
+  lastTransferAt?: number;
+  previousOwnerName?: string;
 }
 
 export interface TerritoryClaim {
@@ -40,6 +48,29 @@ export interface TerritoryClaim {
   extractedGold: number;
   blocksDug: number;
   isWildcatOrigin?: boolean;
+  forSale?: boolean;
+  priceDollars?: number;
+  priceGoldOunces?: number;
+  description?: string;
+  listedAt?: number;
+  lastTransferPrice?: number;
+  lastTransferAt?: number;
+  previousOwnerName?: string;
+}
+
+export interface ClaimTradeOffer {
+  id: string;
+  claimId: string;
+  claimName: string;
+  targetOwnerId: string;
+  buyerId: string;
+  buyerName: string;
+  cashOffered: number;
+  goldOffered: number;
+  offeredClaimId?: string;
+  offeredClaimName?: string;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled';
+  createdAt: number;
 }
 
 export interface ClaimInfringement {

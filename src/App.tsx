@@ -23,10 +23,11 @@ import { CompassHUD } from './components/CompassHUD';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
 import { soundEngine } from './audio/soundEffects';
 import { westernMusic } from './audio/westernMusic';
-import { ClaimInfo, ClueItem, Landmark, MineStructureType, PlayerState, Vector3D, WeatherType, MineLayerData, GameOverDetails, MultiplayerPlayer, MultiplayerChatMessage, RoomDirection, WaterTableState, GraphicsQuality } from './types';
+import { ClaimInfo, ClueItem, Landmark, MineStructureType, PlayerState, Vector3D, WeatherType, MineLayerData, GameOverDetails, MultiplayerPlayer, MultiplayerChatMessage, RoomDirection, WaterTableState, GraphicsQuality, TerritoryClaim } from './types';
 import { MultiplayerHUD } from './components/MultiplayerHUD';
 import { ShaftSinkingStats } from './world/undergroundVoxels';
 import { multiplayer } from './multiplayer/multiplayerService';
+import { territoryClaims } from './services/territoryClaimService';
 import { getTerrainHeight } from './world/terrain';
 import { advanceDiurnalTime } from './world/atmosphere';
 import { Compass, BookOpen, Map as MapIcon, Sparkles, AlertCircle } from 'lucide-react';
@@ -50,6 +51,7 @@ export default function App() {
       dynamite: 6,
       woodPlanks: 6, // Starting seasoned timber stakes & firewood
       goldFound: 2.0, // 2 oz starting gold from prospecting
+      cashDollars: 45.0, // Starting territorial currency ($) for provisions and claim deeds
       blocksDug: 0,
       bullionBars: 0,
       activeClaim: null,
@@ -497,6 +499,161 @@ export default function App() {
     }
   }, []);
 
+  // Mining Claims & Deeds Exchange Handlers
+  const handleBuyClaim = useCallback(
+    async (target: TerritoryClaim, method: 'cash' | 'gold') => {
+      const priceDollars = target.priceDollars || 150;
+      const priceGold = target.priceGoldOunces || Math.round((priceDollars / 20.67) * 10) / 10;
+      const currentCash = playerStateRef.current.cashDollars || 0;
+      const currentGold = playerStateRef.current.goldFound || 0;
+
+      if (method === 'cash' && currentCash < priceDollars) {
+        showBanner(`⚠️ Insufficient cash! $${priceDollars} required. Cash in gold at Tortilla Flat.`);
+        return;
+      }
+      if (method === 'gold' && currentGold < priceGold) {
+        showBanner(`⚠️ Insufficient raw gold! ${priceGold} oz required. Mine more paydirt.`);
+        return;
+      }
+
+      const buyerId = territoryClaims.getOrCreateProspectorId();
+      const buyerName = territoryClaims.getProspectorName();
+
+      const res = await territoryClaims.buyClaim({
+        claimId: target.id,
+        buyerId,
+        buyerName,
+        paidDollars: method === 'cash' ? priceDollars : 0,
+        paidGoldOunces: method === 'gold' ? priceGold : 0,
+      });
+
+      if (!res.success) {
+        showBanner(`⚠️ Transaction failed: ${res.message || 'Bureau recorded error.'}`);
+        return;
+      }
+
+      soundEngine.playCoins();
+      const claimY = getTerrainHeight(target.x, target.z) + 0.5;
+      const newClaim: ClaimInfo = {
+        name: target.name,
+        position: { x: target.x, y: claimY, z: target.z },
+        size: target.radius || 40,
+        isClaimed: true,
+        extractedGold: target.extractedGold || 0,
+        blocksDug: target.blocksDug || 0,
+        ownerId: buyerId,
+        ownerName: buyerName,
+        stakedAt: target.stakedAt || Date.now(),
+        forSale: false,
+        priceDollars: target.priceDollars,
+        priceGoldOunces: target.priceGoldOunces,
+        description: target.description,
+      };
+
+      setPlayerState((prev) => ({
+        ...prev,
+        cashDollars: method === 'cash' ? Math.max(0, (prev.cashDollars || 0) - priceDollars) : prev.cashDollars,
+        goldFound: method === 'gold' ? Math.max(0, (prev.goldFound || 0) - priceGold) : prev.goldFound,
+        activeClaim: newClaim,
+      }));
+
+      showBanner(
+        `📜 Mineral Patent "${target.name}" Acquired for ${
+          method === 'cash' ? `$${priceDollars} Cash` : `${priceGold} oz Gold`
+        }! Conveyance registered.`
+      );
+    },
+    [showBanner]
+  );
+
+  const handleSellClaimToSyndicate = useCallback(
+    async (claimId: string, payoutDollars: number) => {
+      const sellerName = territoryClaims.getProspectorName();
+      const res = await territoryClaims.sellClaimToSyndicate({
+        claimId,
+        payoutDollars,
+        sellerName,
+      });
+
+      if (!res.success) {
+        showBanner(`⚠️ Syndicate conveyance error: ${res.message || 'Deed rejected.'}`);
+        return;
+      }
+
+      soundEngine.playCashRegister();
+      setPlayerState((prev) => ({
+        ...prev,
+        cashDollars: (prev.cashDollars || 0) + payoutDollars,
+        activeClaim: null,
+      }));
+
+      showBanner(`💰 Claim Deed Surrendered! The Arizona Territorial Mining Syndicate paid +$${payoutDollars}.00 in cash.`);
+    },
+    [showBanner]
+  );
+
+  const handleListClaimForSale = useCallback(
+    async (claimId: string, priceDollars: number, priceGold: number, desc: string) => {
+      const res = await territoryClaims.listClaimForSale({
+        claimId,
+        priceDollars,
+        priceGoldOunces: priceGold,
+        description: desc,
+      });
+
+      if (!res.success) {
+        showBanner(`⚠️ Listing failed: ${res.message || 'Could not post deed.'}`);
+        return;
+      }
+
+      setPlayerState((prev) => ({
+        ...prev,
+        activeClaim: prev.activeClaim
+          ? {
+              ...prev.activeClaim,
+              forSale: true,
+              priceDollars,
+              priceGoldOunces: priceGold,
+              description: desc,
+            }
+          : null,
+      }));
+
+      showBanner(`🏷️ Claim Deed Listed on the District Exchange for $${priceDollars} / ${priceGold} oz gold!`);
+    },
+    [showBanner]
+  );
+
+  const handleCancelListing = useCallback(
+    async (claimId: string) => {
+      await territoryClaims.cancelSaleListing(claimId);
+      setPlayerState((prev) => ({
+        ...prev,
+        activeClaim: prev.activeClaim ? { ...prev.activeClaim, forSale: false } : null,
+      }));
+      showBanner(`Deed listing withdrawn from the open exchange.`);
+    },
+    [showBanner]
+  );
+
+  const handleTradeOfferResponse = useCallback(
+    async (offerId: string, accept: boolean) => {
+      const res = await territoryClaims.respondToTradeOffer(offerId, accept);
+      if (!res.success) {
+        showBanner(`⚠️ Trade tender response error: ${res.message || 'Offer expired.'}`);
+        return;
+      }
+
+      if (accept) {
+        soundEngine.playCashRegister();
+        showBanner(`🤝 Barter Tender Accepted! Land Recorder Horace Miller has filed the deed conveyance.`);
+      } else {
+        showBanner(`Tender declined and returned to sender.`);
+      }
+    },
+    [showBanner]
+  );
+
   // Universal continuous sun & celestial progression (shared instance)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -713,6 +870,7 @@ export default function App() {
       dynamite: 6,
       woodPlanks: 6,
       goldFound: 0, // Lost all gold on death
+      cashDollars: 25.0, // Retain modest emergency cash on respawn
       blocksDug: 0,
       bullionBars: 0,
       activeClaim: null, // Lost claim on death
@@ -748,6 +906,8 @@ export default function App() {
         } else {
           setIsBuilderOpen((prev) => !prev);
         }
+      } else if (e.code === 'KeyK') {
+        setIsClaimDeedOpen((prev) => !prev);
       } else if (e.code === 'KeyV') {
         setViewMode((prev) => (prev === 'first' ? 'third' : 'first'));
       } else if (e.code === 'Escape') {
@@ -842,9 +1002,17 @@ export default function App() {
             }, 3200);
           }
         }}
-        onStakeClaim={(name, pos) => {
+        onStakeClaim={async (name, pos) => {
           soundEngine.playHammerStake();
           setPayDirtAlert(null);
+          const ownerId = territoryClaims.getOrCreateProspectorId();
+          const ownerName = territoryClaims.getProspectorName();
+          await territoryClaims.stakeClaim({
+            name,
+            position: pos,
+            ownerId,
+            ownerName,
+          });
           setPlayerState((prev) => ({
             ...prev,
             activeClaim: {
@@ -854,9 +1022,12 @@ export default function App() {
               isClaimed: true,
               extractedGold: prev.activeClaim?.extractedGold || 0,
               blocksDug: prev.activeClaim?.blocksDug || 0,
+              ownerId,
+              ownerName,
+              stakedAt: Date.now(),
             },
           }));
-          showBanner(`Claim "${name}" Legally Staked!`);
+          showBanner(`Claim "${name}" Legally Staked and Registered!`);
           setClaimPrompt({ name, position: pos });
         }}
         onBuildStructure={(_type, _pos, _rot) => {
@@ -1324,8 +1495,10 @@ export default function App() {
         isOpen={isClaimDeedOpen}
         onClose={() => setIsClaimDeedOpen(false)}
         claim={playerState.activeClaim}
+        playerState={playerState}
         builtStructures={playerState.builtStructures || []}
         goldCount={playerState.goldFound}
+        blocksDug={playerState.blocksDug}
         onRenameClaim={(newName) => {
           setPlayerState((prev) => ({
             ...prev,
@@ -1337,6 +1510,11 @@ export default function App() {
           setIsClaimDeedOpen(false);
           setIsBuilderOpen(true);
         }}
+        onBuyClaim={handleBuyClaim}
+        onSellClaimToSyndicate={handleSellClaimToSyndicate}
+        onListClaimForSale={handleListClaimForSale}
+        onCancelListing={handleCancelListing}
+        onTradeOfferResponse={handleTradeOfferResponse}
       />
 
       {/* Pop-up Dialog when a Claim is Staked: Prompt to build a mine */}

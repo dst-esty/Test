@@ -51,6 +51,40 @@
         "isWildcatOrigin": {
           "type": "boolean",
           "description": "Whether this claim was established after a wildcatting operation"
+        },
+        "forSale": {
+          "type": "boolean",
+          "description": "Whether claim is listed on public territorial claims board"
+        },
+        "priceDollars": {
+          "type": "number",
+          "description": "Asking cash price in 1880s US dollars"
+        },
+        "priceGoldOunces": {
+          "type": "number",
+          "description": "Asking price in raw placer gold ounces"
+        },
+        "description": {
+          "type": "string",
+          "description": "Prospector survey notes and description of the mineral patent",
+          "maxLength": 256
+        },
+        "listedAt": {
+          "type": "number",
+          "description": "Timestamp when claim was posted for trade or sale"
+        },
+        "lastTransferPrice": {
+          "type": "number",
+          "description": "Last recorded sale price in dollars"
+        },
+        "lastTransferAt": {
+          "type": "number",
+          "description": "Timestamp of most recent conveyance"
+        },
+        "previousOwnerName": {
+          "type": "string",
+          "description": "Prior deed holder name",
+          "maxLength": 64
         }
       },
       "required": ["id", "name", "ownerId", "ownerName", "x", "z", "radius", "stakedAt"]
@@ -165,6 +199,68 @@
         }
       },
       "required": ["id", "senderId", "senderName", "receiverId", "receiverName", "status", "createdAt"]
+    },
+    "ClaimTradeOffer": {
+      "title": "ClaimTradeOffer",
+      "description": "Commercial barter or cash tender offered for a territory claim patent",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique offer ID"
+        },
+        "claimId": {
+          "type": "string",
+          "description": "Target claim identifier"
+        },
+        "claimName": {
+          "type": "string",
+          "description": "Target claim deed name",
+          "maxLength": 64
+        },
+        "targetOwnerId": {
+          "type": "string",
+          "description": "Current owner prospector ID receiving the offer",
+          "maxLength": 64
+        },
+        "buyerId": {
+          "type": "string",
+          "description": "Prospective buyer prospector ID",
+          "maxLength": 64
+        },
+        "buyerName": {
+          "type": "string",
+          "description": "Prospective buyer display name",
+          "maxLength": 64
+        },
+        "cashOffered": {
+          "type": "number",
+          "description": "Cash amount offered in dollars"
+        },
+        "goldOffered": {
+          "type": "number",
+          "description": "Gold amount offered in ounces"
+        },
+        "offeredClaimId": {
+          "type": "string",
+          "description": "Optional barter claim patent offered in exchange"
+        },
+        "offeredClaimName": {
+          "type": "string",
+          "description": "Name of optional barter claim",
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the trade proposal",
+          "enum": ["pending", "accepted", "declined", "cancelled"]
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Epoch timestamp of offer creation"
+        }
+      },
+      "required": ["id", "claimId", "claimName", "targetOwnerId", "buyerId", "buyerName", "cashOffered", "goldOffered", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -179,6 +275,10 @@
     "/friendships/{friendshipId}": {
       "schema": "Friendship",
       "description": "Pardner alliances and expedition friend bonds between prospectors"
+    },
+    "/claim_trade_offers/{offerId}": {
+      "schema": "ClaimTradeOffer",
+      "description": "Real-time trade proposals and purchase bids between prospectors"
     }
   }
 }
