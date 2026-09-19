@@ -130,7 +130,7 @@ export interface Landmark {
   radius: number;
   clueId?: string;
   discovered: boolean;
-  type: 'camp' | 'needle' | 'ruins' | 'spring' | 'petroglyph' | 'massacre' | 'mine' | 'town';
+  type: 'camp' | 'needle' | 'ruins' | 'spring' | 'petroglyph' | 'massacre' | 'mine' | 'town' | 'mountain' | 'canyon';
 }
 
 export interface ClueItem {

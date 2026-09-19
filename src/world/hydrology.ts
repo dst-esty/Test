@@ -157,6 +157,17 @@ export const TINAJAS: TinajaPool[] = [
     isPerennial: false,
     waterQuality: 'pure_rain',
   },
+  {
+    id: 'pistol_canyon_tinaja',
+    name: 'Pistol Canyon Bedrock Tinaja',
+    x: -46,
+    z: -130,
+    radius: 4.5,
+    maxDepth: 1.6,
+    waterLevel: 0.50,
+    isPerennial: true,
+    waterQuality: 'fresh_spring',
+  },
 ];
 
 export class DesertHydrologyEngine {

@@ -1081,6 +1081,7 @@ export class DesertFoliageManager {
       { id: 'salt_river', name: 'Salt River Fremont Cottonwoods', x: 0, z: -305, treeCount: 14, poolRadius: 14.0 },
       { id: 'needle', name: "Weaver's Needle Basin Tinaja", x: 68, z: 32, treeCount: 6, poolRadius: 4.5 },
       { id: 'peralta', name: 'Peralta Canyon Tinaja', x: -35, z: 75, treeCount: 6, poolRadius: 4.0 },
+      { id: 'pistol_canyon', name: 'Pistol Canyon Bedrock Tinaja', x: -46, z: -130, treeCount: 6, poolRadius: 4.5 },
     ];
 
     const barkMatCottonwood = new THREE.MeshStandardMaterial({

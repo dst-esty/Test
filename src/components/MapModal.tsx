@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Navigation, Compass, Sparkles, MapPin, Award, Store } from 'lucide-react';
+import { X, Navigation, Compass, Sparkles, MapPin, Award, Store, Mountain, Crosshair } from 'lucide-react';
 import { Landmark, Vector3D } from '../types';
 
 interface MapModalProps {
@@ -97,6 +97,23 @@ export const MapModal: React.FC<MapModalProps> = ({
               (Basalt Caprock Tableland)
             </text>
 
+            {/* Pistol Canyon Box Gorge (between Peters Mesa and Malapais Mountain) */}
+            <path d="M 140 115 Q 165 145 178 185" fill="none" stroke="#9a3412" strokeWidth="2.2" strokeDasharray="3 2" />
+            <text x="175" y="142" fill="#9a3412" fontSize="6.5" fontFamily="serif" fontStyle="italic" transform="rotate(50 175 142)">
+              Pistol Canyon
+            </text>
+
+            {/* Malapais Mountain (USGS Elev. 4,229 ft - Black Mountain) */}
+            <ellipse cx="351" cy="132" rx="36" ry="24" fill="#5c4028" fillOpacity="0.18" stroke="#5c3a21" strokeWidth="1.2" />
+            <ellipse cx="351" cy="132" rx="24" ry="16" fill="#4a2e18" fillOpacity="0.22" stroke="#5c3a21" strokeWidth="1.2" />
+            <ellipse cx="351" cy="132" rx="12" ry="8" fill="#3a1e08" fillOpacity="0.28" stroke="#5c3a21" strokeWidth="1.4" />
+            <text x="351" y="128" fill="#3a1e08" fontSize="7.5" fontFamily="serif" fontWeight="bold" textAnchor="middle">
+              MALAPAIS MT
+            </text>
+            <text x="351" y="138" fill="#78350f" fontSize="6" fontFamily="serif" fontStyle="italic" textAnchor="middle">
+              (4,229 ft Basalt Massif)
+            </text>
+
             {/* Needle Canyon Gorge (East) */}
             <path d="M 330 220 Q 345 285 365 340" fill="none" stroke="#b45309" strokeWidth="1.5" strokeDasharray="3 2" />
             <text x="360" y="275" fill="#78350f" fontSize="7" fontFamily="serif" fontStyle="italic" transform="rotate(45 360 275)">
@@ -161,6 +178,10 @@ export const MapModal: React.FC<MapModalProps> = ({
                       <Store className="w-4 h-4" />
                     ) : lm.type === 'spring' ? (
                       <Sparkles className="w-4 h-4" />
+                    ) : lm.type === 'mountain' ? (
+                      <Mountain className="w-4 h-4" />
+                    ) : lm.type === 'canyon' ? (
+                      <Crosshair className="w-4 h-4" />
                     ) : (
                       <MapPin className="w-4 h-4" />
                     )}

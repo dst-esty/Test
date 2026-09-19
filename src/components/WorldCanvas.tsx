@@ -3784,6 +3784,26 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
         }
+        // 5. Malapais Mountain High Summit (USGS Elev. 4,229 ft / 1,289m)
+        else if (Math.hypot(curX - 95, curZ - (-155)) < 36 && curY > 44) {
+          if (!discoveredSummitsRef.current.has('malapais_mountain')) {
+            discoveredSummitsRef.current.add('malapais_mountain');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('⛰️ Summit Reached: Malapais Mountain (USGS Elev. 4,229 ft) • Highest volcanic basalt massif in the northern Superstitions! Triangulation benchmark & 360° panoramic view.');
+            }
+          }
+        }
+        // 6. Pistol Canyon Box Gorge (Historic Lost Dutchman Tributary)
+        else if (Math.abs(curX - (-46)) < 18 && curZ < -80 && curZ > -175 && curY < 24) {
+          if (!discoveredSummitsRef.current.has('pistol_canyon')) {
+            discoveredSummitsRef.current.add('pistol_canyon');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner("🏜️ Canyon Discovered: Pistol Canyon • Rugged slot gorge below Peters Mesa! Site of Roy Bradford's lost 1920s Colt revolver.");
+            }
+          }
+        }
       }
 
       // Vertical Gravity, Ladder Climbing, and Ground Clamping

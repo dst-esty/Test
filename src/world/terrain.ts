@@ -162,10 +162,20 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     fishCreekCarve = -Math.pow(factor, 0.55) * 15.0;
   }
 
+  // Canyon G: Pistol Canyon (Historic box canyon tributary between Peters Mesa & Malapais Mountain)
+  // Famous site where Dutch Hunter Roy Bradford lost his revolver in the 1920s while searching for the Lost Dutchman Mine
+  const pistolCanyonX = -46 + Math.sin(z * 0.026 - 1.1) * 20 + Math.cos(z * 0.012) * 9;
+  const distToPistolCanyon = Math.abs(x - pistolCanyonX);
+  let pistolCanyonCarve = 0;
+  if (distToPistolCanyon < 25 && z < -60 && z > -190 && x > -92 && x < 5) {
+    const factor = 1.0 - distToPistolCanyon / 25;
+    pistolCanyonCarve = -Math.pow(factor, 0.52) * 15.5;
+  }
+
   // Combined Canyon Carving
   const totalCanyonCarve = Math.min(
     0,
-    peraltaCarve + needleCanyonCarve + slotCarve + centralCanyonCarve + amphitheaterCarve + fishCreekCarve
+    peraltaCarve + needleCanyonCarve + slotCarve + centralCanyonCarve + amphitheaterCarve + fishCreekCarve + pistolCanyonCarve
   );
 
   // 5. Wash / arroyo carving: dry riverbeds, alluvial fans, and gravel drainage
@@ -401,11 +411,35 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     }
   }
 
+  // 7. Malapais Mountain Massif (USGS Elev. 4,229 ft / 1,289m - Historic "Black Mountain")
+  // Prominent towering volcanic basalt/dacite mountain north of Weaver's Needle (80, 15) & east of Pistol Canyon (-46, -130)
+  // Perfectly matches the USGS Weavers Needle 7.5-minute topographic quadrangle!
+  const distToMalapais = Math.hypot(x - 95, z - (-155));
+  let malapaisElevation = 0;
+  if (distToMalapais < 75) {
+    const mFrac = 1.0 - distToMalapais / 75;
+    // Base mountain dome slope (smooth Hermite curve)
+    const baseDome = Math.pow(mFrac, 1.4) * 38.0;
+    // Stepped volcanic caprock (Malpaís black basalt plateau cap, elev. up to ~62m)
+    const capNoise = fbm(x * 0.024 + 115, z * 0.024 + 115, 3);
+    let caprock = 0;
+    if (mFrac > 0.32) {
+      const capFrac = (mFrac - 0.32) / 0.68;
+      caprock = Math.pow(capFrac, 0.62) * (22.0 + capNoise * 5.0);
+    }
+    // Southwest volcanic ridgeline trail (natural walkable ramp from the pass allowing scrambling to summit plateau)
+    const ridgeDist = Math.hypot(x - (95 - (1.0 - mFrac) * 38), z - (-155 + (1.0 - mFrac) * 28));
+    const ridgeRamp = Math.max(0, 1.0 - ridgeDist / 20.0) * 8.5;
+
+    malapaisElevation = baseDome + caprock + ridgeRamp;
+  }
+
   let rawHeight =
     (rawElev + totalCanyonCarve + arroyo + needleBase + springDepression + mineRidge + saltRiverCarve) *
       trailheadFlatten +
     perimeterMountains * (totalCanyonCarve < -1 ? Math.max(0.08, 1.0 + totalCanyonCarve / 18.0) : 1.0) +
-    northCanyonWall;
+    northCanyonWall +
+    malapaisElevation;
 
   // Level out the Tortilla Flat town terrace smoothly to an elevated, dry 7.5m (or sloping river trail)
   if (tortillaFlatBlend > 0) {
@@ -2015,6 +2049,10 @@ export function createTerrainMesh(): THREE.Mesh {
 
     // Color computation
     const distToSpring = Math.hypot(vx - (-70), vz - (-20));
+    const distToMalapais = Math.hypot(vx - 95, vz - (-155));
+    const pistolCanyonX = -46 + Math.sin(vz * 0.026 - 1.1) * 20 + Math.cos(vz * 0.012) * 9;
+    const distToPistol = Math.abs(vx - pistolCanyonX);
+
     let r = 0.82;
     let g = 0.63;
     let b = 0.44;
@@ -2025,6 +2063,26 @@ export function createTerrainMesh(): THREE.Mesh {
       r = 0.42 * factor + r * (1 - factor);
       g = 0.54 * factor + g * (1 - factor);
       b = 0.26 * factor + b * (1 - factor);
+    } else if (distToMalapais < 68 && vy > 26) {
+      // Malapais Mountain ("Black Mountain") dark volcanic basalt caprock & desert varnish
+      const basaltNoise = Math.sin(vx * 0.35) * Math.cos(vz * 0.35) * 0.06;
+      const strata = Math.sin(vy * 0.8) * 0.04;
+      r = 0.28 + basaltNoise + strata;
+      g = 0.23 + basaltNoise * 0.8 + strata * 0.5;
+      b = 0.20 + basaltNoise * 0.6 + strata * 0.3;
+    } else if (distToPistol < 24 && vz < -60 && vz > -188) {
+      // Pistol Canyon: sheer volcanic breccia walls and sun-bleached alluvial wash gravel
+      if (slope > 0.65) {
+        // Red-purple volcanic breccia canyon walls
+        r = 0.68 + Math.sin(vy * 0.85) * 0.07;
+        g = 0.26 + Math.sin(vy * 0.85) * 0.03;
+        b = 0.18 + Math.sin(vy * 0.85) * 0.02;
+      } else {
+        // Smooth gravel wash floor
+        r = 0.85;
+        g = 0.68;
+        b = 0.48;
+      }
     } else if (slope > 0.75) {
       // Sheer canyon walls & mountain cliff faces: exposed layered red sandstone & desert varnish
       const strata = Math.sin(vy * 0.95 + vx * 0.04) * 0.09;

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getTerrainHeight } from './terrain';
 import { Landmark } from '../types';
 import { buildTortillaFlatSettlement } from './tortillaFlat';
+import { buildMalapaisMountainSummit, buildPistolCanyonGorge } from './malapaisPistol';
 
 export interface LandmarkMeshes {
   weaversNeedle: THREE.Group;
@@ -13,6 +14,8 @@ export interface LandmarkMeshes {
   mine: THREE.Group;
   mineInterior: THREE.Group;
   tortillaFlat: THREE.Group;
+  malapaisMountain?: THREE.Group;
+  pistolCanyon?: THREE.Group;
   waterRefillPoints: THREE.Vector3[];
 }
 
@@ -959,6 +962,18 @@ export function createLandmarkStructures(
   // ==========================================
   const tortillaGroup = buildTortillaFlatSettlement(scene, waterRefillPoints);
 
+  // ==========================================
+  // 10. Malapais Mountain Summit (USGS Elev. 4,229 ft / 1,289m)
+  // Highest dominant basalt massif in northern Superstitions ("Black Mountain")
+  // ==========================================
+  const malapaisGroup = buildMalapaisMountainSummit(scene);
+
+  // ==========================================
+  // 11. Pistol Canyon Box Gorge (Historic Lost Dutchman Tributary)
+  // Narrow slot canyon with Roy Bradford's lost 1870s Colt revolver & tinaja
+  // ==========================================
+  const pistolGroup = buildPistolCanyonGorge(scene, waterRefillPoints);
+
   return {
     weaversNeedle: needleGroup,
     trailhead: trailheadGroup,
@@ -969,6 +984,8 @@ export function createLandmarkStructures(
     mine: mineGroup,
     mineInterior,
     tortillaFlat: tortillaGroup,
+    malapaisMountain: malapaisGroup,
+    pistolCanyon: pistolGroup,
     waterRefillPoints,
   };
 }

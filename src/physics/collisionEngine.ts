@@ -113,6 +113,8 @@ export function testPositionCollision(
   const isBluffSpringsGap = Math.hypot(candX - (-190), candZ - (-20)) < 34; // Bluff Springs Gap (West)
   const isNeedleCanyonChasm = candX > 110 && candX < 185 && candZ > -70 && candZ < 150; // Needle Canyon chasm
   const isFishCreekCanyon = candX < -40 && candX > -180 && candZ < -170 && candZ > -300; // Fish Creek Canyon
+  const isPistolCanyon = candX > -85 && candX < -15 && candZ < -55 && candZ > -195; // Pistol Canyon box gorge
+  const isMalapaisRidge = Math.hypot(candX - 95, candZ - (-155)) < 75; // Malapais Mountain massif & summit ridge
 
   const isNavigablePassOrCanyon =
     isApacheTrailOrSaltRiver ||
@@ -121,7 +123,9 @@ export function testPositionCollision(
     isPeraltaPass ||
     isBluffSpringsGap ||
     isNeedleCanyonChasm ||
-    isFishCreekCanyon;
+    isFishCreekCanyon ||
+    isPistolCanyon ||
+    isMalapaisRidge;
 
   const distFromCenter = Math.hypot(candX, candZ);
   const isHardWorldBoundary = distFromCenter > WORLD_BOUNDARY_RADIUS;
