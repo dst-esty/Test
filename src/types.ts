@@ -232,6 +232,16 @@ export interface PlayerState {
   cornishPumpActive?: boolean;
   excavatedRoomsCount?: number;
   canteenOunces?: number; // 0 to 32 oz for desert hydration
+  // Pack Animal & Mount Companion (Burro / Mountain Pony)
+  ownedMount?: 'burro' | 'pony' | null;
+  mountName?: string;
+  isRidingMount?: boolean;
+  mountCarrying?: {
+    goldOunces?: number;
+    rocks?: number;
+    waterOz?: number;
+    woodPlanks?: number;
+  };
 }
 
 export type GraphicsQuality = 'performance' | 'balanced' | 'high';

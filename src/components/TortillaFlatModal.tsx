@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Store,
   Coins,
@@ -15,6 +15,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Layers,
+  Footprints,
+  Package,
+  Award,
 } from 'lucide-react';
 import { PlayerState, Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
@@ -26,6 +29,7 @@ interface TortillaFlatModalProps {
   onUpdatePlayerState: (updater: (prev: PlayerState) => PlayerState) => void;
   onFastTravel?: (target: Vector3D) => void;
   onShowBanner?: (msg: string) => void;
+  initialTab?: 'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery';
 }
 
 export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
@@ -35,8 +39,17 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
   onUpdatePlayerState,
   onFastTravel,
   onShowBanner,
+  initialTab = 'mercantile',
 }) => {
-  const [activeTab, setActiveTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach'>('mercantile');
+  const [activeTab, setActiveTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery'>(initialTab);
+  const [editingMountName, setEditingMountName] = useState(false);
+  const [customNameInput, setCustomNameInput] = useState('');
+
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   if (!isOpen) return null;
 
@@ -188,6 +201,17 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
           >
             <MapPin className="w-4 h-4 text-amber-400" />
             Stagecoach Travel
+          </button>
+          <button
+            onClick={() => setActiveTab('livery')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-serif rounded-t-xl transition-all ${
+              activeTab === 'livery'
+                ? 'bg-amber-900/50 text-amber-100 border-t-2 border-x border-amber-600 font-bold'
+                : 'text-stone-400 hover:text-stone-200 hover:bg-stone-800/40'
+            }`}
+          >
+            <Footprints className="w-4 h-4 text-amber-400" />
+            Livery & Mounts
           </button>
         </div>
 
@@ -476,6 +500,391 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
                       Stage Ride (Travel)
                     </button>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: LIVERY STABLE & MOUNT CORRAL */}
+          {activeTab === 'livery' && (
+            <div className="space-y-4">
+              <div className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-xl text-xs text-amber-200/90 font-serif leading-relaxed">
+                Welcome to the Tortilla Flat Livery Stable & Corral! Master Hostler Silas &quot;Red&quot; McCurdy breeds and breaks surefooted Spanish pack burros and spirited mountain mustang ponies. Whether you need a faithful beast of burden to haul heavy gold ore from the crags or a fast mount to ride across the desert, our stock is bred for the harsh Superstition wilderness.
+              </div>
+
+              {/* Current Active Mount Status (If player owns one) */}
+              {playerState.ownedMount && (
+                <div className="p-4 bg-gradient-to-r from-amber-950/60 via-stone-900 to-amber-950/60 border-2 border-amber-600/70 rounded-xl">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-amber-900/80 border border-amber-500/60 rounded-xl text-amber-200 text-xl shadow-inner">
+                        {playerState.ownedMount === 'burro' ? '🫏' : '🐎'}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono uppercase text-amber-400 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-700/50">
+                            Active Companion
+                          </span>
+                          <h3 className="text-base font-bold font-serif text-amber-100">
+                            {playerState.mountName || (playerState.ownedMount === 'burro' ? 'Barnaby' : 'Sundown')}
+                          </h3>
+                        </div>
+                        <p className="text-xs text-stone-300 font-serif mt-0.5">
+                          {playerState.ownedMount === 'burro'
+                            ? 'Hardy Spanish Pack Burro • Negates heavy ore encumbrance • 32 oz Water'
+                            : 'Swift Mountain Mustang • +75% Riding Speed • Sprint Gallop'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const newRiding = !playerState.isRidingMount;
+                          onUpdatePlayerState((prev) => ({
+                            ...prev,
+                            isRidingMount: newRiding,
+                          }));
+                          soundEngine.playMountSaddle();
+                          if (newRiding) {
+                            if (playerState.ownedMount === 'burro') soundEngine.playBurroBray();
+                            else soundEngine.playHorseWhinny();
+                          }
+                          if (onShowBanner) {
+                            onShowBanner(
+                              newRiding
+                                ? `Mounted ${playerState.mountName || 'your steed'}! Press [M] to dismount.`
+                                : `Dismounted ${playerState.mountName || 'your steed'}. Mount will follow loyally.`
+                            );
+                          }
+                        }}
+                        className={`px-3 py-1.5 text-xs font-serif rounded-lg border transition-all shadow ${
+                          playerState.isRidingMount
+                            ? 'bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold border-amber-400'
+                            : 'bg-stone-800 hover:bg-stone-700 text-amber-200 border-stone-600'
+                        }`}
+                      >
+                        {playerState.isRidingMount ? 'Dismount [M]' : 'Mount Up [M]'}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (cash < 3.0) {
+                            if (onShowBanner) onShowBanner('Need $3.00 Cash for a bag of sweet oats!');
+                            return;
+                          }
+                          soundEngine.playCoins();
+                          if (playerState.ownedMount === 'burro') soundEngine.playBurroBray();
+                          else soundEngine.playHorseWhinny();
+                          onUpdatePlayerState((prev) => ({
+                            ...prev,
+                            cashDollars: (prev.cashDollars || 0) - 3.0,
+                            health: Math.min(100, (prev.health || 0) + 15),
+                            hydration: Math.min(100, (prev.hydration || 0) + 20),
+                          }));
+                          if (onShowBanner) {
+                            onShowBanner(
+                              `Fed sweet oats to ${playerState.mountName || 'your companion'}! Mount vigor restored (+15 HP).`
+                            );
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-amber-900/60 hover:bg-amber-800 text-amber-200 text-xs font-serif rounded-lg border border-amber-700/60 transition-colors"
+                      >
+                        Feed Sweet Oats ($3.00)
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const newName = prompt('Enter a name for your mount:', playerState.mountName || '');
+                          if (newName && newName.trim()) {
+                            onUpdatePlayerState((prev) => ({
+                              ...prev,
+                              mountName: newName.trim(),
+                            }));
+                            if (onShowBanner) onShowBanner(`Mount christened as "${newName.trim()}"!`);
+                          }
+                        }}
+                        className="px-2.5 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-serif rounded-lg border border-stone-600 transition-colors"
+                      >
+                        Rename
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Mount Catalog */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. Spanish Pack Burro */}
+                <div
+                  className={`p-4 rounded-xl border flex flex-col justify-between transition-all ${
+                    playerState.ownedMount === 'burro'
+                      ? 'bg-amber-950/30 border-amber-500/80 shadow-lg ring-1 ring-amber-500/40'
+                      : 'bg-stone-950/80 border-stone-800 hover:border-amber-700/50'
+                  }`}
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-2xl">🫏</span>
+                        <div>
+                          <h4 className="text-base font-bold font-serif text-amber-100">
+                            Prospector&apos;s Pack Burro
+                          </h4>
+                          <span className="text-[11px] font-mono text-amber-400">
+                            Equus asinus • Sawbuck Pack Saddle
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-bold font-mono text-emerald-400">$35.00</div>
+                        <div className="text-[11px] font-mono text-amber-300/80">or 1.7 oz Gold</div>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-stone-300 font-serif leading-relaxed">
+                      The quintessential gold prospector&apos;s companion. Equipped with a wooden sawbuck pack frame, two heavy burlap ore panniers, rope halter, and copper trail bell.
+                    </p>
+
+                    <div className="space-y-1 text-[11px] font-serif text-amber-200/80 bg-stone-900/60 p-2.5 rounded-lg border border-stone-800">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-400">✓</span>
+                        <span><strong>Zero Encumbrance:</strong> Haul heavy rocks &amp; gold boulders without slowing down.</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-400">✓</span>
+                        <span><strong>Emergency Water:</strong> Includes 32 oz reserve canteen for desert hydration.</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-400">✓</span>
+                        <span><strong>Loyal Companion:</strong> Trots behind you everywhere; alerts to predators.</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-400">✓</span>
+                        <span><strong>Rideable:</strong> Mount with [M] for steady desert travel.</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 mt-2 border-t border-stone-800/80 flex items-center gap-2">
+                    {playerState.ownedMount === 'burro' ? (
+                      <div className="w-full py-2 text-center text-xs font-mono font-bold text-amber-400 bg-amber-950/80 border border-amber-600/50 rounded-lg">
+                        Currently in Your Care
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => {
+                            if (cash < 35.0) {
+                              if (onShowBanner) onShowBanner('Need $35.00 Cash! Cash in ore at the Assayer.');
+                              return;
+                            }
+                            soundEngine.playCoins();
+                            soundEngine.playBurroBray();
+                            onUpdatePlayerState((prev) => ({
+                              ...prev,
+                              cashDollars: (prev.cashDollars || 0) - 35.0,
+                              ownedMount: 'burro',
+                              mountName: prev.mountName || 'Barnaby',
+                              isRidingMount: false,
+                              hydration: 100,
+                            }));
+                            if (onShowBanner) {
+                              onShowBanner('Bought Pack Burro "Barnaby"! Press [M] to mount or lead as pack mule.');
+                            }
+                          }}
+                          className="flex-1 py-2 bg-emerald-900/70 hover:bg-emerald-800 text-emerald-100 font-serif text-xs font-bold rounded-lg border border-emerald-600/60 transition-colors shadow"
+                        >
+                          Buy ($35.00)
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (gold < 1.7) {
+                              if (onShowBanner) onShowBanner('Need 1.7 oz Gold to trade for a pack burro!');
+                              return;
+                            }
+                            soundEngine.playCoins();
+                            soundEngine.playBurroBray();
+                            onUpdatePlayerState((prev) => ({
+                              ...prev,
+                              goldFound: Math.max(0, (prev.goldFound || 0) - 1.7),
+                              ownedMount: 'burro',
+                              mountName: prev.mountName || 'Barnaby',
+                              isRidingMount: false,
+                              hydration: 100,
+                            }));
+                            if (onShowBanner) {
+                              onShowBanner('Traded 1.7 oz Gold for Pack Burro "Barnaby"! Press [M] to ride.');
+                            }
+                          }}
+                          className="flex-1 py-2 bg-amber-900/70 hover:bg-amber-800 text-amber-100 font-serif text-xs font-bold rounded-lg border border-amber-600/60 transition-colors shadow"
+                        >
+                          Trade 1.7 oz Ore
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Mountain Mustang Pony */}
+                <div
+                  className={`p-4 rounded-xl border flex flex-col justify-between transition-all ${
+                    playerState.ownedMount === 'pony'
+                      ? 'bg-amber-950/30 border-amber-500/80 shadow-lg ring-1 ring-amber-500/40'
+                      : 'bg-stone-950/80 border-stone-800 hover:border-amber-700/50'
+                  }`}
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-2xl">🐎</span>
+                        <div>
+                          <h4 className="text-base font-bold font-serif text-amber-100">
+                            Mountain Mustang Pony
+                          </h4>
+                          <span className="text-[11px] font-mono text-amber-400">
+                            Equus caballus • Tooled Leather Saddle
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-bold font-mono text-emerald-400">$65.00</div>
+                        <div className="text-[11px] font-mono text-amber-300/80">or 3.2 oz Gold</div>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-stone-300 font-serif leading-relaxed">
+                      A spirited, surefooted Sonoran trail pony with high stamina. Outfitted with hand-tooled Western leather saddle, Navajo wool saddle blanket, brass stirrups, and bridle.
+                    </p>
+
+                    <div className="space-y-1 text-[11px] font-serif text-amber-200/80 bg-stone-900/60 p-2.5 rounded-lg border border-stone-800">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-400">✓</span>
+                        <span><strong>+75% Overland Speed:</strong> Swift riding transport across long distances.</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-400">✓</span>
+                        <span><strong>Sprint Gallop:</strong> Hold Shift to gallop at blistering speed past hostiles.</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-400">✓</span>
+                        <span><strong>Saddlebag Storage:</strong> Extra capacity for rifle rounds and provisions.</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-400">✓</span>
+                        <span><strong>Surefooted:</strong> Climbs mountain foothills and canyon trails effortlessly.</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 mt-2 border-t border-stone-800/80 flex items-center gap-2">
+                    {playerState.ownedMount === 'pony' ? (
+                      <div className="w-full py-2 text-center text-xs font-mono font-bold text-amber-400 bg-amber-950/80 border border-amber-600/50 rounded-lg">
+                        Currently in Your Care
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => {
+                            if (cash < 65.0) {
+                              if (onShowBanner) onShowBanner('Need $65.00 Cash! Cash in ore at the Assayer.');
+                              return;
+                            }
+                            soundEngine.playCoins();
+                            soundEngine.playHorseWhinny();
+                            onUpdatePlayerState((prev) => ({
+                              ...prev,
+                              cashDollars: (prev.cashDollars || 0) - 65.0,
+                              ownedMount: 'pony',
+                              mountName: prev.mountName || 'Sundown',
+                              isRidingMount: false,
+                            }));
+                            if (onShowBanner) {
+                              onShowBanner('Bought Mountain Pony "Sundown"! Press [M] to ride with +75% speed!');
+                            }
+                          }}
+                          className="flex-1 py-2 bg-emerald-900/70 hover:bg-emerald-800 text-emerald-100 font-serif text-xs font-bold rounded-lg border border-emerald-600/60 transition-colors shadow"
+                        >
+                          Buy ($65.00)
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (gold < 3.2) {
+                              if (onShowBanner) onShowBanner('Need 3.2 oz Gold to trade for a mountain pony!');
+                              return;
+                            }
+                            soundEngine.playCoins();
+                            soundEngine.playHorseWhinny();
+                            onUpdatePlayerState((prev) => ({
+                              ...prev,
+                              goldFound: Math.max(0, (prev.goldFound || 0) - 3.2),
+                              ownedMount: 'pony',
+                              mountName: prev.mountName || 'Sundown',
+                              isRidingMount: false,
+                            }));
+                            if (onShowBanner) {
+                              onShowBanner('Traded 3.2 oz Gold for Mountain Pony "Sundown"! Press [M] to ride.');
+                            }
+                          }}
+                          className="flex-1 py-2 bg-amber-900/70 hover:bg-amber-800 text-amber-100 font-serif text-xs font-bold rounded-lg border border-amber-600/60 transition-colors shadow"
+                        >
+                          Trade 3.2 oz Ore
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Extra Livery Tack & Provisions */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <div className="p-3 bg-stone-950/70 border border-stone-800 rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-amber-950 border border-amber-700/50 rounded-lg text-amber-400">
+                      <Package className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold font-serif text-xs text-stone-100">Canvas Pack Saddlebags</div>
+                      <div className="text-[11px] text-stone-400">Expands water &amp; provisions capacity</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() =>
+                      handleBuy('Canvas Pack Saddlebags', 12.0, (p) => ({
+                        hydration: 100,
+                        canteenOunces: 32,
+                      }))
+                    }
+                    className="px-3 py-1.5 bg-amber-900/70 hover:bg-amber-800 text-amber-100 font-mono text-xs rounded-lg border border-amber-600/50 transition-colors shadow"
+                  >
+                    $12.00
+                  </button>
+                </div>
+
+                <div className="p-3 bg-stone-950/70 border border-stone-800 rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-amber-950 border border-amber-700/50 rounded-lg text-amber-400">
+                      <Award className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold font-serif text-xs text-stone-100">Bag of Sweet Alfalfa Oats</div>
+                      <div className="text-[11px] text-stone-400">Restores +15 Health &amp; feeds companion</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() =>
+                      handleBuy('Sweet Alfalfa Oats', 3.0, (p) => {
+                        if (p.ownedMount === 'burro') soundEngine.playBurroBray();
+                        else if (p.ownedMount === 'pony') soundEngine.playHorseWhinny();
+                        return {
+                          health: Math.min(100, (p.health || 0) + 15),
+                        };
+                      })
+                    }
+                    className="px-3 py-1.5 bg-amber-900/70 hover:bg-amber-800 text-amber-100 font-mono text-xs rounded-lg border border-amber-600/50 transition-colors shadow"
+                  >
+                    $3.00
+                  </button>
                 </div>
               </div>
             </div>

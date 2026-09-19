@@ -2154,6 +2154,224 @@ class SoundEngine {
       osc.stop(t + 1.5 + idx * 0.08);
     });
   }
+
+  /**
+   * Authentic Sonoran desert pack burro bray ("Hee-haw!")
+   * Resonant harmonic dual-phase vocalization with descending rasp
+   */
+  public playBurroBray() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // First bray syllable: "HEE" (higher harmonic pitch)
+    const osc1 = this.ctx.createOscillator();
+    const gain1 = this.ctx.createGain();
+    const filter1 = this.ctx.createBiquadFilter();
+    osc1.type = 'sawtooth';
+    filter1.type = 'bandpass';
+    filter1.frequency.setValueAtTime(680, t);
+    filter1.frequency.exponentialRampToValueAtTime(860, t + 0.35);
+    filter1.Q.setValueAtTime(4.0, t);
+
+    osc1.frequency.setValueAtTime(310, t);
+    osc1.frequency.linearRampToValueAtTime(420, t + 0.25);
+    osc1.frequency.linearRampToValueAtTime(360, t + 0.45);
+
+    gain1.gain.setValueAtTime(0.01, t);
+    gain1.gain.linearRampToValueAtTime(0.22, t + 0.1);
+    gain1.gain.exponentialRampToValueAtTime(0.02, t + 0.48);
+
+    osc1.connect(filter1);
+    filter1.connect(gain1);
+    gain1.connect(this.ctx.destination);
+    osc1.start(t);
+    osc1.stop(t + 0.5);
+
+    // Second bray syllable: "HAW" (deep guttural raspy exhalation)
+    const tHaw = t + 0.42;
+    const osc2 = this.ctx.createOscillator();
+    const gain2 = this.ctx.createGain();
+    const filter2 = this.ctx.createBiquadFilter();
+    osc2.type = 'sawtooth';
+    filter2.type = 'lowpass';
+    filter2.frequency.setValueAtTime(480, tHaw);
+    filter2.frequency.exponentialRampToValueAtTime(240, tHaw + 0.6);
+
+    osc2.frequency.setValueAtTime(220, tHaw);
+    osc2.frequency.exponentialRampToValueAtTime(140, tHaw + 0.55);
+
+    gain2.gain.setValueAtTime(0.01, tHaw);
+    gain2.gain.linearRampToValueAtTime(0.26, tHaw + 0.08);
+    gain2.gain.exponentialRampToValueAtTime(0.001, tHaw + 0.65);
+
+    osc2.connect(filter2);
+    filter2.connect(gain2);
+    gain2.connect(this.ctx.destination);
+    osc2.start(tHaw);
+    osc2.stop(tHaw + 0.7);
+
+    // Pack saddle bell jingle
+    this.playBurroBell(tHaw + 0.1);
+  }
+
+  /**
+   * Pack saddle brass bell chime
+   */
+  public playBurroBell(customTime?: number) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = customTime !== undefined ? customTime : this.ctx.currentTime;
+
+    const bellFreqs = [1567.98, 2093.0]; // G6, C7 bright small brass bell
+    bellFreqs.forEach((freq, i) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t + i * 0.03);
+      gain.gain.setValueAtTime(0.07, t + i * 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35 + i * 0.03);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(t + i * 0.03);
+      osc.stop(t + 0.4 + i * 0.03);
+    });
+  }
+
+  /**
+   * Mountain Mustang Pony whinny / neigh
+   */
+  public playHorseWhinny() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1100, t);
+    filter.frequency.exponentialRampToValueAtTime(1700, t + 0.2);
+    filter.frequency.exponentialRampToValueAtTime(750, t + 0.7);
+    filter.Q.setValueAtTime(3.5, t);
+
+    // Pitch envelope: rising then fluttering down
+    osc.frequency.setValueAtTime(520, t);
+    osc.frequency.linearRampToValueAtTime(780, t + 0.18);
+    osc.frequency.linearRampToValueAtTime(620, t + 0.35);
+    osc.frequency.linearRampToValueAtTime(710, t + 0.45);
+    osc.frequency.linearRampToValueAtTime(440, t + 0.75);
+
+    // Tremolo LFO flutter
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    lfo.frequency.setValueAtTime(18, t); // 18Hz vibrato flutter
+    lfoGain.gain.setValueAtTime(28, t);
+    lfo.connect(osc.frequency);
+    lfo.start(t);
+    lfo.stop(t + 0.8);
+
+    gain.gain.setValueAtTime(0.01, t);
+    gain.gain.linearRampToValueAtTime(0.18, t + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.85);
+  }
+
+  /**
+   * Rhythmic two-beat wooden/rocky hoof clip-clop
+   */
+  public playHoofTrot(isGallop = false) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    const duration = isGallop ? 0.045 : 0.06;
+    const gap = isGallop ? 0.07 : 0.11;
+
+    // Two hooves hitting earth/gravel in cadence
+    [0, gap].forEach((delay, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'triangle';
+      const basePitch = (idx === 0 ? 120 : 95) + Math.random() * 15;
+      osc.frequency.setValueAtTime(basePitch, t + delay);
+      osc.frequency.exponentialRampToValueAtTime(45, t + delay + duration);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(420, t + delay);
+
+      gain.gain.setValueAtTime(0.16, t + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + delay + duration);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(t + delay);
+      osc.stop(t + delay + duration + 0.01);
+    });
+  }
+
+  /**
+   * Leather saddle creak & stirrup clink on mount/dismount
+   */
+  public playMountSaddle() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // Leather creak
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(320, t);
+    filter.frequency.linearRampToValueAtTime(180, t + 0.28);
+    filter.Q.setValueAtTime(5.0, t);
+
+    osc.frequency.setValueAtTime(85, t);
+    osc.frequency.linearRampToValueAtTime(120, t + 0.15);
+    osc.frequency.linearRampToValueAtTime(70, t + 0.28);
+
+    gain.gain.setValueAtTime(0.01, t);
+    gain.gain.linearRampToValueAtTime(0.14, t + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.32);
+
+    // Brass stirrup chime
+    const stirrupOsc = this.ctx.createOscillator();
+    const stirrupGain = this.ctx.createGain();
+    stirrupOsc.type = 'sine';
+    stirrupOsc.frequency.setValueAtTime(2480, t + 0.08);
+    stirrupGain.gain.setValueAtTime(0.08, t + 0.08);
+    stirrupGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    stirrupOsc.connect(stirrupGain);
+    stirrupGain.connect(this.ctx.destination);
+    stirrupOsc.start(t + 0.08);
+    stirrupOsc.stop(t + 0.38);
+  }
 }
 
 export const soundEngine = new SoundEngine();

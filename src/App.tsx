@@ -119,6 +119,7 @@ export default function App() {
   const [isClaimDeedOpen, setIsClaimDeedOpen] = useState(false);
   const [isDepotOpen, setIsDepotOpen] = useState(false);
   const [isTortillaFlatOpen, setIsTortillaFlatOpen] = useState(false);
+  const [tortillaFlatTab, setTortillaFlatTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery'>('mercantile');
   const [activeBuildingType, setActiveBuildingType] = useState<MineStructureType>('timber_portal');
   const [gameOverDetails, setGameOverDetails] = useState<GameOverDetails | null>(null);
   const [claimPrompt, setClaimPrompt] = useState<{ name: string; position: Vector3D } | null>(null);
@@ -537,6 +538,27 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handleToggleGoggles]);
 
+  // Handle Companion Mount toggle (Burro / Pony)
+  const handleToggleMount = useCallback(() => {
+    if (!playerState.ownedMount) return;
+    const newRiding = !playerState.isRidingMount;
+    setPlayerState((prev) => ({
+      ...prev,
+      isRidingMount: newRiding,
+    }));
+    soundEngine.playMountSaddle();
+    if (newRiding) {
+      if (playerState.ownedMount === 'burro') soundEngine.playBurroBray();
+      else soundEngine.playHorseWhinny();
+    }
+    const mName = playerState.mountName || (playerState.ownedMount === 'burro' ? 'Pack Burro' : 'Mountain Pony');
+    showBanner(
+      newRiding
+        ? `Mounted ${mName}! Press [M] or tap button to dismount.`
+        : `Dismounted ${mName}. Your loyal companion follows closely.`
+    );
+  }, [playerState.ownedMount, playerState.isRidingMount, playerState.mountName, showBanner]);
+
   // Calculate nearest landmark for Compass HUD
   const nearestLandmark = React.useMemo(() => {
     let nearest: Landmark | null = null;
@@ -901,7 +923,10 @@ export default function App() {
         onRegisterMobileMoveHandler={(fn) => {
           mobileMoveHandlerRef.current = fn;
         }}
-        onOpenTortillaFlat={() => setIsTortillaFlatOpen(true)}
+        onOpenTortillaFlat={(tab) => {
+          setTortillaFlatTab(tab || 'mercantile');
+          setIsTortillaFlatOpen(true);
+        }}
         onToggleDayNight={handleToggleDayNight}
         graphicsQuality={graphicsQuality}
         onFpsUpdate={setCurrentFps}
@@ -1034,6 +1059,7 @@ export default function App() {
         onCycleGraphicsQuality={handleCycleGraphicsQuality}
         areGogglesActive={areGogglesActive}
         onToggleGoggles={handleToggleGoggles}
+        onToggleMount={handleToggleMount}
       />
 
       {/* Prospector's Goggles Optical Vignette Lens */}
@@ -1227,6 +1253,7 @@ export default function App() {
       <TortillaFlatModal
         isOpen={isTortillaFlatOpen}
         onClose={() => setIsTortillaFlatOpen(false)}
+        initialTab={tortillaFlatTab}
         playerState={playerState}
         onUpdatePlayerState={setPlayerState}
         onFastTravel={handleFastTravel}

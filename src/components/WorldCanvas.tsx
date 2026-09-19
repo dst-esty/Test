@@ -49,6 +49,7 @@ import { DesertHydrologyEngine } from '../world/hydrology';
 import { resolveKinematicMovement } from '../physics/collisionEngine';
 import { MountainDustParticleSystem } from '../world/mountainDustParticles';
 import { friendshipService } from '../services/friendshipService';
+import { MountManager } from '../world/mountManager';
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -111,7 +112,7 @@ interface WorldCanvasProps {
   onUpdateShaftSinkingStats?: (stats: ShaftSinkingStats | null) => void;
   onRegisterStrikeVoxelHandler?: (fn: () => void) => void;
   onRegisterPlaceTimberHandler?: (fn: () => void) => void;
-  onOpenTortillaFlat?: () => void;
+  onOpenTortillaFlat?: (tab?: 'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery') => void;
   onToggleDayNight?: () => void;
   onRegisterMobileActionHandler?: (fn: () => void) => void;
   onRegisterMobileJumpHandler?: (fn: () => void) => void;
@@ -312,6 +313,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const foliageManagerRef = useRef<DesertFoliageManager | null>(null);
   const mountainDustParticlesRef = useRef<MountainDustParticleSystem | null>(null);
   const movableRockManagerRef = useRef<MovableRockManager | null>(null);
+  const mountManagerRef = useRef<MountManager | null>(null);
   const miningSystemRef = useRef<MiningSystem | null>(null);
   const mineBuildingRef = useRef<MineBuildingSystem | null>(null);
   const wildlifeManagerRef = useRef<WildlifeManager | null>(null);
@@ -605,6 +607,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     const movableRockManager = new MovableRockManager(scene);
     movableRockManagerRef.current = movableRockManager;
+
+    const mountManager = new MountManager(scene);
+    if (playerStateRef.current.ownedMount) {
+      mountManager.setMount(playerStateRef.current.ownedMount, playerStateRef.current.mountName || '');
+      mountManager.isRiding = Boolean(playerStateRef.current.isRidingMount);
+      const startMountPos = playerPos.current.clone().add(new THREE.Vector3(2.5, 0, 2.0));
+      startMountPos.y = getTerrainHeight(startMountPos.x, startMountPos.z);
+      mountManager.mountGroup.position.copy(startMountPos);
+    }
+    mountManagerRef.current = mountManager;
 
     // Restore existing claim or built structures
     if (playerStateRef.current.activeClaim?.isClaimed) {
@@ -2377,6 +2389,28 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (e.code === 'KeyN') {
         if (onToggleDayNight) onToggleDayNight();
       }
+      if (e.code === 'KeyM') {
+        if (playerStateRef.current.ownedMount) {
+          const newRiding = !playerStateRef.current.isRidingMount;
+          setPlayerState((prev) => ({
+            ...prev,
+            isRidingMount: newRiding,
+          }));
+          soundEngine.playMountSaddle();
+          if (newRiding) {
+            if (playerStateRef.current.ownedMount === 'burro') soundEngine.playBurroBray();
+            else soundEngine.playHorseWhinny();
+          }
+          if (onShowBanner) {
+            const mName = playerStateRef.current.mountName || (playerStateRef.current.ownedMount === 'burro' ? 'Pack Burro' : 'Mountain Pony');
+            onShowBanner(
+              newRiding
+                ? `Mounted ${mName}! Press [M] to dismount.`
+                : `Dismounted ${mName}. Mount will follow loyally.`
+            );
+          }
+        }
+      }
       if (e.code === 'KeyT') {
         if (undergroundLayersRef.current && undergroundLayersRef.current.currentLevel > 0) {
           executePlaceUndergroundTimberBent();
@@ -3221,6 +3255,41 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         return;
       }
 
+      // 3a-0. Companion Mount interaction when on foot
+      if (mountManagerRef.current && playerStateRef.current.ownedMount && !playerStateRef.current.isRidingMount) {
+        const distToMount = mountManagerRef.current.getDistanceToPlayer(playerPos.current);
+        if (distToMount < 3.8) {
+          const mountName = playerStateRef.current.mountName || (playerStateRef.current.ownedMount === 'burro' ? 'Pack Burro' : 'Mountain Pony');
+          const handleMountUp = () => {
+            setPlayerState((prev) => ({
+              ...prev,
+              isRidingMount: true,
+            }));
+            soundEngine.playMountSaddle();
+            if (playerStateRef.current.ownedMount === 'burro') soundEngine.playBurroBray();
+            else soundEngine.playHorseWhinny();
+            if (onShowBanner) onShowBanner(`Mounted ${mountName}! Press [M] to dismount.`);
+          };
+          if (executeAction) {
+            handleMountUp();
+          } else {
+            onPromptInteract(`Mount ${mountName} [M / E]`, handleMountUp);
+          }
+          return;
+        }
+      }
+
+      // 3a-1. Tortilla Flat Livery Stable & Corral (x: 14.8, z: -242.5)
+      const distToLivery = Math.hypot(px - 14.8, pz - (-242.5));
+      if (distToLivery < 10.0 && onOpenTortillaFlat) {
+        if (executeAction) {
+          onOpenTortillaFlat('livery');
+        } else {
+          onPromptInteract('Tortilla Flat Livery: Buy Burro or Mountain Pony [E]', () => onOpenTortillaFlat('livery'));
+        }
+        return;
+      }
+
       const distToSaloon = Math.hypot(px - 0, pz - (-250));
       if (distToSaloon < 28 && onOpenTortillaFlat) {
         if (executeAction) {
@@ -3597,7 +3666,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       let encumbranceFactor = 1.0;
       let allowSprint = true;
 
-      if (carried && carried.weightLbs) {
+      // Pack Burro perk: Faithful burro carries the heavy ore and rocks, negating encumbrance!
+      const ownsBurro = playerStateRef.current.ownedMount === 'burro';
+      const isRiding = Boolean(playerStateRef.current.isRidingMount && playerStateRef.current.ownedMount);
+      const isPony = playerStateRef.current.ownedMount === 'pony';
+
+      if (carried && carried.weightLbs && !ownsBurro) {
         // Carrying 50 lbs reduces walking speed by ~30%
         encumbranceFactor = Math.max(0.68, 1.0 - (carried.weightLbs / 160.0));
         // You cannot sprint while carrying rocks heavier than 25 lbs
@@ -3607,7 +3681,20 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
 
       const isSprinting = !isGameOverRef.current && allowSprint && (keys['ShiftLeft'] || keys['ShiftRight']);
-      const moveSpeed = (isSprinting ? 12.0 : 6.5) * encumbranceFactor * delta;
+      
+      // Speed calculation: Riding a Pony gives +75% speed! Riding a Burro gives +35% speed.
+      let baseWalkSpeed = 6.5;
+      let baseSprintSpeed = 12.0;
+      if (isRiding) {
+        if (isPony) {
+          baseWalkSpeed = 11.0;
+          baseSprintSpeed = 21.0; // Fast gallop!
+        } else if (ownsBurro) {
+          baseWalkSpeed = 8.5;
+          baseSprintSpeed = 15.0; // Steady trot!
+        }
+      }
+      const moveSpeed = (isSprinting ? baseSprintSpeed : baseWalkSpeed) * encumbranceFactor * delta;
 
       const forward = new THREE.Vector3(-Math.sin(playerYaw.current), 0, -Math.cos(playerYaw.current));
       const right = new THREE.Vector3(Math.cos(playerYaw.current), 0, -Math.sin(playerYaw.current));
@@ -3703,11 +3790,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
         // Footstep sounds & Surface Water Splash
         if (isGrounded.current) {
-          stepTimer.current += delta * (isSprinting ? 2.8 : 1.8);
+          stepTimer.current += delta * (isSprinting ? (isRiding ? 3.4 : 2.8) : (isRiding ? 2.2 : 1.8));
           if (stepTimer.current > 1.0) {
             stepTimer.current = 0;
             const inSurfaceWater = !isUnderground && hydrologyEngineRef.current?.queryWaterAtPosition(playerPos.current.x, playerPos.current.z).hasWater;
-            if (inSurfaceWater) {
+            if (isRiding) {
+              soundEngine.playHoofTrot();
+            } else if (inSurfaceWater) {
               soundEngine.playWaterSplash();
             } else {
               soundEngine.playFootstep();
@@ -3715,12 +3804,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         }
 
-        // Hydration drain - balanced rate so the player does not become dehydrated too quickly
+        // Hydration drain - balanced rate so the player does not become dehydrated too quickly (Riding saves stamina!)
         setPlayerState((prev) => {
           if (isGameOverRef.current) return prev;
           const isRaining = weather === 'storm' || weather === 'light_rain';
           const rainRelief = isRaining ? 0.2 : 1.0;
-          const drainRate = (isSprinting ? 0.35 : 0.12) * delta * rainRelief;
+          const ridingRelief = isRiding ? 0.45 : 1.0;
+          const drainRate = (isSprinting ? 0.35 : 0.12) * delta * rainRelief * ridingRelief;
           const nextHydration = Math.max(0, prev.hydration - drainRate);
           let nextHealth = prev.health;
 
@@ -4169,10 +4259,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
 
       // Sync character model position and rotation (Third Person)
+      const saddleHeightOffset = isRiding ? (playerStateRef.current.ownedMount === 'burro' ? 0.75 : 0.95) : 0;
       if (characterMeshRef.current) {
         characterMeshRef.current.position.set(
           playerPos.current.x,
-          currentGroundY,
+          currentGroundY + saddleHeightOffset,
           playerPos.current.z
         );
         characterMeshRef.current.rotation.y = playerYaw.current;
@@ -4183,7 +4274,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (playerLightRef.current) {
         playerLightRef.current.position.set(
           playerPos.current.x,
-          playerPos.current.y + 0.5,
+          playerPos.current.y + 0.5 + saddleHeightOffset,
           playerPos.current.z
         );
       }
@@ -4200,6 +4291,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         camera.lookAt(deathPos.current.x, deathPos.current.y + 0.5, deathPos.current.z);
       } else if (viewMode === 'first') {
         camera.position.copy(playerPos.current);
+        if (isRiding) {
+          camera.position.y += saddleHeightOffset;
+        }
 
         // Subtle, natural head bobbing only when moving while grounded
         if (isMoving && isGrounded.current) {
@@ -4298,8 +4392,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             camera.position.set(camX, camY, camZ);
             camera.lookAt(playerPos.current.x, playerPos.current.y + 0.25, playerPos.current.z);
           } else {
-            const distBehind = 4.2;
-            const camYOffset = 1.8;
+            const distBehind = isRiding ? 5.4 : 4.2;
+            const camYOffset = isRiding ? 2.4 : 1.8;
             const camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
             const camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
             const camGroundY = getTerrainHeight(camX, camZ);
@@ -4310,7 +4404,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             );
 
             camera.position.set(camX, camY, camZ);
-            camera.lookAt(playerPos.current.x, playerPos.current.y + 0.3, playerPos.current.z);
+            camera.lookAt(playerPos.current.x, playerPos.current.y + (isRiding ? 0.9 : 0.3), playerPos.current.z);
           }
         }
       }
@@ -4688,6 +4782,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         });
       }
 
+      // 5b-4. Companion Mount (Burro / Pony) animation & companion tracking
+      if (mountManagerRef.current && playerStateRef.current.ownedMount) {
+        mountManagerRef.current.update(
+          delta,
+          playerPos.current,
+          playerYaw.current,
+          isMoving,
+          isSprinting,
+          getTerrainHeight
+        );
+      }
+
       // 5c. Subterranean Mine Shaft & Granular Mini-Voxel Engine
       if (undergroundLayersRef.current) {
         undergroundLayersRef.current.update(delta, performance.now(), timeOfDay, weather);
@@ -4874,9 +4980,29 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (hydrologyEngineRef.current && typeof hydrologyEngineRef.current.dispose === 'function') {
         hydrologyEngineRef.current.dispose();
       }
+      if (mountManagerRef.current && typeof mountManagerRef.current.dispose === 'function') {
+        mountManagerRef.current.dispose();
+      }
       renderer.dispose();
     };
   }, [viewMode]);
+
+  // Sync mount manager when mount state changes
+  useEffect(() => {
+    if (mountManagerRef.current) {
+      mountManagerRef.current.setMount(playerState.ownedMount || null, playerState.mountName || '');
+      mountManagerRef.current.isRiding = Boolean(playerState.isRidingMount);
+      if (playerState.ownedMount && !playerState.isRidingMount) {
+        // If mount spawned/purchased far away, position near player
+        const dist = mountManagerRef.current.getDistanceToPlayer(playerPos.current);
+        if (dist > 25) {
+          const spawnPos = playerPos.current.clone().add(new THREE.Vector3(2.5, 0, 2.0));
+          spawnPos.y = getTerrainHeight(spawnPos.x, spawnPos.z);
+          mountManagerRef.current.mountGroup.position.copy(spawnPos);
+        }
+      }
+    }
+  }, [playerState.ownedMount, playerState.mountName, playerState.isRidingMount]);
 
   // Update Sun & Atmosphere when timeOfDay or weather changes
   useEffect(() => {
