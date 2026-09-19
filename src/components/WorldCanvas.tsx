@@ -50,6 +50,7 @@ import { multiplayer } from '../multiplayer/multiplayerService';
 import { isMobileDevice } from '../utils/device';
 import { DesertHydrologyEngine } from '../world/hydrology';
 import { resolveKinematicMovement } from '../physics/collisionEngine';
+import { RapierPhysicsManager } from '../physics/rapierEngine';
 import { MountainDustParticleSystem } from '../world/mountainDustParticles';
 import { friendshipService } from '../services/friendshipService';
 import { MountManager } from '../world/mountManager';
@@ -393,6 +394,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const voxelUniformsRef = useRef<VoxelShaderUniforms[]>([]);
   const voxelTimeRef = useRef<{ value: number }>({ value: 0 });
   const noiseTextureRef = useRef<THREE.Texture | null>(null);
+  const rapierPhysicsRef = useRef<RapierPhysicsManager | null>(null);
   const remoteProspectorsRef = useRef<Map<string, RemoteProspector>>(new Map());
   const tortillaFlatLightingRef = useRef<((timeOfDay: number, delta: number) => void) | null>(null);
   const timeOfDayRef = useRef(timeOfDay);
@@ -470,6 +472,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const lastMultiplayerSyncTime = useRef<number>(0);
   const interactionCheckTick = useRef<number>(0);
   const renderFrameCount = useRef<number>(0);
+  const wasUndergroundRef = useRef<boolean>(false);
 
   // Dynamic quality adjustment without rebuilding scene
   useEffect(() => {
@@ -568,10 +571,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     sceneRef.current = scene;
     scene.fog = new THREE.FogExp2(0xddaf88, 0.0035);
 
+    // Initialize Rapier3D Kinematic Physics Engine
+    RapierPhysicsManager.getInstance().then((rpm) => {
+      rapierPhysicsRef.current = rpm;
+    });
+
     // 2. Camera Setup
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
-    const camera = new THREE.PerspectiveCamera(65, width / height, 0.08, 800);
+    const camera = new THREE.PerspectiveCamera(65, width / height, 0.05, 800);
     cameraRef.current = camera;
 
     // 3. Renderer Setup (Hardware Accelerated WebGL2 Pipeline with Adaptive Mobile Performance)
@@ -3948,6 +3956,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         voxelTimeRef.current.value = now * 0.001;
       }
 
+      // Graphics Acceleration: Subterranean Culling of Surface Foliage & Flora Batches
+      const isUndergroundFrame = (undergroundLayersRef.current?.currentLevel || 0) > 0;
+      if (wasUndergroundRef.current !== isUndergroundFrame) {
+        wasUndergroundRef.current = isUndergroundFrame;
+        foliageManagerRef.current?.setVisible(!isUndergroundFrame);
+      }
+
       // 1. Player Physics & Locomotion (Crisp, Responsive, Ground-Snapped Controls)
       const keys = keysPressed.current;
       const carried = playerStateRef.current.carriedObject;
@@ -4049,23 +4064,50 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             ? tunnelCheck.floorY
             : getTerrainHeight(playerPos.current.x, playerPos.current.z);
 
-          const colRes = resolveKinematicMovement(
-            playerPos.current.x,
-            playerPos.current.z,
-            targetDx,
-            targetDz,
-            currentGroundY,
-            getTerrainHeight,
-            foliageManagerRef.current,
-            movableRockManagerRef.current,
-            mineBuildingRef.current,
-            !isGrounded.current
-          );
+          let movedX = playerPos.current.x;
+          let movedZ = playerPos.current.z;
+          let atBoundary = false;
 
-          playerPos.current.x = colRes.x;
-          playerPos.current.z = colRes.z;
+          // If Rapier3D is ready and player is on surface/canyons, use Rapier's kinematic character controller
+          if (
+            rapierPhysicsRef.current?.isReady() &&
+            !tunnelCheck?.inside &&
+            (Math.abs(targetDx) > 0.0001 || Math.abs(targetDz) > 0.0001)
+          ) {
+            const rapierRes = rapierPhysicsRef.current.computeMovement(
+              new THREE.Vector3(playerPos.current.x, currentGroundY, playerPos.current.z),
+              new THREE.Vector3(targetDx, 0, targetDz),
+              foliageManagerRef.current
+            );
+            movedX = rapierRes.position.x;
+            movedZ = rapierRes.position.z;
+            if (rapierRes.atBoundary) {
+              atBoundary = true;
+            }
+          } else {
+            const colRes = resolveKinematicMovement(
+              playerPos.current.x,
+              playerPos.current.z,
+              targetDx,
+              targetDz,
+              currentGroundY,
+              getTerrainHeight,
+              foliageManagerRef.current,
+              movableRockManagerRef.current,
+              mineBuildingRef.current,
+              !isGrounded.current
+            );
+            movedX = colRes.x;
+            movedZ = colRes.z;
+            if (colRes.isBlocked && colRes.blockedReason === 'frontier_boundary') {
+              atBoundary = true;
+            }
+          }
 
-          if (colRes.isBlocked && colRes.blockedReason === 'frontier_boundary') {
+          playerPos.current.x = movedX;
+          playerPos.current.z = movedZ;
+
+          if (atBoundary) {
             const now = Date.now();
             if (now - lastBoundaryNoticeRef.current > 8000) {
               lastBoundaryNoticeRef.current = now;
@@ -4700,19 +4742,47 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             camera.position.set(camX, camY, camZ);
             camera.lookAt(playerPos.current.x, playerPos.current.y + 0.25, playerPos.current.z);
           } else {
-            const distBehind = isRiding ? 5.4 : 4.2;
+            const maxDistBehind = isRiding ? 5.4 : 4.2;
             const camYOffset = isRiding ? 2.4 : 1.8;
-            const camX = playerPos.current.x + Math.sin(playerYaw.current) * distBehind;
-            const camZ = playerPos.current.z + Math.cos(playerYaw.current) * distBehind;
+            const lookTargetY = playerPos.current.y + (isRiding ? 0.9 : 0.3);
+            const headY = playerPos.current.y + (isRiding ? 1.6 : 1.2);
+
+            // Compute camera vector behind character
+            const dirBehindX = Math.sin(playerYaw.current);
+            const dirBehindZ = Math.cos(playerYaw.current);
+            const idealPitchY = Math.sin(playerPitch.current) * 2.0;
+
+            // Spring-arm terrain collision check:
+            // Probe progressive intervals from character out to maxDistBehind.
+            // If the line of sight encounters steep terrain, canyon walls, or cliffs,
+            // pull the camera in closer so it stays safely within the canyon's open airspace.
+            let effectiveDist = maxDistBehind;
+            const numSteps = 5;
+            for (let step = 1; step <= numSteps; step++) {
+              const testFrac = step / numSteps;
+              const testDist = maxDistBehind * testFrac;
+              const testX = playerPos.current.x + dirBehindX * testDist;
+              const testZ = playerPos.current.z + dirBehindZ * testDist;
+              const testGroundY = getTerrainHeight(testX, testZ);
+              const testCamY = headY + (camYOffset - 1.2) * testFrac + idealPitchY * testFrac;
+
+              if (testGroundY + 0.45 > testCamY) {
+                effectiveDist = Math.max(1.1, testDist - 0.45);
+                break;
+              }
+            }
+
+            const camX = playerPos.current.x + dirBehindX * effectiveDist;
+            const camZ = playerPos.current.z + dirBehindZ * effectiveDist;
             const camGroundY = getTerrainHeight(camX, camZ);
             const camY = Math.max(
-              camGroundY + 0.65,
-              currentGroundY + 1.2,
-              playerPos.current.y + camYOffset + Math.sin(playerPitch.current) * 2.0
+              camGroundY + 0.45,
+              currentGroundY + 0.8,
+              playerPos.current.y + camYOffset + idealPitchY
             );
 
             camera.position.set(camX, camY, camZ);
-            camera.lookAt(playerPos.current.x, playerPos.current.y + (isRiding ? 0.9 : 0.3), playerPos.current.z);
+            camera.lookAt(playerPos.current.x, lookTargetY, playerPos.current.z);
           }
         }
       }
@@ -5252,6 +5322,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (endlessTerrainRef.current) {
         endlessTerrainRef.current.update(playerPos.current, delta);
       }
+      if (foliageManagerRef.current) {
+        foliageManagerRef.current.updateLOD(playerPos.current);
+      }
 
       // Update Tortilla Flat historic town night lighting (torches flicker, string lights, lanterns, window radiance)
       if (tortillaFlatLightingRef.current) {
@@ -5368,6 +5441,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       if (foliageManagerRef.current && typeof foliageManagerRef.current.dispose === 'function') {
         foliageManagerRef.current.dispose();
+      }
+      if (rapierPhysicsRef.current) {
+        rapierPhysicsRef.current.dispose();
+        rapierPhysicsRef.current = null;
       }
       if (endlessTerrainRef.current) {
         endlessTerrainRef.current.dispose();

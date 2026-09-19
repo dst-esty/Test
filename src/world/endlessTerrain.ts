@@ -3,6 +3,7 @@ import {
   getTerrainHeight,
   getBaseTerrainHeight,
   DugHole,
+  activeDugHoles,
   createRealisticTerrainMaterial,
   generateTerrainNoiseTexture,
   setTerrainHoleListener,
@@ -30,10 +31,28 @@ function pseudoRandom(seed: number): number {
   return x - Math.floor(x);
 }
 
+export type ChunkLOD = 0 | 1 | 2;
+
+export function getSegmentsForLOD(lod: ChunkLOD): number {
+  switch (lod) {
+    case 0: return 28; // High resolution: 29x29 = 841 vertices (within 140m)
+    case 1: return 14; // Medium resolution: 15x15 = 225 vertices (140m - 280m, 73% reduction)
+    case 2: return 7;  // Low resolution: 8x8 = 64 vertices (> 280m to horizon, 92% reduction)
+  }
+}
+
+export function calculateChunkLOD(cx: number, cz: number, centerCx: number, centerCz: number): ChunkLOD {
+  const dist = Math.max(Math.abs(cx - centerCx), Math.abs(cz - centerCz));
+  if (dist <= 1) return 0;
+  if (dist === 2) return 1;
+  return 2;
+}
+
 export interface TerrainChunk {
   cx: number;
   cz: number;
   key: string;
+  lod: ChunkLOD;
   mesh: THREE.Mesh;
   scatterGroup?: THREE.Group;
   colliders?: WorldRockCollider[];
@@ -49,6 +68,8 @@ export class EndlessTerrainManager {
   private currentCenterCx: number = 999999;
   private currentCenterCz: number = 999999;
   private pendingChunkKeys: Array<{ cx: number; cz: number; distSq: number }> = [];
+  private pendingLodUpdates: Array<{ key: string; targetLod: ChunkLOD }> = [];
+  private lastScatterLodTime: number = 0;
   private lastUpdateTime: number = 0;
 
   // Shared geometries and materials for endless wilderness scatter
@@ -181,6 +202,7 @@ export class EndlessTerrainManager {
       this.currentCenterCx = cx;
       this.currentCenterCz = cz;
       this.recomputeNeededChunks(cx, cz);
+      this.recomputeChunkLODs(cx, cz);
     }
 
     // Process queued chunk creations (1 per frame to guarantee 60 FPS without frame micro-stutter)
@@ -194,10 +216,68 @@ export class EndlessTerrainManager {
       }
     }
 
+    // Process queued LOD upgrades/downgrades (1 per frame when no new chunk is created)
+    if (chunksCreated === 0 && this.pendingLodUpdates.length > 0) {
+      const update = this.pendingLodUpdates.shift()!;
+      const chunk = this.activeChunks.get(update.key);
+      if (chunk && chunk.lod !== update.targetLod) {
+        const oldGeo = chunk.mesh.geometry;
+        const newGeo = this.buildChunkGeometry(chunk.cx, chunk.cz, update.targetLod);
+        chunk.mesh.geometry = newGeo;
+        chunk.lod = update.targetLod;
+        oldGeo.dispose();
+      }
+    }
+
+    // Flora scatter distance LOD (throttled to ~5 Hz)
+    if (now - this.lastScatterLodTime > 200) {
+      this.lastScatterLodTime = now;
+      this.updateScatterLOD(playerPos);
+    }
+
     // Periodically prune distant chunks (every ~2 seconds)
     if (now - this.lastUpdateTime > 2000) {
       this.lastUpdateTime = now;
       this.pruneDistantChunks(cx, cz);
+    }
+  }
+
+  private recomputeChunkLODs(centerCx: number, centerCz: number): void {
+    this.pendingLodUpdates = [];
+    this.activeChunks.forEach((chunk) => {
+      const neededLod = calculateChunkLOD(chunk.cx, chunk.cz, centerCx, centerCz);
+      if (chunk.lod !== neededLod) {
+        this.pendingLodUpdates.push({ key: chunk.key, targetLod: neededLod });
+      }
+    });
+
+    // Sort so closest LOD upgrades are processed first
+    this.pendingLodUpdates.sort((a, b) => {
+      const ca = this.activeChunks.get(a.key);
+      const cb = this.activeChunks.get(b.key);
+      if (!ca || !cb) return 0;
+      const distA = Math.hypot(ca.cx - centerCx, ca.cz - centerCz);
+      const distB = Math.hypot(cb.cx - centerCx, cb.cz - centerCz);
+      return distA - distB;
+    });
+  }
+
+  private updateScatterLOD(playerPos: THREE.Vector3): void {
+    const px = playerPos.x;
+    const pz = playerPos.z;
+    this.activeChunks.forEach((chunk) => {
+      if (chunk.scatterGroup) {
+        const chunkWorldX = chunk.cx * CHUNK_SIZE;
+        const chunkWorldZ = chunk.cz * CHUNK_SIZE;
+        const dist = Math.hypot(chunkWorldX - px, chunkWorldZ - pz);
+        // Flora scatter LOD: cull scatter beyond 220m
+        chunk.scatterGroup.visible = dist <= 220;
+      }
+    });
+
+    // Update macro-quadrant foliage LOD and detail tiers
+    if (this.foliageManager) {
+      this.foliageManager.updateLOD(playerPos);
     }
   }
 
@@ -226,19 +306,21 @@ export class EndlessTerrainManager {
     this.pendingChunkKeys = candidates;
   }
 
-  private createChunk(cx: number, cz: number): TerrainChunk {
-    const key = `${cx},${cz}`;
-    const worldOriginX = cx * CHUNK_SIZE;
-    const worldOriginZ = cz * CHUNK_SIZE;
-
+  /**
+   * Generates analytical chunk terrain geometry conforming to LOD vertex resolution.
+   */
+  public buildChunkGeometry(cx: number, cz: number, lod: ChunkLOD): THREE.BufferGeometry {
+    const segments = getSegmentsForLOD(lod);
     const geometry = new THREE.PlaneGeometry(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      CHUNK_SEGMENTS,
-      CHUNK_SEGMENTS
+      segments,
+      segments
     );
     geometry.rotateX(-Math.PI / 2);
 
+    const worldOriginX = cx * CHUNK_SIZE;
+    const worldOriginZ = cz * CHUNK_SIZE;
     const pos = geometry.attributes.position;
     const count = pos.count;
     const colors = new Float32Array(count * 3);
@@ -320,6 +402,18 @@ export class EndlessTerrainManager {
         b = 0.50 + sandRipple * 0.6;
       }
 
+      // Check if hole excavation pit darkens this vertex (persists across LOD transitions)
+      for (let h = 0; h < activeDugHoles.length; h++) {
+        const hole = activeDugHoles[h];
+        const distToHole = Math.hypot(worldX - hole.x, worldZ - hole.z);
+        if (distToHole <= (hole.radius || 2.0) * 1.8) {
+          r = 0.45;
+          g = 0.32;
+          b = 0.22;
+          break;
+        }
+      }
+
       colors[i * 3] = Math.max(0.1, Math.min(1.0, r));
       colors[i * 3 + 1] = Math.max(0.1, Math.min(1.0, g));
       colors[i * 3 + 2] = Math.max(0.1, Math.min(1.0, b));
@@ -327,6 +421,23 @@ export class EndlessTerrainManager {
 
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+
+    // High-precision bounding computation for accurate Frustum Culling
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+
+    return geometry;
+  }
+
+  private createChunk(cx: number, cz: number, initialLod?: ChunkLOD): TerrainChunk {
+    const key = `${cx},${cz}`;
+    const worldOriginX = cx * CHUNK_SIZE;
+    const worldOriginZ = cz * CHUNK_SIZE;
+    const lod = initialLod !== undefined
+      ? initialLod
+      : calculateChunkLOD(cx, cz, this.currentCenterCx, this.currentCenterCz);
+
+    const geometry = this.buildChunkGeometry(cx, cz, lod);
 
     const mesh = new THREE.Mesh(geometry, this.sharedMaterial);
     mesh.position.set(worldOriginX, 0, worldOriginZ);
@@ -352,6 +463,7 @@ export class EndlessTerrainManager {
       cx,
       cz,
       key,
+      lod,
       mesh,
       scatterGroup,
       colliders: chunkColliders,

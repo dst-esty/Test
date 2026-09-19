@@ -167,9 +167,18 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   const pistolCanyonX = -46 + Math.sin(z * 0.026 - 1.1) * 20 + Math.cos(z * 0.012) * 9;
   const distToPistolCanyon = Math.abs(x - pistolCanyonX);
   let pistolCanyonCarve = 0;
-  if (distToPistolCanyon < 25 && z < -60 && z > -190 && x > -92 && x < 5) {
-    const factor = 1.0 - distToPistolCanyon / 25;
-    pistolCanyonCarve = -Math.pow(factor, 0.52) * 15.5;
+  if (distToPistolCanyon < 25 && z <= -58 && z >= -192) {
+    // Smooth cross-sectional profile with zero derivative at canyon rim (dist = 25) and flat wash floor in center
+    const u = distToPistolCanyon / 25;
+    const crossProfile = 0.5 * (1.0 + Math.cos(u * Math.PI));
+
+    // Smooth longitudinal fade at both ends (head of canyon at -58 and mouth at -192)
+    const headTaper = z > -74 ? ((-58 - z) / 16) : 1.0;
+    const mouthTaper = z < -176 ? ((z - (-192)) / 16) : 1.0;
+    const rawFade = Math.max(0, Math.min(headTaper, mouthTaper));
+    const zFade = rawFade * rawFade * (3.0 - 2.0 * rawFade);
+
+    pistolCanyonCarve = -crossProfile * zFade * 15.5;
   }
 
   // Combined Canyon Carving
@@ -2093,7 +2102,7 @@ export function createTerrainMesh(): THREE.Mesh {
       r = 0.28 + basaltNoise + strata;
       g = 0.23 + basaltNoise * 0.8 + strata * 0.5;
       b = 0.20 + basaltNoise * 0.6 + strata * 0.3;
-    } else if (distToPistol < 24 && vz < -60 && vz > -188) {
+    } else if (distToPistol < 24 && vz <= -58 && vz >= -192) {
       // Pistol Canyon: sheer volcanic breccia walls and sun-bleached alluvial wash gravel
       if (slope > 0.65) {
         // Red-purple volcanic breccia canyon walls

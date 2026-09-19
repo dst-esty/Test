@@ -40,6 +40,8 @@ export const LANDMARK_OBSTACLES: LandmarkObstacle[] = [
   { name: 'Concord Stagecoach', x: 0, z: -252, radius: 2.0, height: 3.2 },
   { name: 'Salt River Project Freight Depot', x: 13.0, z: -298, radius: 4.8, height: 7.0 },
   { name: 'Salt River Timber Pier & Boat Landing', x: -2.0, z: -304, radius: 3.8, height: 4.0 },
+  // 6. Pistol Canyon Sun-Bleached Granite Table Boulder & Tinaja
+  { name: 'Pistol Canyon Table Boulder', x: -46, z: -130, radius: 2.2, height: 2.5 },
 ];
 
 export const PLAYER_COLLISION_RADIUS = 0.42;
@@ -144,33 +146,56 @@ export function testPositionCollision(
   // If player is inside an excavated mountain drift adit, they are walking through the hollowed bedrock!
   const candGroundY = getTerrainHeight(candX, candZ);
   const dh = candGroundY - currentGroundY;
+  const stepDist = Math.hypot(candX - startX, candZ - startZ);
 
-  // When moving uphill:
-  if (dh > 0 && !isNavigatingTunnel) {
+  if (!isNavigatingTunnel && stepDist > 0.0005) {
+    const dirX = (candX - startX) / stepDist;
+    const dirZ = (candZ - startZ) / stepDist;
+
     // A sudden vertical elevation step higher than knee height cannot be walked through
     if (dh > MAX_STEP_HEIGHT && !isAirborne) {
-      const stepDist = Math.hypot(candX - startX, candZ - startZ);
-      const normalX = stepDist > 0.0001 ? (startX - candX) / stepDist : 0;
-      const normalZ = stepDist > 0.0001 ? (startZ - candZ) / stepDist : 0;
       return {
         blocked: true,
         reason: 'cliff_step',
-        normal: { x: normalX, z: normalZ },
+        normal: { x: -dirX, z: -dirZ },
       };
     }
 
-    // A slope steeper than MAX_WALKABLE_SLOPE (~49 degrees) is an impassable hill/mountain
-    // Only evaluate slope for vertical rises exceeding natural foot/gravel clearance (> 0.28m)
-    const stepDist = Math.hypot(candX - startX, candZ - startZ);
-    if (stepDist > 0.001 && dh > 0.28) {
-      const slope = dh / stepDist;
-      if (slope > MAX_WALKABLE_SLOPE) {
+    // Continuous slope evaluation:
+    // If dh > 0.02m uphill, check the frame slope
+    if (dh > 0.02) {
+      const frameSlope = dh / stepDist;
+      if (frameSlope > MAX_WALKABLE_SLOPE) {
         return {
           blocked: true,
           reason: 'steep_slope',
-          normal: { x: (startX - candX) / stepDist, z: (startZ - candZ) / stepDist },
+          normal: { x: -dirX, z: -dirZ },
         };
       }
+    }
+
+    // Forward capsule probe:
+    // Probes the terrain slope at the leading edge of the player's physical collision capsule (0.38m ahead)
+    const probeX = candX + dirX * 0.38;
+    const probeZ = candZ + dirZ * 0.38;
+    const probeGroundY = getTerrainHeight(probeX, probeZ);
+    const probeRise = probeGroundY - candGroundY;
+    // If the ground 0.38m ahead rises steeply (> MAX_WALKABLE_SLOPE * 0.38 = ~0.47m)
+    // or rises higher than knee height (0.50m), the capsule is colliding with a steep canyon wall or rock face!
+    if (probeRise > 0.46 && !isAirborne) {
+      const eps = 0.4;
+      const hL = getTerrainHeight(probeX - eps, probeZ);
+      const hR = getTerrainHeight(probeX + eps, probeZ);
+      const hD = getTerrainHeight(probeX, probeZ - eps);
+      const hU = getTerrainHeight(probeX, probeZ + eps);
+      const gradX = hR - hL;
+      const gradZ = hU - hD;
+      const gradLen = Math.hypot(gradX, gradZ) || 1.0;
+      return {
+        blocked: true,
+        reason: 'steep_cliff_wall',
+        normal: { x: -gradX / gradLen, z: -gradZ / gradLen },
+      };
     }
   }
 

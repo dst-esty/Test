@@ -944,20 +944,50 @@ export function createRealisticTreeCanopyGeometry(isCottonwood: boolean): THREE.
 
 const _scratchFoliageBoreDirs = Array.from({ length: 16 }, () => new THREE.Vector3());
 
+export interface FloraChunk {
+  name: string;
+  cx: number;
+  cz: number;
+  center: THREE.Vector3;
+  radius: number;
+  boundingSphere: THREE.Sphere;
+  boundingBox: THREE.Box3;
+  group: THREE.Group;
+  saguaroMeshes: THREE.InstancedMesh[];
+  barrelMesh?: THREE.InstancedMesh;
+  boulderMeshes: THREE.InstancedMesh[];
+  scrubMesh?: THREE.InstancedMesh;
+  grassMesh?: THREE.InstancedMesh;
+  pricklyMesh?: THREE.InstancedMesh;
+  chollaMesh?: THREE.InstancedMesh;
+  ocotilloMesh?: THREE.InstancedMesh;
+  agaveMesh?: THREE.InstancedMesh;
+  outcroppingMeshes: THREE.InstancedMesh[];
+}
+
 export class DesertFoliageManager {
   public goldDeposits: GoldDeposit[] = [];
   public springTrees: HarvestableTree[] = [];
   public interactiveMeshes: THREE.Object3D[] = [];
+  public floraChunks: FloraChunk[] = [];
   public saguaroGroup: THREE.Group = new THREE.Group();
+  public saguaroMeshes: THREE.InstancedMesh[] = [];
   public barrelMesh!: THREE.InstancedMesh;
+  public allBarrelMeshes: THREE.InstancedMesh[] = [];
   public boulderMesh!: THREE.InstancedMesh;
   public boulderMeshes: THREE.InstancedMesh[] = [];
   public scrubMesh!: THREE.InstancedMesh;
+  public allScrubMeshes: THREE.InstancedMesh[] = [];
   public grassMesh!: THREE.InstancedMesh;
+  public allGrassMeshes: THREE.InstancedMesh[] = [];
   public pricklyMesh!: THREE.InstancedMesh;
+  public allPricklyMeshes: THREE.InstancedMesh[] = [];
   public chollaMesh!: THREE.InstancedMesh;
+  public allChollaMeshes: THREE.InstancedMesh[] = [];
   public ocotilloMesh!: THREE.InstancedMesh;
+  public allOcotilloMeshes: THREE.InstancedMesh[] = [];
   public agaveMesh!: THREE.InstancedMesh;
+  public allAgaveMeshes: THREE.InstancedMesh[] = [];
   public outcroppingMesh!: THREE.InstancedMesh;
   public outcroppingMeshes: THREE.InstancedMesh[] = [];
   public boulderHitsMap: Map<string, number> = new Map();
@@ -1015,11 +1045,105 @@ export class DesertFoliageManager {
     updateTerrainHoleCutouts(surfaceHoles);
   }
 
+  private lastLodCheckTime = 0;
+  /**
+   * Distance-based Level of Detail (LOD) & detail-tier culling for macro-quadrant flora chunks.
+   * Grass is culled beyond 130m, low scrub & prickly pear beyond 170m, and cholla/agave/barrel beyond 230m.
+   */
+  public updateLOD(playerPos: THREE.Vector3): void {
+    const now = performance.now();
+    if (now - this.lastLodCheckTime < 150) return; // ~6.6 Hz throttle
+    this.lastLodCheckTime = now;
+
+    for (let q = 0; q < this.floraChunks.length; q++) {
+      const chunk = this.floraChunks[q];
+      if (!chunk.group.visible) continue;
+      // Distance from player to the closest point of this flora chunk bounding box
+      const dist = chunk.boundingBox.distanceToPoint(playerPos);
+
+      // Detail tier 1 (bunchgrass): culled beyond 75m from chunk boundary
+      if (chunk.grassMesh) {
+        chunk.grassMesh.visible = dist <= 75;
+      }
+      // Detail tier 2 (scrub & prickly pear): culled beyond 125m from chunk boundary
+      if (chunk.scrubMesh) {
+        chunk.scrubMesh.visible = dist <= 125;
+      }
+      if (chunk.pricklyMesh) {
+        chunk.pricklyMesh.visible = dist <= 125;
+      }
+      // Detail tier 3 (cholla, agave, barrel): culled beyond 180m from chunk boundary
+      if (chunk.chollaMesh) {
+        chunk.chollaMesh.visible = dist <= 180;
+      }
+      if (chunk.agaveMesh) {
+        chunk.agaveMesh.visible = dist <= 180;
+      }
+      if (chunk.barrelMesh) {
+        chunk.barrelMesh.visible = dist <= 180;
+      }
+      // Monumental saguaros, boulders, and outcroppings remain visible across field of view
+    }
+  }
+
   private init() {
     const dummy = new THREE.Object3D();
 
     // ==========================================
-    // 1. Saguaro Cacti Generation
+    // 0. Macro-Quadrant Flora Chunks (Frustum Culling & LOD)
+    // ==========================================
+    const QUADRANTS: Array<{ name: string; cx: number; cz: number }> = [
+      { name: 'NW', cx: -95, cz: -95 },
+      { name: 'NE', cx: 95, cz: -95 },
+      { name: 'SW', cx: -95, cz: 95 },
+      { name: 'SE', cx: 95, cz: 95 },
+    ];
+
+    this.floraChunks = QUADRANTS.map((q) => {
+      const group = new THREE.Group();
+      group.name = `flora_chunk_${q.name}`;
+      this.scene.add(group);
+      const center = new THREE.Vector3(q.cx, 18, q.cz);
+      const radius = 185;
+      const boundingSphere = new THREE.Sphere(center, radius);
+      const boundingBox = new THREE.Box3(
+        new THREE.Vector3(q.cx < 0 ? -240 : -15, -5, q.cz < 0 ? -240 : -15),
+        new THREE.Vector3(q.cx < 0 ? 15 : 240, 68, q.cz < 0 ? 15 : 240)
+      );
+      return {
+        name: q.name,
+        cx: q.cx,
+        cz: q.cz,
+        center,
+        radius,
+        boundingSphere,
+        boundingBox,
+        group,
+        saguaroMeshes: [],
+        boulderMeshes: [],
+        outcroppingMeshes: [],
+      };
+    });
+
+    const getQIdx = (x: number, z: number): number => {
+      if (x < 0) return z < 0 ? 0 : 2;
+      return z < 0 ? 1 : 3;
+    };
+
+    this.saguaroMeshes = [];
+    this.boulderMeshes = [];
+    this.outcroppingMeshes = [];
+    this.allBarrelMeshes = [];
+    this.allScrubMeshes = [];
+    this.allGrassMeshes = [];
+    this.allPricklyMeshes = [];
+    this.allChollaMeshes = [];
+    this.allOcotilloMeshes = [];
+    this.allAgaveMeshes = [];
+    this.rockColliders = [];
+
+    // ==========================================
+    // 1. Saguaro Cacti Generation (Instanced Mesh Merging by Quadrant)
     // ==========================================
     const saguaroCount = 450;
     const saguaroMat = new THREE.MeshStandardMaterial({
@@ -1034,6 +1158,45 @@ export class DesertFoliageManager {
     const armHorizontalGeo = createFlutedCylinderGeometry(0.24, 0.24, 1.4, 18, 12, 0.06, false);
     armHorizontalGeo.rotateZ(Math.PI / 2);
 
+    // Build 4 merged geometry archetypes for zero-draw-call saguaro rendering
+    const geoTrunkOnly = trunkGeo.clone();
+
+    const armHLeft = armHorizontalGeo.clone();
+    armHLeft.translate(-0.9, 0.6, 0);
+    const armVLeft = armVerticalGeo.clone();
+    armVLeft.translate(-1.5, 1.8, 0);
+
+    const armHRight = armHorizontalGeo.clone();
+    armHRight.translate(0.9, 1.2, 0);
+    const armVRight = armVerticalGeo.clone();
+    armVRight.translate(1.5, 2.3, 0);
+
+    const geoLeftArm = safeMergeGeometries([trunkGeo.clone(), armHLeft.clone(), armVLeft.clone()]);
+    const geoRightArm = safeMergeGeometries([trunkGeo.clone(), armHRight.clone(), armVRight.clone()]);
+    const geoBothArms = safeMergeGeometries([
+      trunkGeo.clone(),
+      armHLeft.clone(),
+      armVLeft.clone(),
+      armHRight.clone(),
+      armVRight.clone(),
+    ]);
+
+    const archGeos = [geoTrunkOnly, geoLeftArm, geoRightArm, geoBothArms];
+
+    interface SaguaroSpawnItem {
+      x: number;
+      y: number;
+      z: number;
+      scale: number;
+      rotY: number;
+    }
+    const saguaroItemsByArchQuad: SaguaroSpawnItem[][][] = [
+      [[], [], [], []],
+      [[], [], [], []],
+      [[], [], [], []],
+      [[], [], [], []],
+    ];
+
     for (let i = 0; i < saguaroCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const dist = 15 + Math.random() * 280;
@@ -1041,7 +1204,6 @@ export class DesertFoliageManager {
       const z = Math.sin(angle) * dist;
       const y = getTerrainHeight(x, z);
 
-      // Skip steep high summits, sheer canyon cliffs, or right on top of trailhead & spawn camp
       const slope = Math.hypot(
         getTerrainHeight(x + 1.2, z) - getTerrainHeight(x - 1.2, z),
         getTerrainHeight(x, z + 1.2) - getTerrainHeight(x, z - 1.2)
@@ -1049,63 +1211,67 @@ export class DesertFoliageManager {
       if (y > 45 || slope > 0.75 || isNearPeraltaCamp(x, z, 18)) continue;
 
       const scale = 0.7 + Math.random() * 0.8;
-      const singleCactus = new THREE.Group();
-      singleCactus.position.set(x, y + 3 * scale - 0.2, z);
-      singleCactus.scale.set(scale, scale, scale);
-
-      const trunk = new THREE.Mesh(trunkGeo, saguaroMat);
-      trunk.castShadow = true;
-      trunk.receiveShadow = true;
-      singleCactus.add(trunk);
-
       const hasLeftArm = Math.random() > 0.3;
       const hasRightArm = Math.random() > 0.4;
+      const archType = (hasLeftArm && hasRightArm) ? 3 : hasLeftArm ? 1 : hasRightArm ? 2 : 0;
+      const rotY = Math.random() * Math.PI * 2;
 
-      if (hasLeftArm) {
-        const armH = new THREE.Mesh(armHorizontalGeo, saguaroMat);
-        armH.position.set(-0.9, 0.6, 0);
-        armH.castShadow = false;
-        singleCactus.add(armH);
-
-        const armV = new THREE.Mesh(armVerticalGeo, saguaroMat);
-        armV.position.set(-1.5, 1.8, 0);
-        armV.castShadow = false;
-        singleCactus.add(armV);
-      }
-
-      if (hasRightArm) {
-        const armH = new THREE.Mesh(armHorizontalGeo, saguaroMat);
-        armH.position.set(0.9, 1.2, 0);
-        armH.castShadow = false;
-        singleCactus.add(armH);
-
-        const armV = new THREE.Mesh(armVerticalGeo, saguaroMat);
-        armV.position.set(1.5, 2.3, 0);
-        armV.castShadow = false;
-        singleCactus.add(armV);
-      }
-
-      singleCactus.rotation.y = Math.random() * Math.PI * 2;
-      this.saguaroGroup.add(singleCactus);
-
-      // Register solid physical trunk collider for large saguaro cacti
-      if (scale >= 0.75) {
-        this.rockColliders.push({
-          id: `saguaro_${i}`,
-          x,
-          y,
-          z,
-          radius: 0.45 * scale,
-          height: 5.5 * scale,
-          type: 'cactus',
-          active: true,
-        });
-      }
+      saguaroItemsByArchQuad[getQIdx(x, z)][archType].push({ x, y, z, scale, rotY });
     }
+
     this.scene.add(this.saguaroGroup);
 
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      for (let archIdx = 0; archIdx < 4; archIdx++) {
+        const items = saguaroItemsByArchQuad[q][archIdx];
+        const count = Math.max(1, items.length);
+        const meshGeo = archGeos[archIdx].clone();
+        meshGeo.boundingSphere = chunk.boundingSphere.clone();
+        meshGeo.boundingBox = chunk.boundingBox.clone();
+        const mesh = new THREE.InstancedMesh(meshGeo, saguaroMat, count);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = true;
+
+        for (let j = 0; j < items.length; j++) {
+          const item = items[j];
+          dummy.position.set(item.x, item.y + 3 * item.scale - 0.2, item.z);
+          dummy.scale.set(item.scale, item.scale, item.scale);
+          dummy.rotation.set(0, item.rotY, 0);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(j, dummy.matrix);
+
+          if (item.scale >= 0.75) {
+            this.rockColliders.push({
+              id: `saguaro_${q}_${archIdx}_${j}`,
+              x: item.x,
+              y: item.y,
+              z: item.z,
+              radius: 0.45 * item.scale,
+              height: 5.5 * item.scale,
+              type: 'cactus',
+              meshIdx: this.saguaroMeshes.length,
+              instanceId: j,
+              active: true,
+            });
+          }
+        }
+
+        if (items.length === 0) {
+          mesh.setMatrixAt(0, this.zeroMatrix);
+        }
+
+        mesh.instanceMatrix.needsUpdate = true;
+        chunk.group.add(mesh);
+        chunk.saguaroMeshes.push(mesh);
+        this.saguaroMeshes.push(mesh);
+        this.saguaroGroup.add(mesh);
+      }
+    }
+
     // ==========================================
-    // 2. Barrel Cacti & Prickly Pears (Instanced)
+    // 2. Barrel Cacti & Prickly Pears (Instanced by Quadrant)
     // ==========================================
     const barrelCount = 280;
     const barrelGeo = createRealisticBarrelCactusGeometry();
@@ -1113,11 +1279,18 @@ export class DesertFoliageManager {
       color: 0x3d6632,
       roughness: 0.82,
     });
-    this.barrelMesh = new THREE.InstancedMesh(barrelGeo, barrelMat, barrelCount);
-    this.barrelMesh.castShadow = true;
-    this.barrelMesh.frustumCulled = false;
 
-    let bIdx = 0;
+    interface BarrelSpawnItem {
+      rx: number;
+      ry: number;
+      rz: number;
+      bScale: number;
+      rotX: number;
+      rotY: number;
+      rotZ: number;
+    }
+    const barrelByQuad: BarrelSpawnItem[][] = [[], [], [], []];
+
     for (let i = 0; i < barrelCount; i++) {
       const rx = (Math.random() - 0.5) * 360;
       const rz = (Math.random() - 0.5) * 360;
@@ -1125,33 +1298,57 @@ export class DesertFoliageManager {
       if (ry > 50 || isNearPeraltaCamp(rx, rz, 16)) continue;
 
       const bScale = 0.5 + Math.random() * 0.7;
-      dummy.position.set(rx, ry + 0.45 * bScale, rz);
-      dummy.scale.set(bScale, bScale, bScale);
-      dummy.rotation.set(Math.random() * 0.1, Math.random() * Math.PI * 2, Math.random() * 0.1);
-      dummy.updateMatrix();
-      this.barrelMesh.setMatrixAt(bIdx++, dummy.matrix);
+      barrelByQuad[getQIdx(rx, rz)].push({
+        rx,
+        ry: ry + 0.45 * bScale,
+        rz,
+        bScale,
+        rotX: Math.random() * 0.1,
+        rotY: Math.random() * Math.PI * 2,
+        rotZ: Math.random() * 0.1,
+      });
     }
-    this.barrelMesh.count = bIdx;
-    this.barrelMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.barrelMesh);
+
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      const items = barrelByQuad[q];
+      const count = Math.max(1, items.length);
+      const bGeo = barrelGeo.clone();
+      bGeo.boundingSphere = chunk.boundingSphere.clone();
+      bGeo.boundingBox = chunk.boundingBox.clone();
+      const mesh = new THREE.InstancedMesh(bGeo, barrelMat, count);
+      mesh.castShadow = true;
+      mesh.frustumCulled = true;
+
+      for (let j = 0; j < items.length; j++) {
+        const it = items[j];
+        dummy.position.set(it.rx, it.ry, it.rz);
+        dummy.scale.set(it.bScale, it.bScale, it.bScale);
+        dummy.rotation.set(it.rotX, it.rotY, it.rotZ);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(j, dummy.matrix);
+      }
+
+      if (items.length === 0) {
+        mesh.setMatrixAt(0, this.zeroMatrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      chunk.group.add(mesh);
+      chunk.barrelMesh = mesh;
+      this.allBarrelMeshes.push(mesh);
+    }
+    this.barrelMesh = this.allBarrelMeshes[0];
 
     // ==========================================
-    // 3. Desert Boulders, Talus Scree & Flat Sandstone Slabs (Instanced with Mineral Color Variation)
+    // 3. Desert Boulders, Talus Scree & Flat Sandstone Slabs (Instanced by Quadrant)
     // ==========================================
-    // Replace uniform round red balls with 3 authentic geological rock archetypes:
-    // A. Angular Chiseled Talus Blocks (fractured basalt/dacite with sharp cleavage planes)
-    // B. Flat Tabular Sandstone Slabs (horizontal flagstones layered in washes and slopes)
-    // C. Weathered Granite Corestones (pitted, oblong whaleback corestones)
     const rockArchetypes = [
       { geo: createAngularRockGeometry(), count: 180, flatShading: true, baseScale: 1.1 },
       { geo: createSlabRockGeometry(), count: 140, flatShading: true, baseScale: 1.2 },
       { geo: createWeatheredCorestoneGeometry(), count: 110, flatShading: false, baseScale: 1.15 },
     ];
 
-    this.boulderMeshes = [];
-
-    for (let archIdx = 0; archIdx < rockArchetypes.length; archIdx++) {
-      const arch = rockArchetypes[archIdx];
+    const boulderMaterials = rockArchetypes.map((arch, archIdx) => {
       const mat = new THREE.MeshStandardMaterial({
         roughness: 0.94,
         metalness: 0.08,
@@ -1159,87 +1356,143 @@ export class DesertFoliageManager {
         flatShading: arch.flatShading,
       });
       applyMountainHoleShaderToMaterial(mat, `boulder_${archIdx}`);
+      return mat;
+    });
 
-      const mesh = new THREE.InstancedMesh(arch.geo, mat, arch.count);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
+    interface BoulderSpawnItem {
+      rx: number;
+      ry: number;
+      rz: number;
+      sinkOffset: number;
+      scaleX: number;
+      scaleY: number;
+      scaleZ: number;
+      rotX: number;
+      rotY: number;
+      rotZ: number;
+      bRadius: number;
+      bHeight: number;
+      color: THREE.Color;
+    }
+    const boulderByQuadArch: BoulderSpawnItem[][][] = [
+      [[], [], []],
+      [[], [], []],
+      [[], [], []],
+      [[], [], []],
+    ];
 
-      let rCount = 0;
+    for (let archIdx = 0; archIdx < rockArchetypes.length; archIdx++) {
+      const arch = rockArchetypes[archIdx];
       for (let i = 0; i < arch.count; i++) {
         const rx = (Math.random() - 0.5) * 380;
         const rz = (Math.random() - 0.5) * 380;
         if (isNearPeraltaCamp(rx, rz, 20)) continue;
         const ry = getTerrainHeight(rx, rz);
 
-        // Natural scale variation: pebbles/scree (0.5), typical stones (1.0-1.8), large monolith boulders (2.0-2.8)
         const scaleRoll = Math.random();
         let s = 1.0;
         if (scaleRoll < 0.25) {
-          s = 0.5 + Math.random() * 0.4; // Scree gravel & small stones
+          s = 0.5 + Math.random() * 0.4;
         } else if (scaleRoll < 0.85) {
-          s = 0.9 + Math.random() * 0.9; // Medium field rocks
+          s = 0.9 + Math.random() * 0.9;
         } else {
-          s = 1.9 + Math.random() * 0.9; // Monumental weathered boulders
+          s = 1.9 + Math.random() * 0.9;
         }
         s *= arch.baseScale;
 
-        // Position on surface, sunken securely so flat bottom is deeply embedded in soil/bedrock
         const sinkOffset = archIdx === 1 ? -s * 0.06 : -s * 0.12;
-        dummy.position.set(rx, ry + sinkOffset, rz);
+        let scaleX = s * (0.8 + Math.random() * 0.4);
+        let scaleY = s * (0.85 + Math.random() * 0.35);
+        let scaleZ = s * (0.8 + Math.random() * 0.4);
+        let rotX = (Math.random() - 0.5) * 0.3;
+        const rotY = Math.random() * Math.PI * 2;
+        let rotZ = (Math.random() - 0.5) * 0.3;
 
         if (archIdx === 1) {
-          // Sandstone slabs: flatter aspect ratio, subtle tilt following slope
-          dummy.scale.set(s * (1.0 + Math.random() * 0.5), s * 0.55, s * (1.0 + Math.random() * 0.5));
-          dummy.rotation.set((Math.random() - 0.5) * 0.25, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.25);
-        } else {
-          // Angular and corestones: natural 3D proportioning
-          dummy.scale.set(s * (0.8 + Math.random() * 0.4), s * (0.85 + Math.random() * 0.35), s * (0.8 + Math.random() * 0.4));
-          dummy.rotation.set((Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.3);
+          scaleX = s * (1.0 + Math.random() * 0.5);
+          scaleY = s * 0.55;
+          scaleZ = s * (1.0 + Math.random() * 0.5);
+          rotX = (Math.random() - 0.5) * 0.25;
+          rotZ = (Math.random() - 0.5) * 0.25;
         }
 
-        dummy.updateMatrix();
-        mesh.setMatrixAt(rCount, dummy.matrix);
+        const bRadius = Math.max(scaleX, scaleZ) * 0.95;
+        const bHeight = scaleY * 1.6;
 
-        // Assign individual natural mineral color to every rock:
-        // Manganese desert varnish, terracotta red sandstone, buff tan, or salt-and-pepper granite
         const randColor = DESERT_ROCK_PALETTES[Math.floor(Math.random() * DESERT_ROCK_PALETTES.length)];
-        mesh.setColorAt(rCount, randColor);
 
-        // Register solid physical rock collider for medium and large boulders
-        const bRadius = Math.max(dummy.scale.x, dummy.scale.z) * 0.95;
-        const bHeight = dummy.scale.y * 1.6;
-        if (bRadius >= 0.52) {
-          this.rockColliders.push({
-            id: `boulder_${archIdx}_${rCount}`,
-            x: rx,
-            y: ry,
-            z: rz,
-            radius: bRadius,
-            height: bHeight,
-            type: 'boulder',
-            meshIdx: archIdx,
-            instanceId: rCount,
-            active: true,
-          });
-        }
-
-        rCount++;
+        boulderByQuadArch[getQIdx(rx, rz)][archIdx].push({
+          rx,
+          ry,
+          rz,
+          sinkOffset,
+          scaleX,
+          scaleY,
+          scaleZ,
+          rotX,
+          rotY,
+          rotZ,
+          bRadius,
+          bHeight,
+          color: randColor,
+        });
       }
-
-      mesh.count = rCount;
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-
-      this.scene.add(mesh);
-      this.boulderMeshes.push(mesh);
     }
 
-    // Keep primary boulderMesh pointing to first mesh for legacy access
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      for (let archIdx = 0; archIdx < rockArchetypes.length; archIdx++) {
+        const arch = rockArchetypes[archIdx];
+        const items = boulderByQuadArch[q][archIdx];
+        const count = Math.max(1, items.length);
+        const bGeo = arch.geo.clone();
+        bGeo.boundingSphere = chunk.boundingSphere.clone();
+        bGeo.boundingBox = chunk.boundingBox.clone();
+        const mesh = new THREE.InstancedMesh(bGeo, boulderMaterials[archIdx], count);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = true;
+
+        for (let j = 0; j < items.length; j++) {
+          const it = items[j];
+          dummy.position.set(it.rx, it.ry + it.sinkOffset, it.rz);
+          dummy.scale.set(it.scaleX, it.scaleY, it.scaleZ);
+          dummy.rotation.set(it.rotX, it.rotY, it.rotZ);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(j, dummy.matrix);
+          mesh.setColorAt(j, it.color);
+
+          if (it.bRadius >= 0.52) {
+            this.rockColliders.push({
+              id: `boulder_${q}_${archIdx}_${j}`,
+              x: it.rx,
+              y: it.ry,
+              z: it.rz,
+              radius: it.bRadius,
+              height: it.bHeight,
+              type: 'boulder',
+              meshIdx: this.boulderMeshes.length,
+              instanceId: j,
+              active: true,
+            });
+          }
+        }
+
+        if (items.length === 0) {
+          mesh.setMatrixAt(0, this.zeroMatrix);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+
+        chunk.group.add(mesh);
+        chunk.boulderMeshes.push(mesh);
+        this.boulderMeshes.push(mesh);
+      }
+    }
     this.boulderMesh = this.boulderMeshes[0];
 
     // ==========================================
-    // 4. Authentic Sonoran Creosote Bushes (Larrea tridentata)
+    // 4. Authentic Sonoran Creosote Bushes (By Quadrant)
     // ==========================================
     const scrubCount = 350;
     const scrubGeo = createRealisticCreosoteGeometry();
@@ -1247,10 +1500,16 @@ export class DesertFoliageManager {
       color: 0x5a6d3b,
       roughness: 0.82,
     });
-    this.scrubMesh = new THREE.InstancedMesh(scrubGeo, scrubMat, scrubCount);
-    this.scrubMesh.castShadow = true;
-    this.scrubMesh.frustumCulled = false;
-    let sIdx = 0;
+
+    interface ScrubSpawnItem {
+      rx: number;
+      ry: number;
+      rz: number;
+      s: number;
+      rotY: number;
+    }
+    const scrubByQuad: ScrubSpawnItem[][] = [[], [], [], []];
+
     for (let i = 0; i < scrubCount; i++) {
       const rx = (Math.random() - 0.5) * 380;
       const rz = (Math.random() - 0.5) * 380;
@@ -1258,18 +1517,47 @@ export class DesertFoliageManager {
       const ry = getTerrainHeight(rx, rz);
 
       const s = 0.65 + Math.random() * 0.75;
-      dummy.position.set(rx, ry, rz);
-      dummy.scale.set(s, s, s);
-      dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-      dummy.updateMatrix();
-      this.scrubMesh.setMatrixAt(sIdx++, dummy.matrix);
+      scrubByQuad[getQIdx(rx, rz)].push({
+        rx,
+        ry,
+        rz,
+        s,
+        rotY: Math.random() * Math.PI * 2,
+      });
     }
-    this.scrubMesh.count = sIdx;
-    this.scrubMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.scrubMesh);
+
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      const items = scrubByQuad[q];
+      const count = Math.max(1, items.length);
+      const sGeo = scrubGeo.clone();
+      sGeo.boundingSphere = chunk.boundingSphere.clone();
+      sGeo.boundingBox = chunk.boundingBox.clone();
+      const mesh = new THREE.InstancedMesh(sGeo, scrubMat, count);
+      mesh.castShadow = true;
+      mesh.frustumCulled = true;
+
+      for (let j = 0; j < items.length; j++) {
+        const it = items[j];
+        dummy.position.set(it.rx, it.ry, it.rz);
+        dummy.scale.set(it.s, it.s, it.s);
+        dummy.rotation.set(0, it.rotY, 0);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(j, dummy.matrix);
+      }
+
+      if (items.length === 0) {
+        mesh.setMatrixAt(0, this.zeroMatrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      chunk.group.add(mesh);
+      chunk.scrubMesh = mesh;
+      this.allScrubMeshes.push(mesh);
+    }
+    this.scrubMesh = this.allScrubMeshes[0];
 
     // ==========================================
-    // 4B. Realistic Desert Bunchgrass & Purple Three-Awn (Aristida)
+    // 5. Realistic Desert Bunchgrass & Purple Three-Awn (By Quadrant)
     // ==========================================
     const grassCount = 650;
     const grassBladeGeo = createRealisticBunchgrassGeometry();
@@ -1278,10 +1566,18 @@ export class DesertFoliageManager {
       roughness: 0.9,
       side: THREE.DoubleSide,
     });
-    this.grassMesh = new THREE.InstancedMesh(grassBladeGeo, grassMat, grassCount);
-    this.grassMesh.castShadow = true;
-    this.grassMesh.frustumCulled = false;
-    let gIdx = 0;
+
+    interface GrassSpawnItem {
+      gx: number;
+      gy: number;
+      gz: number;
+      scale: number;
+      rotX: number;
+      rotY: number;
+      rotZ: number;
+    }
+    const grassByQuad: GrassSpawnItem[][] = [[], [], [], []];
+
     for (let i = 0; i < grassCount; i++) {
       const gx = (Math.random() - 0.5) * 360;
       const gz = (Math.random() - 0.5) * 360;
@@ -1289,18 +1585,49 @@ export class DesertFoliageManager {
       if (gy > 42) continue;
 
       const scale = 0.7 + Math.random() * 0.6;
-      dummy.position.set(gx, gy, gz);
-      dummy.scale.set(scale, scale, scale);
-      dummy.rotation.set((Math.random() - 0.5) * 0.1, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.1);
-      dummy.updateMatrix();
-      this.grassMesh.setMatrixAt(gIdx++, dummy.matrix);
+      grassByQuad[getQIdx(gx, gz)].push({
+        gx,
+        gy,
+        gz,
+        scale,
+        rotX: (Math.random() - 0.5) * 0.1,
+        rotY: Math.random() * Math.PI * 2,
+        rotZ: (Math.random() - 0.5) * 0.1,
+      });
     }
-    this.grassMesh.count = gIdx;
-    this.grassMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.grassMesh);
+
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      const items = grassByQuad[q];
+      const count = Math.max(1, items.length);
+      const gGeo = grassBladeGeo.clone();
+      gGeo.boundingSphere = chunk.boundingSphere.clone();
+      gGeo.boundingBox = chunk.boundingBox.clone();
+      const mesh = new THREE.InstancedMesh(gGeo, grassMat, count);
+      mesh.castShadow = true;
+      mesh.frustumCulled = true;
+
+      for (let j = 0; j < items.length; j++) {
+        const it = items[j];
+        dummy.position.set(it.gx, it.gy, it.gz);
+        dummy.scale.set(it.scale, it.scale, it.scale);
+        dummy.rotation.set(it.rotX, it.rotY, it.rotZ);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(j, dummy.matrix);
+      }
+
+      if (items.length === 0) {
+        mesh.setMatrixAt(0, this.zeroMatrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      chunk.group.add(mesh);
+      chunk.grassMesh = mesh;
+      this.allGrassMeshes.push(mesh);
+    }
+    this.grassMesh = this.allGrassMeshes[0];
 
     // ==========================================
-    // 4C. Authentic Engelmann's Prickly Pear Clusters (Opuntia)
+    // 6. Authentic Engelmann's Prickly Pear Clusters (By Quadrant)
     // ==========================================
     const pricklyPearCount = 180;
     const padGeo = createRealisticPricklyPearGeometry();
@@ -1308,10 +1635,18 @@ export class DesertFoliageManager {
       color: 0x3d6635,
       roughness: 0.8,
     });
-    this.pricklyMesh = new THREE.InstancedMesh(padGeo, padMat, pricklyPearCount);
-    this.pricklyMesh.castShadow = true;
-    this.pricklyMesh.frustumCulled = false;
-    let ppIdx = 0;
+
+    interface PricklySpawnItem {
+      px: number;
+      py: number;
+      pz: number;
+      scale: number;
+      rotX: number;
+      rotY: number;
+      rotZ: number;
+    }
+    const pricklyByQuad: PricklySpawnItem[][] = [[], [], [], []];
+
     for (let i = 0; i < pricklyPearCount; i++) {
       const px = (Math.random() - 0.5) * 340;
       const pz = (Math.random() - 0.5) * 340;
@@ -1319,18 +1654,49 @@ export class DesertFoliageManager {
       if (py > 38 || isNearPeraltaCamp(px, pz, 14)) continue;
 
       const scale = 0.75 + Math.random() * 0.5;
-      dummy.position.set(px, py, pz);
-      dummy.scale.set(scale, scale, scale);
-      dummy.rotation.set((Math.random() - 0.5) * 0.1, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.1);
-      dummy.updateMatrix();
-      this.pricklyMesh.setMatrixAt(ppIdx++, dummy.matrix);
+      pricklyByQuad[getQIdx(px, pz)].push({
+        px,
+        py,
+        pz,
+        scale,
+        rotX: (Math.random() - 0.5) * 0.1,
+        rotY: Math.random() * Math.PI * 2,
+        rotZ: (Math.random() - 0.5) * 0.1,
+      });
     }
-    this.pricklyMesh.count = ppIdx;
-    this.pricklyMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.pricklyMesh);
+
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      const items = pricklyByQuad[q];
+      const count = Math.max(1, items.length);
+      const pGeo = padGeo.clone();
+      pGeo.boundingSphere = chunk.boundingSphere.clone();
+      pGeo.boundingBox = chunk.boundingBox.clone();
+      const mesh = new THREE.InstancedMesh(pGeo, padMat, count);
+      mesh.castShadow = true;
+      mesh.frustumCulled = true;
+
+      for (let j = 0; j < items.length; j++) {
+        const it = items[j];
+        dummy.position.set(it.px, it.py, it.pz);
+        dummy.scale.set(it.scale, it.scale, it.scale);
+        dummy.rotation.set(it.rotX, it.rotY, it.rotZ);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(j, dummy.matrix);
+      }
+
+      if (items.length === 0) {
+        mesh.setMatrixAt(0, this.zeroMatrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      chunk.group.add(mesh);
+      chunk.pricklyMesh = mesh;
+      this.allPricklyMeshes.push(mesh);
+    }
+    this.pricklyMesh = this.allPricklyMeshes[0];
 
     // ==========================================
-    // 4D. Jumping Cholla Cacti (Cylindropuntia fulgida)
+    // 7. Jumping Cholla Cacti (By Quadrant)
     // ==========================================
     const chollaCount = 130;
     const chollaGeo = createRealisticChollaGeometry();
@@ -1338,10 +1704,18 @@ export class DesertFoliageManager {
       color: 0xa6b872,
       roughness: 0.85,
     });
-    this.chollaMesh = new THREE.InstancedMesh(chollaGeo, chollaMat, chollaCount);
-    this.chollaMesh.castShadow = true;
-    this.chollaMesh.frustumCulled = false;
-    let cIdx = 0;
+
+    interface ChollaSpawnItem {
+      cx: number;
+      cy: number;
+      cz: number;
+      scale: number;
+      rotX: number;
+      rotY: number;
+      rotZ: number;
+    }
+    const chollaByQuad: ChollaSpawnItem[][] = [[], [], [], []];
+
     for (let i = 0; i < chollaCount; i++) {
       const cx = (Math.random() - 0.5) * 320;
       const cz = (Math.random() - 0.5) * 320;
@@ -1349,18 +1723,49 @@ export class DesertFoliageManager {
       if (cy > 36 || isNearPeraltaCamp(cx, cz, 14)) continue;
 
       const scale = 0.75 + Math.random() * 0.45;
-      dummy.position.set(cx, cy, cz);
-      dummy.scale.set(scale, scale, scale);
-      dummy.rotation.set((Math.random() - 0.5) * 0.1, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.1);
-      dummy.updateMatrix();
-      this.chollaMesh.setMatrixAt(cIdx++, dummy.matrix);
+      chollaByQuad[getQIdx(cx, cz)].push({
+        cx,
+        cy,
+        cz,
+        scale,
+        rotX: (Math.random() - 0.5) * 0.1,
+        rotY: Math.random() * Math.PI * 2,
+        rotZ: (Math.random() - 0.5) * 0.1,
+      });
     }
-    this.chollaMesh.count = cIdx;
-    this.chollaMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.chollaMesh);
+
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      const items = chollaByQuad[q];
+      const count = Math.max(1, items.length);
+      const cGeo = chollaGeo.clone();
+      cGeo.boundingSphere = chunk.boundingSphere.clone();
+      cGeo.boundingBox = chunk.boundingBox.clone();
+      const mesh = new THREE.InstancedMesh(cGeo, chollaMat, count);
+      mesh.castShadow = true;
+      mesh.frustumCulled = true;
+
+      for (let j = 0; j < items.length; j++) {
+        const it = items[j];
+        dummy.position.set(it.cx, it.cy, it.cz);
+        dummy.scale.set(it.scale, it.scale, it.scale);
+        dummy.rotation.set(it.rotX, it.rotY, it.rotZ);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(j, dummy.matrix);
+      }
+
+      if (items.length === 0) {
+        mesh.setMatrixAt(0, this.zeroMatrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      chunk.group.add(mesh);
+      chunk.chollaMesh = mesh;
+      this.allChollaMeshes.push(mesh);
+    }
+    this.chollaMesh = this.allChollaMeshes[0];
 
     // ==========================================
-    // 4E. Authentic Sonoran Desert Ocotillo (Fouquieria splendens)
+    // 8. Authentic Sonoran Desert Ocotillo (By Quadrant)
     // ==========================================
     const ocotilloCount = 140;
     const ocotilloGeo = createRealisticOcotilloGeometry();
@@ -1368,10 +1773,16 @@ export class DesertFoliageManager {
       color: 0x544030,
       roughness: 0.88,
     });
-    this.ocotilloMesh = new THREE.InstancedMesh(ocotilloGeo, ocotilloMat, ocotilloCount);
-    this.ocotilloMesh.castShadow = true;
-    this.ocotilloMesh.frustumCulled = false;
-    let ocIdx = 0;
+
+    interface OcotilloSpawnItem {
+      ox: number;
+      oy: number;
+      oz: number;
+      scale: number;
+      rotY: number;
+    }
+    const ocotilloByQuad: OcotilloSpawnItem[][] = [[], [], [], []];
+
     for (let i = 0; i < ocotilloCount; i++) {
       const ox = (Math.random() - 0.5) * 360;
       const oz = (Math.random() - 0.5) * 360;
@@ -1379,18 +1790,47 @@ export class DesertFoliageManager {
       if (oy > 45 || isNearPeraltaCamp(ox, oz, 16)) continue;
 
       const scale = 0.8 + Math.random() * 0.5;
-      dummy.position.set(ox, oy, oz);
-      dummy.scale.set(scale, scale, scale);
-      dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-      dummy.updateMatrix();
-      this.ocotilloMesh.setMatrixAt(ocIdx++, dummy.matrix);
+      ocotilloByQuad[getQIdx(ox, oz)].push({
+        ox,
+        oy,
+        oz,
+        scale,
+        rotY: Math.random() * Math.PI * 2,
+      });
     }
-    this.ocotilloMesh.count = ocIdx;
-    this.ocotilloMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.ocotilloMesh);
+
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      const items = ocotilloByQuad[q];
+      const count = Math.max(1, items.length);
+      const oGeo = ocotilloGeo.clone();
+      oGeo.boundingSphere = chunk.boundingSphere.clone();
+      oGeo.boundingBox = chunk.boundingBox.clone();
+      const mesh = new THREE.InstancedMesh(oGeo, ocotilloMat, count);
+      mesh.castShadow = true;
+      mesh.frustumCulled = true;
+
+      for (let j = 0; j < items.length; j++) {
+        const it = items[j];
+        dummy.position.set(it.ox, it.oy, it.oz);
+        dummy.scale.set(it.scale, it.scale, it.scale);
+        dummy.rotation.set(0, it.rotY, 0);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(j, dummy.matrix);
+      }
+
+      if (items.length === 0) {
+        mesh.setMatrixAt(0, this.zeroMatrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      chunk.group.add(mesh);
+      chunk.ocotilloMesh = mesh;
+      this.allOcotilloMeshes.push(mesh);
+    }
+    this.ocotilloMesh = this.allOcotilloMeshes[0];
 
     // ==========================================
-    // 4F. Desert Century Agave (Agave chrysantha)
+    // 9. Desert Century Agave (By Quadrant)
     // ==========================================
     const agaveCount = 150;
     const agaveGeo = createRealisticAgaveGeometry();
@@ -1398,10 +1838,18 @@ export class DesertFoliageManager {
       color: 0x486b5d,
       roughness: 0.78,
     });
-    this.agaveMesh = new THREE.InstancedMesh(agaveGeo, agaveMat, agaveCount);
-    this.agaveMesh.castShadow = true;
-    this.agaveMesh.frustumCulled = false;
-    let agIdx = 0;
+
+    interface AgaveSpawnItem {
+      ax: number;
+      ay: number;
+      az: number;
+      scale: number;
+      rotX: number;
+      rotY: number;
+      rotZ: number;
+    }
+    const agaveByQuad: AgaveSpawnItem[][] = [[], [], [], []];
+
     for (let i = 0; i < agaveCount; i++) {
       const ax = (Math.random() - 0.5) * 350;
       const az = (Math.random() - 0.5) * 350;
@@ -1409,24 +1857,50 @@ export class DesertFoliageManager {
       if (ay > 48 || isNearPeraltaCamp(ax, az, 14)) continue;
 
       const scale = 0.75 + Math.random() * 0.5;
-      dummy.position.set(ax, ay, az);
-      dummy.scale.set(scale, scale, scale);
-      dummy.rotation.set((Math.random() - 0.5) * 0.1, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.1);
-      dummy.updateMatrix();
-      this.agaveMesh.setMatrixAt(agIdx++, dummy.matrix);
+      agaveByQuad[getQIdx(ax, az)].push({
+        ax,
+        ay,
+        az,
+        scale,
+        rotX: (Math.random() - 0.5) * 0.1,
+        rotY: Math.random() * Math.PI * 2,
+        rotZ: (Math.random() - 0.5) * 0.1,
+      });
     }
-    this.agaveMesh.count = agIdx;
-    this.agaveMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.agaveMesh);
+
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      const items = agaveByQuad[q];
+      const count = Math.max(1, items.length);
+      const aGeo = agaveGeo.clone();
+      aGeo.boundingSphere = chunk.boundingSphere.clone();
+      aGeo.boundingBox = chunk.boundingBox.clone();
+      const mesh = new THREE.InstancedMesh(aGeo, agaveMat, count);
+      mesh.castShadow = true;
+      mesh.frustumCulled = true;
+
+      for (let j = 0; j < items.length; j++) {
+        const it = items[j];
+        dummy.position.set(it.ax, it.ay, it.az);
+        dummy.scale.set(it.scale, it.scale, it.scale);
+        dummy.rotation.set(it.rotX, it.rotY, it.rotZ);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(j, dummy.matrix);
+      }
+
+      if (items.length === 0) {
+        mesh.setMatrixAt(0, this.zeroMatrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      chunk.group.add(mesh);
+      chunk.agaveMesh = mesh;
+      this.allAgaveMeshes.push(mesh);
+    }
+    this.agaveMesh = this.allAgaveMeshes[0];
 
     // ==========================================
-    // 4E. Monumental Southwestern Outcroppings & Canyon Formations (4 Geological Archetypes)
+    // 10. Monumental Southwestern Outcroppings & Canyon Formations (4 Archetypes by Quadrant)
     // ==========================================
-    // Replaces uniform mushroom hoodoos with authentic Arizona geology:
-    // 1. Jagged Volcanic Crags / Cliff Fins (serrated knife-edge crests, columnar jointing)
-    // 2. Stepped Mesa Buttes (horizontal sedimentary benches, sheer drops, flat caprock)
-    // 3. Tilted Fault Monoclines (35-degree dipping slip-faces & sheer fault scarps)
-    // 4. Weathered Canyon Spire Needles (tall pinnacles tapering gracefully to pointed summits)
     const outcroppingArchetypes = [
       {
         name: 'volcanic_crag',
@@ -1458,13 +1932,7 @@ export class DesertFoliageManager {
       },
     ];
 
-    this.outcroppingMeshes = [];
-    const totalOutcrops = 58;
-    const globalAngles = Array.from({ length: totalOutcrops }, (_, i) => (i / totalOutcrops) * Math.PI * 2);
-    let globalAngleIdx = 0;
-
-    for (let archIdx = 0; archIdx < outcroppingArchetypes.length; archIdx++) {
-      const arch = outcroppingArchetypes[archIdx];
+    const outcropMaterials = outcroppingArchetypes.map((arch) => {
       const mat = new THREE.MeshStandardMaterial({
         name: `rock_outcrop_${arch.name}`,
         vertexColors: true,
@@ -1474,13 +1942,43 @@ export class DesertFoliageManager {
         flatShading: false,
       });
       applyMountainHoleShaderToMaterial(mat, `outcrop_${arch.name}`);
+      return mat;
+    });
 
-      const mesh = new THREE.InstancedMesh(arch.geo, mat, arch.count);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
+    interface OutcropSpawnItem {
+      ox: number;
+      oy: number;
+      oz: number;
+      sx: number;
+      sy: number;
+      sz: number;
+      rotX: number;
+      rotY: number;
+      rotZ: number;
+      oRadius: number;
+      oHeight: number;
+      archIdx: number;
+    }
+    const outcropByQuadArch: OutcropSpawnItem[][][] = [
+      [[], [], [], []],
+      [[], [], [], []],
+      [[], [], [], []],
+      [[], [], [], []],
+    ];
 
-      let ocCount = 0;
+    const totalOutcrops = 58;
+    const globalAngles = Array.from({ length: totalOutcrops }, (_, i) => (i / totalOutcrops) * Math.PI * 2);
+    let globalAngleIdx = 0;
+
+    const baseRadiusMap: Record<string, number> = {
+      volcanic_crag: 4.8,
+      stepped_mesa: 6.2,
+      fault_monocline: 4.2,
+      canyon_spire: 3.8,
+    };
+
+    for (let archIdx = 0; archIdx < outcroppingArchetypes.length; archIdx++) {
+      const arch = outcroppingArchetypes[archIdx];
       for (let i = 0; i < arch.count; i++) {
         const baseAngle = globalAngles[globalAngleIdx % totalOutcrops];
         globalAngleIdx++;
@@ -1488,73 +1986,101 @@ export class DesertFoliageManager {
         const r = 45 + Math.random() * 155;
         const ox = Math.cos(angle) * r;
         const oz = Math.sin(angle) * r;
-        // Keep Peralta Base Camp and player spawn clear of soaring outcropping geometry
         if (isNearPeraltaCamp(ox, oz, 30)) continue;
         const oy = getTerrainHeight(ox, oz);
 
-        // Aspect ratio variations: some wide massif bluffs, some high soaring towers
         const baseScale = 0.85 + Math.random() * 1.35;
         let sx = baseScale;
         let sy = baseScale;
         let sz = baseScale;
 
         if (arch.name === 'stepped_mesa') {
-          // Broad, imposing flat-topped mesas
           sx *= 1.3 + Math.random() * 0.5;
           sy *= 0.8 + Math.random() * 0.4;
           sz *= 1.3 + Math.random() * 0.5;
         } else if (arch.name === 'canyon_spire') {
-          // Slender, soaring canyon needle pinnacles
           sx *= 0.75 + Math.random() * 0.3;
           sy *= 1.25 + Math.random() * 0.5;
           sz *= 0.75 + Math.random() * 0.3;
         } else if (arch.name === 'volcanic_crag') {
-          // Asymmetric crag buttresses
           sx *= 1.2 + Math.random() * 0.5;
           sy *= 0.95 + Math.random() * 0.4;
           sz *= 0.9 + Math.random() * 0.35;
         } else {
-          // Fault monoclines: elongated along fault strike
           sx *= 1.1 + Math.random() * 0.4;
           sy *= 1.0 + Math.random() * 0.35;
           sz *= 1.4 + Math.random() * 0.5;
         }
 
-        dummy.position.set(ox, oy + (arch.baseHeight * arch.heightOffsetFrac) * sy, oz);
-        dummy.scale.set(sx, sy, sz);
-        dummy.rotation.set((Math.random() - 0.5) * 0.12, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.12);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(ocCount, dummy.matrix);
+        const rotX = (Math.random() - 0.5) * 0.12;
+        const rotY = Math.random() * Math.PI * 2;
+        const rotZ = (Math.random() - 0.5) * 0.12;
 
-        // Register solid physical mountain outcropping collider
-        const baseRadiusMap: Record<string, number> = {
-          volcanic_crag: 4.8,
-          stepped_mesa: 6.2,
-          fault_monocline: 4.2,
-          canyon_spire: 3.8,
-        };
         const baseRad = baseRadiusMap[arch.name] || 4.5;
         const oRadius = baseRad * ((sx + sz) * 0.5);
-        this.rockColliders.push({
-          id: `outcrop_${archIdx}_${ocCount}`,
-          x: ox,
-          y: oy,
-          z: oz,
-          radius: oRadius,
-          height: arch.baseHeight * sy,
-          type: 'mountain',
-          meshIdx: archIdx,
-          instanceId: ocCount,
-          active: true,
+        const oHeight = arch.baseHeight * sy;
+
+        outcropByQuadArch[getQIdx(ox, oz)][archIdx].push({
+          ox,
+          oy: oy + (arch.baseHeight * arch.heightOffsetFrac) * sy,
+          oz,
+          sx,
+          sy,
+          sz,
+          rotX,
+          rotY,
+          rotZ,
+          oRadius,
+          oHeight,
+          archIdx,
         });
-
-        ocCount++;
       }
+    }
 
-      mesh.count = ocCount;
-      mesh.instanceMatrix.needsUpdate = true;
-      this.scene.add(mesh);
-      this.outcroppingMeshes.push(mesh);
+    for (let q = 0; q < 4; q++) {
+      const chunk = this.floraChunks[q];
+      for (let archIdx = 0; archIdx < outcroppingArchetypes.length; archIdx++) {
+        const arch = outcroppingArchetypes[archIdx];
+        const items = outcropByQuadArch[q][archIdx];
+        const count = Math.max(1, items.length);
+        const ocGeo = arch.geo.clone();
+        ocGeo.boundingSphere = chunk.boundingSphere.clone();
+        ocGeo.boundingBox = chunk.boundingBox.clone();
+        const mesh = new THREE.InstancedMesh(ocGeo, outcropMaterials[archIdx], count);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = true;
+
+        for (let j = 0; j < items.length; j++) {
+          const it = items[j];
+          dummy.position.set(it.ox, it.oy, it.oz);
+          dummy.scale.set(it.sx, it.sy, it.sz);
+          dummy.rotation.set(it.rotX, it.rotY, it.rotZ);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(j, dummy.matrix);
+
+          this.rockColliders.push({
+            id: `outcrop_${q}_${archIdx}_${j}`,
+            x: it.ox,
+            y: it.oy - (arch.baseHeight * arch.heightOffsetFrac) * it.sy,
+            z: it.oz,
+            radius: it.oRadius,
+            height: it.oHeight,
+            type: 'mountain',
+            meshIdx: this.outcroppingMeshes.length,
+            instanceId: j,
+            active: true,
+          });
+        }
+
+        if (items.length === 0) {
+          mesh.setMatrixAt(0, this.zeroMatrix);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+        chunk.group.add(mesh);
+        chunk.outcroppingMeshes.push(mesh);
+        this.outcroppingMeshes.push(mesh);
+      }
     }
 
     // Keep primary outcroppingMesh pointing to first mesh for legacy access
@@ -2130,17 +2656,20 @@ export class DesertFoliageManager {
       }
     }
 
-    // 4. Check Saguaro Cacti
-    if (this.saguaroGroup) {
-      const sagHits = raycaster.intersectObjects(this.saguaroGroup.children, true);
-      if (sagHits.length > 0 && sagHits[0].distance <= maxDist) {
-        let topObj: THREE.Object3D | null = sagHits[0].object;
-        while (topObj && topObj.parent !== this.saguaroGroup) {
-          topObj = topObj.parent;
-        }
-        if (topObj && topObj.scale.x > 0.05) {
-          topObj.scale.set(0, 0, 0);
-          topObj.visible = false;
+    // 4. Check Saguaro Cacti (Merged InstancedMesh Batches)
+    if (this.saguaroMeshes && this.saguaroMeshes.length > 0) {
+      const sagHits = raycaster.intersectObjects(this.saguaroMeshes, false);
+      if (sagHits.length > 0 && sagHits[0].distance <= maxDist && sagHits[0].instanceId !== undefined) {
+        const hitMesh = sagHits[0].object as THREE.InstancedMesh;
+        const id = sagHits[0].instanceId;
+        const matrix = new THREE.Matrix4();
+        hitMesh.getMatrixAt(id, matrix);
+        const scale = new THREE.Vector3();
+        scale.setFromMatrixScale(matrix);
+
+        if (scale.x > 0.05) {
+          hitMesh.setMatrixAt(id, this.zeroMatrix);
+          hitMesh.instanceMatrix.needsUpdate = true;
           return {
             hit: true,
             type: 'saguaro',
@@ -2418,14 +2947,24 @@ export class DesertFoliageManager {
       }
     }
 
-    // Saguaros
-    if (this.saguaroGroup) {
-      for (const c of this.saguaroGroup.children) {
-        if (c.scale.x > 0.05 && c.position.distanceTo(center) <= radius) {
-          c.scale.set(0, 0, 0);
-          c.visible = false;
-          hydrationBlasted += 15;
-          destroyedPoints.push({ pos: c.position.clone(), type: 'cactus' });
+    // Saguaros (InstancedMesh Batches)
+    if (this.saguaroMeshes) {
+      const matrix = new THREE.Matrix4();
+      const pos = new THREE.Vector3();
+      const scale = new THREE.Vector3();
+      for (const sMesh of this.saguaroMeshes) {
+        for (let i = 0; i < sMesh.count; i++) {
+          sMesh.getMatrixAt(i, matrix);
+          scale.setFromMatrixScale(matrix);
+          if (scale.x > 0.05) {
+            pos.setFromMatrixPosition(matrix);
+            if (pos.distanceTo(center) <= radius) {
+              sMesh.setMatrixAt(i, this.zeroMatrix);
+              sMesh.instanceMatrix.needsUpdate = true;
+              hydrationBlasted += 15;
+              destroyedPoints.push({ pos: pos.clone(), type: 'cactus' });
+            }
+          }
         }
       }
     }
@@ -2492,9 +3031,30 @@ export class DesertFoliageManager {
     return { goldBlasted, rocksBlasted, woodBlasted, hydrationBlasted, destroyedPoints, bannerMessage: bannerMsg };
   }
 
+  public setVisible(visible: boolean) {
+    if (this.saguaroGroup) this.saguaroGroup.visible = visible;
+    if (this.barrelMesh) this.barrelMesh.visible = visible;
+    for (const b of this.boulderMeshes) b.visible = visible;
+    if (this.scrubMesh) this.scrubMesh.visible = visible;
+    if (this.grassMesh) this.grassMesh.visible = visible;
+    if (this.pricklyMesh) this.pricklyMesh.visible = visible;
+    if (this.chollaMesh) this.chollaMesh.visible = visible;
+    if (this.ocotilloMesh) this.ocotilloMesh.visible = visible;
+    if (this.agaveMesh) this.agaveMesh.visible = visible;
+    for (const o of this.outcroppingMeshes) o.visible = visible;
+    for (const t of this.springTrees) {
+      if (t.group) t.group.visible = visible;
+    }
+  }
+
   public dispose() {
     if (this.saguaroGroup) {
       this.scene.remove(this.saguaroGroup);
+    }
+    if (this.saguaroMeshes) {
+      this.saguaroMeshes.forEach((m) => {
+        m.geometry.dispose();
+      });
     }
     if (this.barrelMesh) {
       this.scene.remove(this.barrelMesh);
