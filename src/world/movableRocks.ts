@@ -192,6 +192,27 @@ export class MovableRockManager {
   }
 
   /**
+   * Spawn a loose rock or chipped fragment using a parameter object
+   */
+  public spawnLooseRock(opts: {
+    position: THREE.Vector3;
+    color?: number;
+    scale?: number;
+    weightLbs?: number;
+    ejectionDir?: THREE.Vector3;
+    isChippedFragment?: boolean;
+  }): MovableRock {
+    const origin = opts.position || new THREE.Vector3(0, 0, 0);
+    const color = opts.color ?? 0x8f4327;
+    const scale = opts.scale ?? 0.5;
+    const ejectionDir = opts.ejectionDir || new THREE.Vector3(0, 1, 0);
+    if (opts.isChippedFragment) {
+      return this.spawnChippedFragment(origin, ejectionDir, color, scale);
+    }
+    return this.spawnPlacedRock(origin, color, scale);
+  }
+
+  /**
    * Raycast to find the closest movable rock within interaction distance
    */
   public raycastMovableRock(
