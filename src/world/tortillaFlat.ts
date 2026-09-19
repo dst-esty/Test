@@ -243,7 +243,7 @@ function createGlazedWindow(
 
   // 2. Glass Pane
   const glassMat = new THREE.MeshStandardMaterial({
-    color: interiorLight ? 0xffeaad : 0x243542,
+    color: interiorLight ? 0xffeaad : 0x26201a,
     roughness: 0.12,
     metalness: 0.1,
     transparent: true,
@@ -449,7 +449,7 @@ function createFestoonGlowTexture(): THREE.CanvasTexture {
   const ctx = cvs.getContext('2d');
   if (ctx) {
     const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-    grad.addColorStop(0, 'rgba(255, 238, 160, 0.95)');
+    grad.addColorStop(0, 'rgba(255, 200, 70, 0.95)');
     grad.addColorStop(0.2, 'rgba(255, 180, 55, 0.65)');
     grad.addColorStop(0.5, 'rgba(255, 110, 20, 0.22)');
     grad.addColorStop(1, 'rgba(255, 60, 0, 0)');
@@ -541,26 +541,26 @@ function createFrontierTorch(
 
   // Layered Dancing Flame Cones
   const flameOuterMat = new THREE.MeshStandardMaterial({
-    color: 0xff3800,
-    emissive: 0xff6200,
-    emissiveIntensity: 2.4,
-    roughness: 0.1,
+    color: 0xff6a14,
+    emissive: 0xff4804,
+    emissiveIntensity: 1.2,
+    roughness: 0.2,
     transparent: true,
-    opacity: 0.88,
+    opacity: 0.82,
     side: THREE.DoubleSide,
   });
   const flameMesh = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.5, 8), flameOuterMat);
   flameMesh.position.set(0, topY + 0.44, 0);
   group.add(flameMesh);
 
-  const flameCoreMat = new THREE.MeshBasicMaterial({ color: 0xfffaaa });
+  const flameCoreMat = new THREE.MeshBasicMaterial({ color: 0xffde6a });
   const flameCore = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.3, 8), flameCoreMat);
   flameCore.position.set(0, topY + 0.36, 0);
   group.add(flameCore);
 
   // Warm orange/amber torch PointLight
   const baseIntensity = options.baseIntensity || 2.8;
-  const torchLight = new THREE.PointLight(0xff6611, baseIntensity, 13, 1.8);
+  const torchLight = new THREE.PointLight(0xff7722, baseIntensity, 13, 1.8);
   torchLight.position.set(0, topY + 0.48, 0);
   group.add(torchLight);
 
@@ -594,7 +594,7 @@ function createFestoonStringLights(
   const brassSocketMat = new THREE.MeshStandardMaterial({ color: 0xa88532, metalness: 0.8, roughness: 0.4 });
   const glowSpriteMat = new THREE.SpriteMaterial({
     map: glowTexture,
-    color: 0xffbb44,
+    color: 0xff9922,
     transparent: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
@@ -632,9 +632,9 @@ function createFestoonStringLights(
 
     // Teardrop glass bulb
     const bulbMat = new THREE.MeshStandardMaterial({
-      color: 0xfffae6,
-      emissive: 0xffaa33,
-      emissiveIntensity: 1.8,
+      color: 0xffd27d,
+      emissive: 0xff8811,
+      emissiveIntensity: 2.2,
       roughness: 0.15,
       metalness: 0.05,
     });
@@ -688,10 +688,10 @@ function createBoardwalkLanternPost(
   const woodPostMat = new THREE.MeshStandardMaterial({ color: 0x3d2819, roughness: 0.9 });
   const ironMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.45, metalness: 0.85 });
   const glassMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
+    color: 0xffefdb,
     transparent: true,
-    opacity: 0.42,
-    roughness: 0.1,
+    opacity: 0.32,
+    roughness: 0.15,
   });
 
   // 1. Weathered timber lamp post
@@ -742,7 +742,7 @@ function createBoardwalkLanternPost(
   // Internal brass kerosene burner with glowing teardrop flame
   const burner = new THREE.Mesh(
     new THREE.ConeGeometry(0.032, 0.09, 6),
-    new THREE.MeshBasicMaterial({ color: 0xffe688 })
+    new THREE.MeshBasicMaterial({ color: 0xffa433 })
   );
   burner.position.set(0, 0.015, 0);
   lampGroup.add(burner);

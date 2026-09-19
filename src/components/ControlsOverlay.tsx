@@ -110,6 +110,11 @@ interface ControlsOverlayProps {
   areGogglesActive?: boolean;
   onToggleGoggles?: () => void;
   onToggleMount?: () => void;
+  isAimingRifle?: boolean;
+  scopeZoom?: number;
+  onToggleAimRifle?: () => void;
+  onZoomInScope?: () => void;
+  onZoomOutScope?: () => void;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
@@ -164,6 +169,11 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onCycleGraphicsQuality,
   areGogglesActive = false,
   onToggleGoggles,
+  isAimingRifle = false,
+  scopeZoom = 3.0,
+  onToggleAimRifle,
+  onZoomInScope,
+  onZoomOutScope,
 }) => {
   const [musicPlaying, setMusicPlaying] = useState(westernMusic.getIsPlaying());
   const [musicMuted, setMusicMuted] = useState(westernMusic.getIsMuted());
@@ -1317,10 +1327,22 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               <div className="flex items-center gap-2.5 bg-stone-950/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-amber-600/70 text-amber-200 shadow-xl font-mono">
                 <Crosshair className="w-4 h-4 text-amber-400" />
                 <div className="flex flex-col text-right">
-                  <span className="text-[10px] text-stone-400">WINCHESTER .44</span>
-                  <span className="text-sm font-bold text-amber-300">
-                    {playerState.ammo} <span className="text-[10px] font-normal text-stone-400">ROUNDS</span>
-                  </span>
+                  <span className="text-[10px] text-stone-400">WINCHESTER 1873 • 3X-10X SCOPE</span>
+                  <div className="flex items-center gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onToggleAimRifle) onToggleAimRifle();
+                      }}
+                      className="pointer-events-auto px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/40 text-[10px] text-amber-300 font-bold border border-amber-500/40 cursor-pointer transition active:scale-95"
+                    >
+                      {isAimingRifle ? `SCOPED ${scopeZoom ? scopeZoom.toFixed(1) + 'X' : ''}` : '[V / RMB] AIM'}
+                    </button>
+                    <span className="text-sm font-bold text-amber-300">
+                      {playerState.ammo} <span className="text-[10px] font-normal text-stone-400">ROUNDS</span>
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -1377,8 +1399,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* Center Crosshair for first person view */}
-      {viewMode === 'first' && (
+      {/* Center Crosshair for first person view (hidden while looking through scope) */}
+      {viewMode === 'first' && !isAimingRifle && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center">
           {playerState.equippedTool === 'rifle' ? (
             <div className="relative w-7 h-7 flex items-center justify-center">
@@ -1643,6 +1665,33 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               >
                 <span className="text-base leading-none">⬆️</span>
                 <span className="text-[9px] font-mono font-bold tracking-wider uppercase mt-0.5">JUMP</span>
+              </button>
+            )}
+
+            {/* Mobile Rifle Scope Toggle Button */}
+            {playerState.equippedTool === 'rifle' && onToggleAimRifle && (
+              <button
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onToggleAimRifle();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleAimRifle();
+                }}
+                className={`w-14 h-14 rounded-full ${
+                  isAimingRifle
+                    ? 'bg-amber-500 text-stone-950 border-2 border-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.9)]'
+                    : 'bg-stone-900/90 text-amber-300 border-2 border-amber-600/70'
+                } backdrop-blur-md flex flex-col items-center justify-center transition-all active:scale-90 touch-manipulation cursor-pointer font-bold`}
+                title="Toggle Malcolm Scope [V / Right-Click]"
+                aria-label="Scope Toggle"
+              >
+                <Crosshair className="w-5 h-5" />
+                <span className="text-[9px] font-mono tracking-tighter">
+                  {isAimingRifle ? (scopeZoom ? `${scopeZoom.toFixed(1)}X` : 'LOWER') : 'SCOPE'}
+                </span>
               </button>
             )}
 

@@ -153,7 +153,8 @@ export type MineStructureType =
   | 'deep_shaft'
   | 'campfire'
   | 'prospector_camp'
-  | 'frontier_torch';
+  | 'frontier_torch'
+  | 'rifle_barrier';
 
 export interface BuiltStructure {
   id: string;

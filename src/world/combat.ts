@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { BulletTracer, DynamiteEntity, EnemyBandit, Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
+import { createRifleModel } from './rifleModel';
 
 export interface BanditEntity {
   data: EnemyBandit;
   mesh: THREE.Group;
-  rifleMesh: THREE.Mesh;
+  rifleMesh: THREE.Object3D;
   muzzleFlash: THREE.PointLight;
   legs: THREE.Mesh[];
   walkTimer: number;
@@ -83,19 +84,8 @@ export class CombatManager {
     crown.position.set(0, 1.9, 0);
     group.add(crown);
 
-    // Lever-Action Repeater Rifle
-    const rifleGroup = new THREE.Group();
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.0, 6), gunMat);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.z = 0.5;
-    const stock = new THREE.Mesh(
-      new THREE.BoxGeometry(0.06, 0.14, 0.35),
-      new THREE.MeshStandardMaterial({ color: 0x4a2a18, roughness: 0.8 })
-    );
-    stock.position.z = -0.15;
-    rifleGroup.add(barrel);
-    rifleGroup.add(stock);
-
+    // Lever-Action Repeater Rifle with Octagonal Barrel & Vintage Scope
+    const rifleGroup = createRifleModel({ withScope: true, scale: 0.95 });
     rifleGroup.position.set(0.28, 1.15, 0.3);
     rifleGroup.rotation.x = -0.2;
     group.add(rifleGroup);
@@ -131,7 +121,7 @@ export class CombatManager {
         patrolAngle: Math.random() * Math.PI * 2,
       },
       mesh: group,
-      rifleMesh: barrel,
+      rifleMesh: rifleGroup,
       muzzleFlash: flash,
       legs: [leftLeg, rightLeg],
       walkTimer: Math.random() * 10,

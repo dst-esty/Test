@@ -22,6 +22,7 @@ import { CombatManager } from '../world/combat';
 import { AtmosphereManager } from '../world/atmosphere';
 import { MineBuildingSystem, STRUCTURE_BLUEPRINTS, validateStructurePlacement } from '../world/mineBuilding';
 import { soundEngine } from '../audio/soundEffects';
+import { createRifleModel } from '../world/rifleModel';
 import {
   ClaimInfo,
   ClueItem,
@@ -43,6 +44,8 @@ import { UndergroundLayersManager } from '../world/undergroundLayers';
 import { MovableRockManager } from '../world/movableRocks';
 import { ShaftSinkingStats } from '../world/undergroundVoxels';
 import { RemoteProspector } from '../world/remoteProspector';
+import { createProspectorCharacter, ProspectorRig } from '../world/prospectorModel';
+import { FirstPersonArmsRig } from '../world/firstPersonArms';
 import { multiplayer } from '../multiplayer/multiplayerService';
 import { isMobileDevice } from '../utils/device';
 import { DesertHydrologyEngine } from '../world/hydrology';
@@ -50,6 +53,8 @@ import { resolveKinematicMovement } from '../physics/collisionEngine';
 import { MountainDustParticleSystem } from '../world/mountainDustParticles';
 import { friendshipService } from '../services/friendshipService';
 import { MountManager } from '../world/mountManager';
+import { TownfolkManager } from '../world/townfolk';
+import { createPostProcessingPipeline, PostProcessingPipeline } from '../world/postProcessing';
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -120,6 +125,9 @@ interface WorldCanvasProps {
   onRegisterMobileMoveHandler?: (fn: (move: { forward: number; right: number }) => void) => void;
   graphicsQuality?: GraphicsQuality;
   onFpsUpdate?: (fps: number) => void;
+  onAimingRifleChange?: (aiming: boolean, zoom: number) => void;
+  onRegisterToggleScopeHandler?: (fn: () => void) => void;
+  onRegisterScopeZoomHandler?: (fn: (delta: number) => void) => void;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
@@ -189,12 +197,34 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onRegisterMobileMoveHandler,
   graphicsQuality = 'balanced' as GraphicsQuality,
   onFpsUpdate,
+  onAimingRifleChange,
+  onRegisterToggleScopeHandler,
+  onRegisterScopeZoomHandler,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
   const virtualJoystickInput = useRef<{ forward: number; right: number }>({ forward: 0, right: 0 });
   const isUIOpenRef = useRef(isUIOpen);
   const activeBuildingTypeRef = useRef<MineStructureType>(activeBuildingType);
+
+  const [isAimingRifle, setIsAimingRifle] = useState(false);
+  const [scopeZoom, setScopeZoom] = useState(3.0);
+  const [isRestingOnBarrier, setIsRestingOnBarrier] = useState(false);
+  const isAimingRifleRef = useRef(false);
+  const targetZoomRef = useRef(3.0);
+  const isRestingOnBarrierRef = useRef(false);
+  const rifleRecoilRef = useRef(0);
+  const fpRifleGroupRef = useRef<THREE.Group | null>(null);
+
+  useEffect(() => {
+    if (playerState.equippedTool !== 'rifle') {
+      if (isAimingRifleRef.current) {
+        isAimingRifleRef.current = false;
+        setIsAimingRifle(false);
+        if (onAimingRifleChange) onAimingRifleChange(false, targetZoomRef.current);
+      }
+    }
+  }, [playerState.equippedTool, onAimingRifleChange]);
 
   useEffect(() => {
     activeBuildingTypeRef.current = activeBuildingType;
@@ -259,6 +289,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         characterMeshRef.current.visible = true;
         characterMeshRef.current.rotation.z = Math.PI / 2;
       }
+      if (localPlayerRigRef.current) {
+        localPlayerRigRef.current.root.visible = true;
+      }
 
       if (onPlayerDeath) {
         onPlayerDeath(details);
@@ -282,6 +315,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           characterMeshRef.current.rotation.set(0, 0, 0);
           characterMeshRef.current.visible = viewMode === 'third';
         }
+        if (localPlayerRigRef.current) {
+          localPlayerRigRef.current.root.rotation.set(0, 0, 0);
+          localPlayerRigRef.current.root.visible = viewMode === 'third';
+        }
         if (sceneRef.current) {
           resetAllDugHoles(sceneRef.current);
         }
@@ -297,10 +334,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const hemiLightRef = useRef<THREE.HemisphereLight | null>(null);
   const playerLightRef = useRef<THREE.PointLight | null>(null);
   const characterMeshRef = useRef<THREE.Group | null>(null);
+  const localPlayerRigRef = useRef<ProspectorRig | null>(null);
   const pickaxeMeshRef = useRef<THREE.Mesh | null>(null);
   const starsRef = useRef<THREE.Points | null>(null);
   const goldDepositsRef = useRef<GoldDeposit[]>([]);
   const fpToolGroupRef = useRef<THREE.Group | null>(null);
+  const fpArmsRigRef = useRef<FirstPersonArmsRig | null>(null);
   const fpPickGroupRef = useRef<THREE.Group | null>(null);
   const fpShovelGroupRef = useRef<THREE.Group | null>(null);
   const fpAxeGroupRef = useRef<THREE.Group | null>(null);
@@ -314,6 +353,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const mountainDustParticlesRef = useRef<MountainDustParticleSystem | null>(null);
   const movableRockManagerRef = useRef<MovableRockManager | null>(null);
   const mountManagerRef = useRef<MountManager | null>(null);
+  const townfolkManagerRef = useRef<TownfolkManager | null>(null);
   const miningSystemRef = useRef<MiningSystem | null>(null);
   const mineBuildingRef = useRef<MineBuildingSystem | null>(null);
   const wildlifeManagerRef = useRef<WildlifeManager | null>(null);
@@ -378,6 +418,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   // High-performance graphics and frame pacing refs
   const qualityRef = useRef<GraphicsQuality>(graphicsQuality);
   qualityRef.current = graphicsQuality;
+  const postProcessingRef = useRef<PostProcessingPipeline | null>(null);
 
   const currentDprRef = useRef<number>(1.0);
   const fpsTrackerRef = useRef<{ frames: number; time: number; lowFpsCount: number }>({
@@ -399,6 +440,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const targetDpr = getTargetPixelRatio(graphicsQuality);
     currentDprRef.current = targetDpr;
     rendererRef.current.setPixelRatio(targetDpr);
+
+    if (postProcessingRef.current && rendererRef.current) {
+      const w = containerRef.current?.clientWidth || window.innerWidth;
+      const h = containerRef.current?.clientHeight || window.innerHeight;
+      postProcessingRef.current.resize(w, h);
+    }
 
     if (foliageManagerRef.current) {
       foliageManagerRef.current.setGraphicsQuality(graphicsQuality);
@@ -526,6 +573,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
+    // Initialize Cinematic Post-Processing Pipeline (RDR Atmospheric Bloom, Color Grading, 35mm Grain & Vignette)
+    const postProcessing = createPostProcessingPipeline(
+      renderer,
+      scene,
+      camera,
+      width,
+      height,
+      initQuality
+    );
+    postProcessingRef.current = postProcessing;
+
     const maxAnisotropy = renderer.capabilities?.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1;
 
     // 4. Lighting Setup
@@ -618,6 +676,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     }
     mountManagerRef.current = mountManager;
 
+    const townfolkManager = new TownfolkManager(scene);
+    townfolkManagerRef.current = townfolkManager;
+
     // Restore existing claim or built structures
     if (playerStateRef.current.activeClaim?.isClaimed) {
       mineBuilding.stakeClaim(
@@ -673,12 +734,19 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       onUpdateShaftLevel(0, undergroundLayers.maxUnlockedLevel);
     }
 
-    // 6b. First-Person 3D Tool Rig (Rigged directly to camera)
+    // 6b. First-Person 3D Tool & Articulated Arms Rig (Rigged directly to camera)
     const fpToolGroup = new THREE.Group();
     fpToolGroup.position.set(0.3, -0.28, -0.55);
     camera.add(fpToolGroup);
     scene.add(camera);
     fpToolGroupRef.current = fpToolGroup;
+
+    // First-Person Prospector Arms Rig
+    const fpArmsRig = new FirstPersonArmsRig({
+      outfitColor: 0x5a3c22,
+    });
+    camera.add(fpArmsRig.root);
+    fpArmsRigRef.current = fpArmsRig;
 
     // First-Person Tool: 1. Prospector Pickaxe
     const pickGroup = new THREE.Group();
@@ -780,50 +848,36 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     fpToolGroup.add(axeGroup);
     fpAxeGroupRef.current = axeGroup;
 
-    // 7. Character Mesh for Third-Person Mode
-    const charGroup = new THREE.Group();
-    // Prospector Torso (Coat)
-    const coat = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.3, 0.35, 0.9, 8),
-      new THREE.MeshStandardMaterial({ color: 0x4a3b32, roughness: 0.8 })
-    );
-    coat.position.y = 0.9;
-    charGroup.add(coat);
+    // First-Person Tool: 4. Winchester Lever-Action Repeater (with Octagonal Barrel, Malcolm Vintage Scope & Barrier Lug)
+    const fpRifleModel = createRifleModel({ withScope: true, scale: 0.92 });
+    fpRifleModel.rotation.y = Math.PI; // Face forward down-range (-Z)
+    fpRifleModel.position.set(-0.06, 0.04, 0.05);
+    fpRifleModel.visible = false;
+    fpToolGroup.add(fpRifleModel);
+    fpRifleGroupRef.current = fpRifleModel;
 
-    // Head
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.2, 8, 8),
-      new THREE.MeshStandardMaterial({ color: 0xdcb898 })
+    // First-Person Tool: 5. Carried Boulder/Rock
+    const fpCarriedRockGroup = new THREE.Group();
+    const fpCarriedRockMesh = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.18, 1),
+      new THREE.MeshStandardMaterial({ color: 0x9b583c, roughness: 0.9 })
     );
-    head.position.y = 1.5;
-    charGroup.add(head);
+    fpCarriedRockGroup.add(fpCarriedRockMesh);
+    fpCarriedRockGroup.position.set(0, -0.15, -0.42);
+    fpCarriedRockGroup.visible = false;
+    fpToolGroup.add(fpCarriedRockGroup);
+    fpCarriedRockGroupRef.current = fpCarriedRockGroup;
+    fpCarriedRockMeshRef.current = fpCarriedRockMesh;
 
-    // Slouch Prospector Hat (Wide Brim)
-    const brim = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.45, 0.45, 0.04, 10),
-      new THREE.MeshStandardMaterial({ color: 0x2b1d14 })
-    );
-    brim.position.y = 1.62;
-    charGroup.add(brim);
-
-    const hatCrown = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.24, 0.26, 0.22, 10),
-      new THREE.MeshStandardMaterial({ color: 0x2b1d14 })
-    );
-    hatCrown.position.y = 1.74;
-    charGroup.add(hatCrown);
-
-    // Prospector Backpack / Bedroll
-    const pack = new THREE.Mesh(
-      new THREE.BoxGeometry(0.4, 0.5, 0.3),
-      new THREE.MeshStandardMaterial({ color: 0x755938 })
-    );
-    pack.position.set(0, 1.0, -0.3);
-    charGroup.add(pack);
-
-    charGroup.visible = viewMode === 'third';
-    scene.add(charGroup);
-    characterMeshRef.current = charGroup;
+    // 7. Full 3D Articulated Character Mesh for Third-Person Mode
+    const prospectorRig = createProspectorCharacter({
+      outfitColor: 0x5a3c22,
+      showBackpack: true,
+    });
+    prospectorRig.root.visible = viewMode === 'third';
+    scene.add(prospectorRig.root);
+    characterMeshRef.current = prospectorRig.root;
+    localPlayerRigRef.current = prospectorRig;
 
     // 8. Night Sky Stars
     const starCount = 1200;
@@ -2100,6 +2154,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       cam.getWorldDirection(lookDir);
 
       if (playerStateRef.current.ammo > 0) {
+        rifleRecoilRef.current = 1.0;
         setPlayerState((prev) => ({
           ...prev,
           ammo: Math.max(0, prev.ammo - 1),
@@ -2426,6 +2481,46 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      if (e.code === 'KeyV' || e.code === 'KeyZ') {
+        if (playerStateRef.current.equippedTool === 'rifle') {
+          const nextAim = !isAimingRifleRef.current;
+          isAimingRifleRef.current = nextAim;
+          setIsAimingRifle(nextAim);
+          if (onAimingRifleChange) onAimingRifleChange(nextAim, targetZoomRef.current);
+          if (onShowBanner) {
+            onShowBanner(
+              nextAim
+                ? `🎯 Malcolm Vintage Brass Scope Engaged (${targetZoomRef.current.toFixed(1)}X)`
+                : 'Frontier Repeater at Ready'
+            );
+          }
+        }
+      }
+
+      // Scope Magnification hotkeys (+ / - or [ / ])
+      if (e.code === 'Equal' || e.code === 'NumpadAdd' || e.code === 'BracketRight') {
+        if (playerStateRef.current.equippedTool === 'rifle' && isAimingRifleRef.current) {
+          const next = Math.min(10.0, Math.round((targetZoomRef.current + 0.5) * 2) / 2);
+          targetZoomRef.current = next;
+          setScopeZoom(next);
+          if (onAimingRifleChange) onAimingRifleChange(true, next);
+          if (onShowBanner) {
+            onShowBanner(`🎯 Malcolm Scope Magnification: ${next.toFixed(1)}X`);
+          }
+        }
+      }
+      if (e.code === 'Minus' || e.code === 'NumpadSubtract' || e.code === 'BracketLeft') {
+        if (playerStateRef.current.equippedTool === 'rifle' && isAimingRifleRef.current) {
+          const next = Math.max(2.0, Math.round((targetZoomRef.current - 0.5) * 2) / 2);
+          targetZoomRef.current = next;
+          setScopeZoom(next);
+          if (onAimingRifleChange) onAimingRifleChange(true, next);
+          if (onShowBanner) {
+            onShowBanner(`🎯 Malcolm Scope Magnification: ${next.toFixed(1)}X`);
+          }
+        }
+      }
+
       // Hotkeys for tools
       const toolHotkeys: Record<string, PlayerState['equippedTool']> = {
         Backquote: 'hands',
@@ -2498,7 +2593,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!isPointerLocked.current || isGameOverRef.current) return;
-      const sensitivity = 0.0022;
+      let sensitivity = 0.0022;
+      if (playerStateRef.current.equippedTool === 'rifle' && isAimingRifleRef.current) {
+        const zoom = Math.max(1, targetZoomRef.current);
+        sensitivity = 0.0022 * (2.8 / zoom);
+      } else if (playerStateRef.current.equippedTool === 'binoculars') {
+        sensitivity = 0.0022 * 0.35;
+      }
       playerYaw.current -= e.movementX * sensitivity;
       playerPitch.current -= e.movementY * sensitivity;
       playerPitch.current = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, playerPitch.current));
@@ -2590,6 +2691,20 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           executePlaceRock();
           return;
         }
+        if (playerStateRef.current.equippedTool === 'rifle') {
+          const nextAim = !isAimingRifleRef.current;
+          isAimingRifleRef.current = nextAim;
+          setIsAimingRifle(nextAim);
+          if (onAimingRifleChange) onAimingRifleChange(nextAim, targetZoomRef.current);
+          if (onShowBanner) {
+            onShowBanner(
+              nextAim
+                ? `🎯 Malcolm Vintage Brass Scope Engaged (${targetZoomRef.current.toFixed(1)}X)`
+                : 'Frontier Repeater at Ready'
+            );
+          }
+          return;
+        }
       }
 
       if (e.button !== 0) return; // Left click only
@@ -2622,10 +2737,66 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       });
     }
 
+    if (onRegisterToggleScopeHandler) {
+      onRegisterToggleScopeHandler(() => {
+        if (playerStateRef.current.equippedTool === 'rifle') {
+          const nextAim = !isAimingRifleRef.current;
+          isAimingRifleRef.current = nextAim;
+          setIsAimingRifle(nextAim);
+          if (onAimingRifleChange) onAimingRifleChange(nextAim, targetZoomRef.current);
+          if (onShowBanner) {
+            onShowBanner(
+              nextAim
+                ? `🎯 Malcolm Vintage Scope Engaged (${targetZoomRef.current.toFixed(1)}X)`
+                : 'Frontier Repeater at Ready'
+            );
+          }
+        }
+      });
+    }
+
+    if (onRegisterScopeZoomHandler) {
+      onRegisterScopeZoomHandler((delta: number) => {
+        if (playerStateRef.current.equippedTool === 'rifle' && isAimingRifleRef.current) {
+          const next = Math.max(2.0, Math.min(10.0, Math.round((targetZoomRef.current + delta) * 2) / 2));
+          targetZoomRef.current = next;
+          setScopeZoom(next);
+          if (onAimingRifleChange) onAimingRifleChange(true, next);
+        }
+      });
+    }
+
+    const handleWheel = (e: WheelEvent) => {
+      if (playerStateRef.current.equippedTool === 'rifle' && isAimingRifleRef.current) {
+        e.preventDefault();
+        const step = e.deltaY < 0 ? 0.5 : -0.5;
+        const next = Math.max(2.0, Math.min(10.0, Math.round((targetZoomRef.current + step) * 2) / 2));
+        if (next !== targetZoomRef.current) {
+          targetZoomRef.current = next;
+          setScopeZoom(next);
+          if (onAimingRifleChange) onAimingRifleChange(true, next);
+        }
+      }
+    };
+
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
       if (playerStateRef.current.carriedObject) {
         executePlaceRock();
+        return;
+      }
+      if (playerStateRef.current.equippedTool === 'rifle') {
+        const nextAim = !isAimingRifleRef.current;
+        isAimingRifleRef.current = nextAim;
+        setIsAimingRifle(nextAim);
+        if (onAimingRifleChange) onAimingRifleChange(nextAim, targetZoomRef.current);
+        if (onShowBanner) {
+          onShowBanner(
+            nextAim
+              ? `🎯 Malcolm Vintage Brass Scope Engaged (${targetZoomRef.current.toFixed(1)}X)`
+              : 'Frontier Repeater at Ready'
+          );
+        }
       }
     };
 
@@ -2707,6 +2878,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('wheel', handleWheel, { passive: false });
     window.addEventListener('blur', handleResetInputs);
     window.addEventListener('focus', handleResetInputs);
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -2728,6 +2900,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       cameraRef.current.aspect = w / h;
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(w, h);
+      if (postProcessingRef.current) {
+        postProcessingRef.current.resize(w, h);
+      }
     };
     window.addEventListener('resize', handleResize);
     const onOrientationChange = () => {
@@ -3279,6 +3454,33 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      // 3a-0. Tortilla Flat Historic Townfolk NPCs
+      if (townfolkManagerRef.current) {
+        const nearestNPC = townfolkManagerRef.current.getNearestNPC(playerPos.current, 3.8);
+        if (nearestNPC) {
+          const handleNPCInteract = () => {
+            soundEngine.playDiscovery();
+            const speech = nearestNPC.getNextDialogue();
+            if (onShowBanner) {
+              onShowBanner(`🗣️ ${nearestNPC.data.name} (${nearestNPC.data.title}): "${speech}"`);
+            }
+            if (nearestNPC.data.actionTab && onOpenTortillaFlat) {
+              onOpenTortillaFlat(nearestNPC.data.actionTab);
+            }
+          };
+
+          if (executeAction) {
+            handleNPCInteract();
+          } else {
+            const prompt = nearestNPC.data.actionPrompt
+              ? `${nearestNPC.data.name}: ${nearestNPC.data.actionPrompt} [E]`
+              : `Speak with ${nearestNPC.data.name} [E]`;
+            onPromptInteract(prompt, handleNPCInteract);
+          }
+          return;
+        }
+      }
+
       // 3a-1. Tortilla Flat Livery Stable & Corral (x: 14.8, z: -242.5)
       const distToLivery = Math.hypot(px - 14.8, pz - (-242.5));
       if (distToLivery < 10.0 && onOpenTortillaFlat) {
@@ -3290,8 +3492,24 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         return;
       }
 
+      // 3a-2. Direct Building Door Entrances
+      const distToSaloonDoor = Math.hypot(px - (-10.0), pz - (-246.0));
+      const distToMercantileDoor = Math.hypot(px - (-10.0), pz - (-261.5));
+      if ((distToSaloonDoor < 5.0 || distToMercantileDoor < 5.0) && onOpenTortillaFlat) {
+        const tab = distToMercantileDoor < distToSaloonDoor ? 'mercantile' : 'saloon';
+        const label = distToMercantileDoor < distToSaloonDoor
+          ? 'Enter Tortilla Flat Mercantile & Assayer [E]'
+          : 'Enter Superstition Saloon [E]';
+        if (executeAction) {
+          onOpenTortillaFlat(tab);
+        } else {
+          onPromptInteract(label, () => onOpenTortillaFlat(tab));
+        }
+        return;
+      }
+
       const distToSaloon = Math.hypot(px - 0, pz - (-250));
-      if (distToSaloon < 28 && onOpenTortillaFlat) {
+      if (distToSaloon < 24 && onOpenTortillaFlat) {
         if (executeAction) {
           onOpenTortillaFlat();
         } else {
@@ -4260,7 +4478,36 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // Sync character model position and rotation (Third Person)
       const saddleHeightOffset = isRiding ? (playerStateRef.current.ownedMount === 'burro' ? 0.75 : 0.95) : 0;
-      if (characterMeshRef.current) {
+      if (localPlayerRigRef.current) {
+        const rig = localPlayerRigRef.current;
+        rig.root.position.set(
+          playerPos.current.x,
+          currentGroundY + saddleHeightOffset,
+          playerPos.current.z
+        );
+        rig.root.rotation.y = playerYaw.current;
+        rig.root.visible = viewMode === 'third';
+
+        // Synchronize equipped tool & rock carrying
+        rig.setEquippedTool(
+          playerStateRef.current.equippedTool,
+          !!playerStateRef.current.carriedObject
+        );
+
+        // Locomotion state and animation
+        rig.updateAnimation({
+          delta,
+          isMoving: isMoving && isGrounded.current,
+          moveSpeed: isSprinting ? 1.5 : 1.0,
+          isRiding,
+          isAiming: isAimingRifleRef.current,
+          isSwinging: toolSwingProgress.current > 0,
+          swingProgress: toolSwingProgress.current,
+          pitch: playerPitch.current,
+          carriedRock: !!playerStateRef.current.carriedObject,
+          isDead: isGameOverRef.current,
+        });
+      } else if (characterMeshRef.current) {
         characterMeshRef.current.position.set(
           playerPos.current.x,
           currentGroundY + saddleHeightOffset,
@@ -4410,15 +4657,75 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
 
       // First-Person Tool Swing & Idle Breathing Animation
+      const tool = playerStateRef.current.equippedTool;
+      const isToolVisible = viewMode === 'first' && (Boolean(carried) || tool === 'shovel' || tool === 'pickaxe' || tool === 'axe' || tool === 'rifle');
+
+      // Check if player is resting rifle against a nearby Frontier Rifle Barrier
+      let restingOnBarrier = false;
+      if (tool === 'rifle' && mineBuildingRef.current) {
+        const px = playerPos.current.x;
+        const pz = playerPos.current.z;
+        for (let bIdx = 0; bIdx < mineBuildingRef.current.builtStructures.length; bIdx++) {
+          const str = mineBuildingRef.current.builtStructures[bIdx];
+          if (str.type === 'rifle_barrier') {
+            const bDist = Math.hypot(px - str.position.x, pz - str.position.z);
+            if (bDist < 2.2) {
+              restingOnBarrier = true;
+              break;
+            }
+          }
+        }
+      }
+      if (restingOnBarrier !== isRestingOnBarrierRef.current) {
+        isRestingOnBarrierRef.current = restingOnBarrier;
+        setIsRestingOnBarrier(restingOnBarrier);
+      }
+
+      // Decay rifle recoil kickback
+      if (rifleRecoilRef.current > 0) {
+        rifleRecoilRef.current = Math.max(0, rifleRecoilRef.current - delta * (restingOnBarrier ? 8.0 : 4.5));
+      }
+
+      const isAiming = isAimingRifleRef.current && tool === 'rifle' && !carried;
+      // Smooth camera FOV adjustment when aiming through vintage scope with dynamic zoom
+      const currentZoom = Math.max(1.0, targetZoomRef.current);
+      const targetFov = tool === 'binoculars' ? 22 : isAiming ? (65 / currentZoom) : 65;
+      if (Math.abs(camera.fov - targetFov) > 0.05) {
+        camera.fov += (targetFov - camera.fov) * Math.min(1, delta * 14);
+        camera.updateProjectionMatrix();
+      }
+
+      const swayFactor = restingOnBarrier ? 0.08 : (isAiming ? 0.25 : 1.0);
+      const breathe = Math.sin(now * 0.0022) * 0.006 * swayFactor;
+      const recoil = rifleRecoilRef.current;
+
+      // Update First-Person Articulated Arms Rig
+      if (fpArmsRigRef.current) {
+        const isArmsVisible = viewMode === 'first' && !isAiming;
+        fpArmsRigRef.current.root.visible = isArmsVisible;
+        if (isArmsVisible) {
+          fpArmsRigRef.current.update({
+            delta,
+            tool,
+            isAiming,
+            isMoving: isMoving && isGrounded.current,
+            isSprinting,
+            isSwinging: toolSwingProgress.current > 0,
+            swingProgress: toolSwingProgress.current,
+            recoil,
+            carriedRock: Boolean(carried),
+            restingOnBarrier,
+          });
+        }
+      }
+
       if (fpToolGroupRef.current) {
-        const tool = playerStateRef.current.equippedTool;
-        const carried = playerStateRef.current.carriedObject;
-        const isToolVisible = viewMode === 'first' && (Boolean(carried) || tool === 'shovel' || tool === 'pickaxe' || tool === 'axe');
         fpToolGroupRef.current.visible = isToolVisible;
 
         if (fpPickGroupRef.current) fpPickGroupRef.current.visible = !carried && tool === 'pickaxe';
         if (fpShovelGroupRef.current) fpShovelGroupRef.current.visible = !carried && tool === 'shovel';
         if (fpAxeGroupRef.current) fpAxeGroupRef.current.visible = !carried && tool === 'axe';
+        if (fpRifleGroupRef.current) fpRifleGroupRef.current.visible = !carried && tool === 'rifle';
 
         if (fpCarriedRockGroupRef.current) {
           fpCarriedRockGroupRef.current.visible = Boolean(carried);
@@ -4428,8 +4735,21 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         }
 
-        const breathe = Math.sin(now * 0.0022) * 0.006;
-        if (carried) {
+        if (tool === 'rifle' && !carried) {
+          if (isAiming) {
+            // Looking directly through the scope ocular lens:
+            // Hide the first-person weapon mesh so the sight picture through the circular brass optic is 100% crystal-clear and unobstructed!
+            fpToolGroupRef.current.visible = false;
+            if (recoil > 0.02) {
+              camera.rotation.x += recoil * 0.015;
+            }
+          } else {
+            fpToolGroupRef.current.visible = isToolVisible;
+            // Low-ready frontier hip hold aligned with gloved arms
+            fpToolGroupRef.current.rotation.set(0.04 + recoil * 0.22, -0.05, 0);
+            fpToolGroupRef.current.position.set(0.24, -0.22 + breathe - recoil * 0.04, -0.48 + recoil * 0.1);
+          }
+        } else if (carried) {
           if (toolSwingProgress.current > 0) {
             toolSwingProgress.current = Math.max(0, toolSwingProgress.current - delta * 4.5);
             const heave = Math.sin(toolSwingProgress.current * Math.PI);
@@ -4794,6 +5114,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         );
       }
 
+      // 5b-5. Tortilla Flat Historic Townfolk NPCs animation & logic
+      if (townfolkManagerRef.current) {
+        townfolkManagerRef.current.update(delta, playerPos.current);
+      }
+
       // 5c. Subterranean Mine Shaft & Granular Mini-Voxel Engine
       if (undergroundLayersRef.current) {
         undergroundLayersRef.current.update(delta, performance.now(), timeOfDay, weather);
@@ -4878,8 +5203,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
-      // Render scene
-      renderer.render(scene, camera);
+      // Render scene via cinematic post-processing pipeline or fallback to standard renderer
+      if (postProcessingRef.current) {
+        postProcessingRef.current.update(delta, timeOfDayRef.current, qualityRef.current);
+        postProcessingRef.current.composer.render();
+      } else {
+        renderer.render(scene, camera);
+      }
 
       // Update remote prospectors smooth interpolation and animations
       remoteProspectorsRef.current.forEach((rp) => {
@@ -4914,9 +5244,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         rp.dispose();
       });
       remoteProspectorsRef.current.clear();
+      fpArmsRigRef.current?.dispose();
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('blur', handleResetInputs);
       window.removeEventListener('focus', handleResetInputs);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -4983,6 +5315,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (mountManagerRef.current && typeof mountManagerRef.current.dispose === 'function') {
         mountManagerRef.current.dispose();
       }
+      if (townfolkManagerRef.current && typeof townfolkManagerRef.current.dispose === 'function') {
+        townfolkManagerRef.current.dispose();
+        townfolkManagerRef.current = null;
+      }
+      if (postProcessingRef.current) {
+        postProcessingRef.current.dispose();
+        postProcessingRef.current = null;
+      }
       renderer.dispose();
     };
   }, [viewMode]);
@@ -5035,6 +5375,107 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             <span className="absolute bottom-6 font-mono text-amber-300 text-xs tracking-widest">
               FIELD GLASSES 8X
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Vintage Brass Malcolm Telescopic Scope Overlay */}
+      {playerState.equippedTool === 'rifle' && isAimingRifle && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center select-none overflow-hidden">
+          {/* Blackout Vignette with circular brass scope ocular tube */}
+          <div className="relative w-[min(88vw,560px)] h-[min(88vw,560px)] rounded-full border-[22px] border-[#7d5d33] ring-4 ring-[#3a2810] shadow-[0_0_0_9999px_rgba(8,7,5,0.98)] flex items-center justify-center">
+            {/* Outer Brass Tube Thread & Knurling texture */}
+            <div className="absolute -inset-[22px] rounded-full border border-amber-600/40 pointer-events-none" />
+            <div className="absolute inset-0 rounded-full border-[2px] border-amber-500/30 pointer-events-none" />
+
+            {/* Scope Optics Lens Tint: slight warm amber vignette towards edge, crisp in center */}
+            <div className="absolute inset-0 rounded-full bg-radial from-transparent via-transparent to-amber-950/25 pointer-events-none" />
+
+            {/* German No. 1 Reticle: Thick Horizontal Posts tapering to ultra-fine wire */}
+            <div className="w-full absolute flex items-center justify-between px-4 pointer-events-none">
+              {/* Left thick post */}
+              <div className="h-1.5 w-[38%] bg-stone-950 flex items-center justify-end">
+                <div className="w-0 h-0 border-y-[3px] border-y-transparent border-l-[10px] border-l-stone-950" />
+              </div>
+              {/* Right thick post */}
+              <div className="h-1.5 w-[38%] bg-stone-950 flex items-center justify-start">
+                <div className="w-0 h-0 border-y-[3px] border-y-transparent border-r-[10px] border-r-stone-950" />
+              </div>
+            </div>
+
+            {/* Fine Horizontal Center Hairline */}
+            <div className="w-[50%] h-[1px] bg-stone-950 absolute pointer-events-none flex justify-between px-6">
+              <div className="w-[1px] h-3 -mt-1 bg-stone-900" />
+              <div className="w-[1px] h-2 -mt-0.5 bg-stone-900" />
+              <div className="w-[1px] h-2 -mt-0.5 bg-stone-900" />
+              <div className="w-[1px] h-3 -mt-1 bg-stone-900" />
+            </div>
+
+            {/* Bottom Thick Post tapering to central apex pointer */}
+            <div className="h-[42%] w-1.5 bg-stone-950 absolute bottom-0 flex flex-col items-center justify-start pointer-events-none">
+              <div className="w-0 h-0 border-x-[3px] border-x-transparent border-b-[10px] border-b-stone-950 -mt-2.5" />
+            </div>
+
+            {/* Fine Vertical Center Hairline */}
+            <div className="h-[52%] w-[1px] bg-stone-950 absolute pointer-events-none flex flex-col justify-between py-4">
+              <div className="h-[1px] w-2 -ml-0.5 bg-stone-900" />
+              <div className="h-[1px] w-3 -ml-1 bg-stone-900" />
+              <div className="h-[1px] w-2 -ml-0.5 bg-stone-900" />
+              <div className="h-[1px] w-4 -ml-1.5 bg-stone-900" />
+            </div>
+
+            {/* Central Precision Mil-Dot */}
+            <div className="w-2 h-2 rounded-full bg-stone-950 absolute pointer-events-none" />
+
+            {/* Top Period Inscription */}
+            <div className="absolute top-5 font-serif text-[10px] tracking-widest text-amber-200/75 uppercase drop-shadow">
+              Malcolm & Co. Telescopic Sight • Pat. 1871
+            </div>
+
+            {/* Magnification Controls & Indicator */}
+            <div className="absolute bottom-6 flex flex-col items-center gap-1 pointer-events-auto">
+              <div className="flex items-center gap-2 bg-stone-950/85 backdrop-blur-sm px-3 py-1 rounded-full border border-amber-500/40 shadow-lg">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const next = Math.max(2.0, Math.round((targetZoomRef.current - 0.5) * 2) / 2);
+                    targetZoomRef.current = next;
+                    setScopeZoom(next);
+                    if (onAimingRifleChange) onAimingRifleChange(true, next);
+                  }}
+                  className="w-5 h-5 rounded-full bg-amber-500/20 hover:bg-amber-500/40 active:bg-amber-500 text-amber-300 active:text-stone-950 font-bold text-xs flex items-center justify-center transition cursor-pointer"
+                  title="Zoom Out [- or Scroll Down]"
+                >
+                  -
+                </button>
+                <span className="font-mono text-xs font-black tracking-wider text-amber-300 min-w-[3.5rem] text-center">
+                  {scopeZoom.toFixed(1)}X
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const next = Math.min(10.0, Math.round((targetZoomRef.current + 0.5) * 2) / 2);
+                    targetZoomRef.current = next;
+                    setScopeZoom(next);
+                    if (onAimingRifleChange) onAimingRifleChange(true, next);
+                  }}
+                  className="w-5 h-5 rounded-full bg-amber-500/20 hover:bg-amber-500/40 active:bg-amber-500 text-amber-300 active:text-stone-950 font-bold text-xs flex items-center justify-center transition cursor-pointer"
+                  title="Zoom In [+ or Scroll Up]"
+                >
+                  +
+                </button>
+              </div>
+
+              {/* Status / Rest Information */}
+              <span className={`font-mono text-[10px] tracking-wider font-semibold ${isRestingOnBarrier ? 'text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'text-amber-200/80'}`}>
+                {isRestingOnBarrier ? '🛡️ RESTED ON FRONTIER BARRIER' : 'OFF-HAND AIM'}
+              </span>
+              <span className="font-mono text-[8px] tracking-widest text-stone-400/80 uppercase">
+                {isRestingOnBarrier ? 'ZERO SWAY • RECOIL DAMPENED' : 'SCROLL / [ ] TO ZOOM • RMB / V TO LOWER'}
+              </span>
+            </div>
           </div>
         </div>
       )}

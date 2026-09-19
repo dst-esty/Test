@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MountainDustParticleSystem } from './mountainDustParticles';
 import { getTerrainHeight } from './terrain';
 import { soundEngine } from '../audio/soundEffects';
+import { safeMergeGeometries } from './foliage';
 
 export type MountainHoleType = 'drift' | 'branch' | 'raise';
 
@@ -869,7 +869,7 @@ export class MountainHoleManager {
         mesh.frustumCulled = false;
         hole.group.add(mesh);
       } else {
-        const merged = mergeGeometries(geos, false);
+        const merged = safeMergeGeometries(geos);
         geos.forEach((g) => g.dispose());
         if (merged) {
           mesh = new THREE.Mesh(merged, material);

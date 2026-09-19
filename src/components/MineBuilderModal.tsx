@@ -13,6 +13,7 @@ import {
   X,
   CheckCircle2,
   Tent,
+  Shield,
 } from 'lucide-react';
 import { MineStructureType, PlayerState, StructureBlueprint } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
@@ -84,6 +85,8 @@ export const MineBuilderModal: React.FC<MineBuilderModalProps> = ({
         return <Tent className="w-6 h-6 text-amber-300" />;
       case 'frontier_torch':
         return <Flame className="w-6 h-6 text-amber-400" />;
+      case 'rifle_barrier':
+        return <Shield className="w-6 h-6 text-amber-300" />;
     }
   };
 

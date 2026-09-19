@@ -1749,17 +1749,18 @@ export function generateTerrainNoiseTexture(size = 256): THREE.DataTexture {
       const u = x / size;
       const v = y / size;
 
-      // Channel R: Macro rock strata noise
-      const r = (smoothNoise(u * 8, v * 8) * 0.65 + smoothNoise(u * 16, v * 16) * 0.35) * 255;
+      // Channel R: Macro rock strata noise with cross-bedding warping
+      const warp = smoothNoise(u * 4 + 12.3, v * 4 + 8.7) * 0.4;
+      const r = (smoothNoise((u + warp) * 10, v * 20) * 0.6 + smoothNoise(u * 24, v * 36) * 0.4) * 255;
 
-      // Channel G: Scree and pebble relief
-      const g = (smoothNoise(u * 28 + 40, v * 28 + 40) * 0.7 + smoothNoise(u * 56, v * 56) * 0.3) * 255;
+      // Channel G: Scree, talus gravel and pebble relief
+      const g = (smoothNoise(u * 32 + 40, v * 32 + 40) * 0.65 + smoothNoise(u * 64, v * 64) * 0.35) * 255;
 
-      // Channel B: Micro sand grain grit
-      const b = smoothNoise(u * 70 + 90, v * 70 + 90) * 255;
+      // Channel B: Micro sand grain grit & fine quartz sparkle
+      const b = (smoothNoise(u * 80 + 90, v * 80 + 90) * 0.7 + smoothNoise(u * 160, v * 160) * 0.3) * 255;
 
-      // Channel A: Desert varnish erosion streak
-      const a = (smoothNoise(u * 4 + 10, v * 12 + 10) * 0.8 + smoothNoise(u * 12, v * 24) * 0.2) * 255;
+      // Channel A: Desert varnish erosion streaks with directional vertical drainage
+      const a = (smoothNoise(u * 6 + 10, v * 18 + 10) * 0.75 + smoothNoise(u * 16, v * 32) * 0.25) * 255;
 
       const idx = (y * size + x) * 4;
       data[idx] = Math.floor(r);
@@ -1907,7 +1908,7 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
     shadowSide: THREE.FrontSide,
   });
 
-  material.customProgramCacheKey = () => 'superstition_terrain_material_v5';
+  material.customProgramCacheKey = () => 'superstition_terrain_material_v6_rdr';
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTerrainNoise = { value: noiseTexture };
@@ -1973,39 +1974,61 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
       highp vec3 tNorm = normalize(vWorldNormal);
       highp float slope = 1.0 - clamp(tNorm.y, 0.0, 1.0);
 
-      // Triplanar procedural sampling of geological texture
-      vec4 texX = texture2D(uTerrainNoise, vWorldPos.yz * 0.06);
-      vec4 texY = texture2D(uTerrainNoise, vWorldPos.xz * 0.06);
-      vec4 texZ = texture2D(uTerrainNoise, vWorldPos.xy * 0.06);
+      // Triplanar procedural sampling of geological texture across multiple scales (macro cliffs & micro detail)
       vec3 blend = abs(tNorm);
-      blend /= max(0.001, blend.x + blend.y + blend.z);
-      vec4 rockTex = texX * blend.x + texY * blend.y + texZ * blend.z;
+      blend = pow(blend, vec3(4.0));
+      blend /= max(0.0001, blend.x + blend.y + blend.z);
 
-      // Multi-layer sedimentary geological strata (Coconino sandstone, Supai terracing, Hermit shale)
-      float fineBanding = sin(vWorldPos.y * 2.1 + rockTex.r * 3.2) * 0.5 + 0.5;
-      float coarseStrata = sin(vWorldPos.y * 0.52 + rockTex.g * 1.4) * 0.5 + 0.5;
+      // Macro geological scale (cliffs, broad banding)
+      vec4 texX_macro = texture2D(uTerrainNoise, vWorldPos.yz * 0.045);
+      vec4 texY_macro = texture2D(uTerrainNoise, vWorldPos.xz * 0.045);
+      vec4 texZ_macro = texture2D(uTerrainNoise, vWorldPos.xy * 0.045);
+      vec4 rockTexMacro = texX_macro * blend.x + texY_macro * blend.y + texZ_macro * blend.z;
 
-      vec3 terracotta = vec3(0.66, 0.30, 0.18);
-      vec3 buffSand = vec3(0.77, 0.50, 0.32);
-      vec3 deepHematite = vec3(0.48, 0.18, 0.12);
-      vec3 darkVarnish = vec3(0.22, 0.16, 0.14);
+      // Micro grit and scree detail (close-up surface roughness & pebbles)
+      vec4 texX_micro = texture2D(uTerrainNoise, vWorldPos.yz * 0.28);
+      vec4 texY_micro = texture2D(uTerrainNoise, vWorldPos.xz * 0.28);
+      vec4 texZ_micro = texture2D(uTerrainNoise, vWorldPos.xy * 0.28);
+      vec4 rockTexMicro = texX_micro * blend.x + texY_micro * blend.y + texZ_micro * blend.z;
 
-      vec3 cliffRock = mix(terracotta, buffSand, coarseStrata * 0.55);
-      cliffRock = mix(cliffRock, deepHematite, fineBanding * 0.35);
-      cliffRock = mix(cliffRock, darkVarnish, rockTex.a * 0.42);
+      // Red Dead Redemption-style Arizona geological strata (Coconino sandstone, Supai terracing, Hermit shale, Iron-oxide silt)
+      float strataWarp = rockTexMacro.r * 1.8 + rockTexMicro.g * 0.35;
+      float fineBanding = sin(vWorldPos.y * 3.4 + strataWarp * 2.5) * 0.5 + 0.5;
+      float mediumBanding = sin(vWorldPos.y * 1.15 + strataWarp * 1.2) * 0.5 + 0.5;
+      float macroStrata = sin(vWorldPos.y * 0.38 + rockTexMacro.g * 0.8) * 0.5 + 0.5;
 
-      // Sandy wash / arroyo base with micro pebble grit
-      vec3 sandBase = diffuseColor.rgb * (0.86 + rockTex.g * 0.22);
+      vec3 terracotta = vec3(0.68, 0.29, 0.17);
+      vec3 buffSandstone = vec3(0.79, 0.53, 0.34);
+      vec3 deepHematite = vec3(0.46, 0.17, 0.11);
+      vec3 ironOchre = vec3(0.72, 0.42, 0.20);
+      vec3 darkDesertVarnish = vec3(0.19, 0.14, 0.13);
 
-      // Blend based on steepness of the terrain surface
-      diffuseColor.rgb = mix(sandBase, cliffRock, smoothstep(0.24, 0.65, slope));
+      vec3 cliffRock = mix(terracotta, buffSandstone, macroStrata * 0.6);
+      cliffRock = mix(cliffRock, ironOchre, mediumBanding * 0.45);
+      cliffRock = mix(cliffRock, deepHematite, fineBanding * 0.38);
+      cliffRock = mix(cliffRock, darkDesertVarnish, rockTexMacro.a * 0.52);
+
+      // Micro scree pebbles & gravel on slopes
+      cliffRock *= (0.88 + rockTexMicro.g * 0.24);
+
+      // Sandy desert wash / arroyo base with micro quartz sparkle and gravel wash
+      vec3 sandWash = diffuseColor.rgb * (0.84 + rockTexMicro.g * 0.26);
+      // Sun-baked crust on flat ground
+      sandWash = mix(sandWash, vec3(0.82, 0.66, 0.48), rockTexMacro.b * 0.25);
+
+      // Slope-based transitions with natural talus apron erosion break
+      float slopeFactor = smoothstep(0.22, 0.62, slope);
+      diffuseColor.rgb = mix(sandWash, cliffRock, slopeFactor);
       `
     );
 
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <roughnessmap_fragment>',
       `#include <roughnessmap_fragment>
-      roughnessFactor = mix(0.94, 0.68, smoothstep(0.3, 0.7, slope));
+      // RDR PBR response: weathered rocks have higher micro-specularity on smooth varnish, high roughness on dry sand
+      float rockRoughness = mix(0.72, 0.95, rockTexMicro.g);
+      float varnishGloss = (1.0 - rockTexMacro.a * 0.3);
+      roughnessFactor = mix(0.96, rockRoughness * varnishGloss, smoothstep(0.2, 0.68, slope));
       `
     );
   };

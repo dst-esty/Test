@@ -719,24 +719,30 @@ export class AtmosphereManager {
           float sunDot = max(dot(viewDir, sunDir), 0.0);
           float horizon = clamp(viewDir.y, 0.0, 1.0);
 
-          // Continuous eased Rayleigh dome gradient across day, golden hour, twilight, and night
-          vec3 sky = mix(uHorizonColor, uZenithColor, pow(horizon, 0.52));
+          // RDR western atmosphere: warm low-altitude desert aerosol / dust haze band near the horizon
+          float horizonHaze = pow(1.0 - horizon, 3.2);
+          vec3 warmHazeColor = mix(uHorizonColor, vec3(0.96, 0.62, 0.36), 0.35);
+
+          // Eased Rayleigh celestial dome gradient across day, golden hour, twilight, and night
+          vec3 sky = mix(uHorizonColor, uZenithColor, pow(horizon, 0.48));
+          sky = mix(sky, warmHazeColor, horizonHaze * 0.45);
 
           // Physical Sun Disc and Mie scattering corona on the celestial sky dome
           // Smooth sunset immersion factor: fades smoothly as sun descends towards/below the horizon
           float horizonFade = clamp((sunDir.y + 0.04) / 0.16, 0.0, 1.0);
           if (horizonFade > 0.001 && uSunCoronaIntensity > 0.01) {
-            // Tight realistic solar disc (apparent angular size ~0.5°)
+            // Solar disc (apparent angular size ~0.5°)
             float sunDisc = smoothstep(0.9997, 0.99995, sunDot);
 
-            // Forward Mie atmospheric scattering corona with realistic steep angular falloff
-            float innerCorona = pow(sunDot, 1200.0) * 1.8;
-            float outerCorona = pow(sunDot, 180.0) * 0.45;
-            float softGlow = pow(sunDot, 48.0) * 0.12;
+            // Forward Mie atmospheric scattering corona with multi-tier optical falloff (RDR golden glow)
+            float innerCorona = pow(sunDot, 1024.0) * 2.2;
+            float midCorona = pow(sunDot, 140.0) * 0.65;
+            float outerGlow = pow(sunDot, 32.0) * 0.22;
+            float horizonAerosolGlow = pow(sunDot, 8.0) * horizonHaze * 0.28;
 
-            float coronaTotal = (innerCorona + outerCorona + softGlow) * uSunCoronaIntensity * horizonFade;
-            sky += uSunCoronaColor * min(coronaTotal, 1.8);
-            sky += vec3(1.0, 1.0, 0.96) * sunDisc * 2.0 * horizonFade;
+            float coronaTotal = (innerCorona + midCorona + outerGlow + horizonAerosolGlow) * uSunCoronaIntensity * horizonFade;
+            sky += uSunCoronaColor * min(coronaTotal, 2.4);
+            sky += vec3(1.0, 1.0, 0.96) * sunDisc * 2.2 * horizonFade;
           } else if (horizonFade > 0.001 && uHaboobDustBlend > 0.05) {
             // Obscured reddish solar disc struggling through the thick Haboob dust
             float sunDisc = smoothstep(0.9995, 0.99995, sunDot);
@@ -747,7 +753,7 @@ export class AtmosphereManager {
           // Celestial Night Stars and Procedural Milky Way with smooth eased opacity
           if (uStarAlpha > 0.005) {
             float star = step(0.9962, starHash(floor(viewDir * 420.0))) * uStarAlpha;
-            float milkyBand = pow(max(0.0, 1.0 - abs(viewDir.x * 0.72 + viewDir.z * 0.69)), 5.5) * 0.32 * uStarAlpha;
+            float milkyBand = pow(max(0.0, 1.0 - abs(viewDir.x * 0.72 + viewDir.z * 0.69)), 5.5) * 0.38 * uStarAlpha;
             sky += vec3(0.94, 0.96, 1.0) * star + vec3(0.70, 0.78, 0.98) * milkyBand;
           }
 

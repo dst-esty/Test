@@ -318,6 +318,16 @@ export const STRUCTURE_BLUEPRINTS: Record<MineStructureType, StructureBlueprint>
     dimensions: { width: 0.6, height: 2.2, depth: 0.6 },
     benefit: 'Stakes into the earth like a tiki torch to illuminate campsites, claim borders, dark trails, and mine tunnels with warm firelight.',
   },
+  rifle_barrier: {
+    type: 'rifle_barrier',
+    name: 'Frontier Rifle Barrier',
+    description: 'Fortified heavy pine timber parapet with packed sandbags and a notched gun rest to steady rifle fire against outlaw ambushes.',
+    goldCost: 0,
+    rockCost: 3,
+    woodCost: 2,
+    dimensions: { width: 2.8, height: 1.25, depth: 1.0 },
+    benefit: 'Provides high ballistic cover against bandits and a steady gun rest for scoped precision rifle shots.',
+  },
 };
 
 export class MineBuildingSystem {
@@ -1154,6 +1164,9 @@ export class MineBuildingSystem {
         break;
       case 'frontier_torch':
         mesh = this.createFrontierTorchMesh(structure);
+        break;
+      case 'rifle_barrier':
+        mesh = this.createRifleBarrierMesh(structure);
         break;
     }
 
@@ -2371,6 +2384,112 @@ export class MineBuildingSystem {
     return group;
   }
 
+  // Structure 10: Frontier Rifle Barrier / Fortified Breastwork
+  private createRifleBarrierMesh(structure: BuiltStructure): THREE.Group {
+    const group = new THREE.Group();
+
+    // Weathered timber logs
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0x4a3220,
+      roughness: 0.88,
+    });
+    // Burlap sandbags
+    const sandbagMat = new THREE.MeshStandardMaterial({
+      color: 0xb59e77,
+      roughness: 0.95,
+    });
+    // Iron brackets & stakes
+    const ironMat = new THREE.MeshStandardMaterial({
+      color: 0x24272a,
+      metalness: 0.8,
+      roughness: 0.4,
+    });
+
+    // 1. Heavy Pine Timber Base Log
+    const baseLog = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.2, 2.6, 10), woodMat);
+    baseLog.rotation.z = Math.PI / 2;
+    baseLog.position.set(0, 0.18, 0);
+    baseLog.castShadow = true;
+    baseLog.receiveShadow = true;
+    group.add(baseLog);
+
+    // 2. Mid Timber Log
+    const midLog = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.17, 2.6, 10), woodMat);
+    midLog.rotation.z = Math.PI / 2;
+    midLog.position.set(0, 0.5, -0.02);
+    midLog.castShadow = true;
+    group.add(midLog);
+
+    // 3. Top Split Log Breastwork with Central Rifle Rest Notch
+    const leftLog = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.95, 10), woodMat);
+    leftLog.rotation.z = Math.PI / 2;
+    leftLog.position.set(-0.75, 0.8, -0.04);
+    leftLog.castShadow = true;
+    group.add(leftLog);
+
+    const rightLog = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.95, 10), woodMat);
+    rightLog.rotation.z = Math.PI / 2;
+    rightLog.position.set(0.75, 0.8, -0.04);
+    rightLog.castShadow = true;
+    group.add(rightLog);
+
+    // Central V-shaped rifle rest notch wood
+    const notchRest = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.28), woodMat);
+    notchRest.position.set(0, 0.72, -0.04);
+    notchRest.castShadow = true;
+    group.add(notchRest);
+
+    // 4. Heavy Stacked Front Sandbags (ballistic shield)
+    for (let row = 0; row < 3; row++) {
+      const bagCount = row === 0 ? 5 : row === 1 ? 4 : 3;
+      const rowY = 0.12 + row * 0.22;
+      const startX = -((bagCount - 1) * 0.48) / 2;
+      for (let b = 0; b < bagCount; b++) {
+        if (row === 2 && b === 1) continue; // leave gun slit
+        const bag = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.18, 0.28), sandbagMat);
+        bag.position.set(startX + b * 0.48, rowY, 0.2);
+        bag.rotation.y = Math.sin(b * 1.5 + row) * 0.1;
+        bag.rotation.z = Math.cos(b * 2.1) * 0.04;
+        bag.castShadow = true;
+        bag.receiveShadow = true;
+        group.add(bag);
+      }
+    }
+
+    // 5. Rear Prospector Ammo & Rest Shelf
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.04, 0.35), woodMat);
+    shelf.position.set(0, 0.65, -0.28);
+    shelf.castShadow = true;
+    group.add(shelf);
+
+    const bracket1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.26, 0.28), woodMat);
+    bracket1.position.set(-0.6, 0.52, -0.24);
+    group.add(bracket1);
+
+    const bracket2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.26, 0.28), woodMat);
+    bracket2.position.set(0.6, 0.52, -0.24);
+    group.add(bracket2);
+
+    // 6. Brass .44 Cartridge Box on shelf
+    const ammoBox = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.08, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x2d4a22, roughness: 0.6 })
+    );
+    ammoBox.position.set(0.42, 0.71, -0.26);
+    ammoBox.rotation.y = 0.2;
+    group.add(ammoBox);
+
+    // 7. Ground Iron Anchor Stakes
+    for (let s = 0; s < 2; s++) {
+      const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.015, 0.9, 6), ironMat);
+      stake.position.set(s === 0 ? -1.35 : 1.35, 0.45, 0);
+      stake.rotation.z = s === 0 ? 0.15 : -0.15;
+      group.add(stake);
+    }
+
+    return group;
+  }
+
   // ==========================================
   // HOLOGRAPHIC BLUEPRINT GHOST PREVIEW
   // ==========================================
@@ -2430,6 +2549,32 @@ export class MineBuildingSystem {
       torchGhost.add(lightRing);
 
       this.ghostMesh = torchGhost;
+    } else if (type === 'rifle_barrier') {
+      const barrierGhost = new THREE.Group();
+      // Main breastwork log parapet
+      const log1 = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.45, 0.4), ghostMat);
+      log1.position.y = 0.22;
+      barrierGhost.add(log1);
+
+      const log2 = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.4, 0.35), ghostMat);
+      log2.position.y = 0.6;
+      barrierGhost.add(log2);
+
+      // Gun slit notch preview
+      const slitL = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.35, 0.3), ghostMat);
+      slitL.position.set(-0.75, 0.9, 0);
+      barrierGhost.add(slitL);
+
+      const slitR = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.35, 0.3), ghostMat);
+      slitR.position.set(0.75, 0.9, 0);
+      barrierGhost.add(slitR);
+
+      // Sandbag front shelf
+      const sandbags = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 0.3), ghostMat);
+      sandbags.position.set(0, 0.25, 0.25);
+      barrierGhost.add(sandbags);
+
+      this.ghostMesh = barrierGhost;
     } else if (type === 'headframe_hoist') {
       const hfGhost = new THREE.Group();
       // Collar base timber footprint

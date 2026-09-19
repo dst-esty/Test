@@ -286,31 +286,34 @@ export class DesertHydrologyEngine {
           float crestFoam = smoothstep(0.65, 0.95, ripples) * (0.1 + uStormFactor * 0.45);
           float totalFoam = clamp(edgeFoam + crestFoam, 0.0, 1.0);
           
-          // Palette: Crystal turquoise oasis vs silty flash flood mud
-          vec3 calmColor = vec3(0.13, 0.46, 0.55);
-          vec3 stormColor = vec3(0.46, 0.33, 0.21);
-          vec3 foamColor = vec3(0.92, 0.90, 0.85);
+          // Palette: Natural western stream with clear emerald-turquoise mountain spring vs silty arroyo runoff
+          vec3 calmColor = vec3(0.11, 0.44, 0.48);
+          vec3 deepPoolColor = vec3(0.06, 0.28, 0.35);
+          vec3 stormColor = vec3(0.44, 0.31, 0.19);
+          vec3 foamColor = vec3(0.94, 0.92, 0.88);
           
-          vec3 baseWater = mix(calmColor, stormColor, uStormFactor);
+          vec3 waterBody = mix(calmColor, deepPoolColor, clamp(vWorldPos.y * -0.05, 0.0, 0.6));
+          vec3 baseWater = mix(waterBody, stormColor, uStormFactor);
           
-          // Sun specular glint
+          // Sun specular glint with realistic micro-facet spread
           vec3 viewDir = normalize(uCameraPos - vWorldPos);
           vec3 lightDir = normalize(uSunDir);
           vec3 halfVec = normalize(lightDir + viewDir);
           
-          vec3 perturbedNormal = normalize(vNormal + vec3(ripples * 0.12, 0.0, ripples * 0.12));
-          float spec = pow(max(0.0, dot(perturbedNormal, halfVec)), 42.0) * 1.4;
+          vec3 perturbedNormal = normalize(vNormal + vec3(ripples * 0.16, 0.0, ripples * 0.16));
+          float spec = pow(max(0.0, dot(perturbedNormal, halfVec)), 64.0) * 1.8;
+          float broadSpec = pow(max(0.0, dot(perturbedNormal, halfVec)), 14.0) * 0.25;
           
-          // Fresnel reflection
-          float fresnel = pow(1.0 - max(0.0, dot(viewDir, perturbedNormal)), 3.0);
+          // Fresnel reflection with sky color bounce
+          float fresnel = pow(1.0 - max(0.0, dot(viewDir, perturbedNormal)), 4.0);
           
           vec3 finalColor = mix(baseWater, foamColor, totalFoam);
-          finalColor += spec * vec3(1.0, 0.95, 0.82) * (0.7 + uRainIntensity * 0.3);
+          finalColor += (spec + broadSpec) * vec3(1.0, 0.94, 0.80) * (0.85 + uRainIntensity * 0.3);
           finalColor += rainRings * vec3(0.85, 0.92, 0.98);
-          finalColor = mix(finalColor, vec3(0.72, 0.82, 0.92), fresnel * 0.45);
+          finalColor = mix(finalColor, vec3(0.76, 0.84, 0.92), fresnel * 0.55);
           
-          float baseOpacity = 0.84 + uRainIntensity * 0.12;
-          float alpha = clamp(baseOpacity * (0.42 + fresnel * 0.58 + totalFoam * 0.48), 0.0, 0.96);
+          float baseOpacity = 0.82 + uRainIntensity * 0.14;
+          float alpha = clamp(baseOpacity * (0.38 + fresnel * 0.62 + totalFoam * 0.55), 0.0, 0.96);
           
           gl_FragColor = vec4(finalColor, alpha);
         }

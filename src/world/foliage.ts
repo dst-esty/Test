@@ -1,8 +1,46 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { getTerrainHeight, updateTerrainHoleCutouts, applyMountainHoleShaderToMaterial } from './terrain';
 import { DebrisType } from '../types';
 import { MountainHoleManager } from './mountainHoles';
 import { MountainDustParticleSystem } from './mountainDustParticles';
+
+/**
+ * Safely merges multiple geometries by normalizing attributes (non-indexed + common attributes).
+ * Prevents BufferGeometryUtils.mergeGeometries from failing on indexed/non-indexed attribute mismatches.
+ */
+export function safeMergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  if (!geos || geos.length === 0) return new THREE.BufferGeometry();
+  if (geos.length === 1) return geos[0];
+
+  // 1. Convert all to non-indexed to guarantee compatible index structures
+  const prepared = geos.map((g) => {
+    return g.index ? g.toNonIndexed() : g.clone();
+  });
+
+  // 2. Identify common attributes shared across ALL geometries
+  const allKeys = Object.keys(prepared[0].attributes);
+  const commonKeys = allKeys.filter((key) => prepared.every((g) => !!g.attributes[key]));
+
+  // 3. Strip mismatched attributes and ensure normals exist
+  for (const g of prepared) {
+    for (const key of Object.keys(g.attributes)) {
+      if (!commonKeys.includes(key)) {
+        g.deleteAttribute(key);
+      }
+    }
+    if (!g.attributes.normal) {
+      g.computeVertexNormals();
+    }
+  }
+
+  const merged = mergeGeometries(prepared, false);
+  if (merged) {
+    merged.computeVertexNormals();
+    return merged;
+  }
+  return prepared[0];
+}
 
 export interface GoldDeposit {
   id: string;
@@ -449,6 +487,461 @@ export function isNearPeraltaCamp(x: number, z: number, clearanceRadius: number 
   return distTrailhead < clearanceRadius || distSpawn < clearanceRadius || distCenter < clearanceRadius || distTortilla < Math.max(clearanceRadius, 48) || isTortillaTownBox;
 }
 
+/**
+ * Procedural fluted cylinder for realistic pleated Saguaro cacti.
+ */
+export function createFlutedCylinderGeometry(
+  radiusBottom: number,
+  radiusTop: number,
+  height: number,
+  radialSegments: number = 24,
+  pleatCount: number = 16,
+  pleatDepth: number = 0.08,
+  domeTop: boolean = true
+): THREE.BufferGeometry {
+  const heightSegments = domeTop ? 14 : 8;
+  const geo = new THREE.CylinderGeometry(radiusTop, radiusBottom, height, radialSegments, heightSegments);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const theta = Math.atan2(z, x);
+    const r = Math.hypot(x, z);
+
+    // Fluted vertical accordion rib modulation
+    const pleat = 1.0 + pleatDepth * Math.cos(theta * pleatCount);
+
+    // Dome top at summit
+    let dome = 1.0;
+    if (domeTop && y > height * 0.35) {
+      const t = (y - height * 0.35) / (height * 0.15);
+      dome = Math.sqrt(Math.max(0.04, 1.0 - Math.min(1.0, t * t) * 0.82));
+    }
+
+    const newR = r * pleat * dome;
+    pos.setXYZ(i, Math.cos(theta) * newR, y, Math.sin(theta) * newR);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Authentic Sonoran Creosote Bush (Larrea tridentata)
+ * Open, multi-stemmed gnarled branches radiating from soil with airy leafy clusters.
+ */
+export function createRealisticCreosoteGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+
+  // 1. Root collar & base woody branches
+  const branchCount = 6;
+  for (let i = 0; i < branchCount; i++) {
+    const angle = (i / branchCount) * Math.PI * 2 + ((i * 1.618) % 0.5);
+    const tilt = 0.35 + (i % 3) * 0.12;
+    const length = 0.75 + (i % 2) * 0.25;
+
+    const branchGeo = new THREE.CylinderGeometry(0.022, 0.045, length, 5);
+    branchGeo.translate(0, length / 2, 0);
+    branchGeo.rotateZ(tilt);
+    branchGeo.rotateY(angle);
+    parts.push(branchGeo);
+
+    // Secondary sub-branch
+    if (i % 2 === 0) {
+      const subLength = 0.42;
+      const subGeo = new THREE.CylinderGeometry(0.016, 0.028, subLength, 4);
+      subGeo.translate(0, subLength / 2, 0);
+      subGeo.rotateZ(tilt + 0.32);
+      subGeo.rotateY(angle + 0.45);
+      const mx = Math.sin(tilt) * Math.cos(angle) * (length * 0.55);
+      const my = Math.cos(tilt) * (length * 0.55);
+      const mz = Math.sin(tilt) * Math.sin(angle) * (length * 0.55);
+      subGeo.translate(mx, my, mz);
+      parts.push(subGeo);
+    }
+  }
+
+  // 2. Airy, clustered botanical foliage sprigs at branch tips (leaves the woody center open!)
+  const sprigCount = 9;
+  for (let s = 0; s < sprigCount; s++) {
+    const angle = (s / sprigCount) * Math.PI * 2 + ((s * 2.3) % 0.4);
+    const r = 0.5 + (s % 3) * 0.16;
+    const y = 0.38 + (s % 3) * 0.22;
+    const x = Math.cos(angle) * r;
+    const z = Math.sin(angle) * r;
+
+    const sprigGeo = new THREE.DodecahedronGeometry(0.24 + (s % 2) * 0.08, 0);
+    sprigGeo.scale(1.3, 0.72, 1.3);
+    sprigGeo.rotateY(s * 1.1);
+    sprigGeo.translate(x, y, z);
+    parts.push(sprigGeo);
+  }
+
+  return safeMergeGeometries(parts);
+}
+
+/**
+ * Authentic Desert Bunchgrass / Purple Three-Awn (Aristida)
+ * Multi-blade tussock of curved, arching blades radiating outwards with seed plumes.
+ */
+export function createRealisticBunchgrassGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const bladeCount = 14;
+
+  for (let i = 0; i < bladeCount; i++) {
+    const angle = (i / bladeCount) * Math.PI * 2 + ((i * 0.85) % 0.3);
+    const bladeHeight = 0.68 + (i % 3) * 0.18;
+
+    // Segment 1: erect base
+    const seg1 = new THREE.BoxGeometry(0.045, bladeHeight * 0.42, 0.008);
+    seg1.translate(0, (bladeHeight * 0.42) / 2, 0);
+    seg1.rotateZ(0.12);
+
+    // Segment 2: arching outward
+    const seg2 = new THREE.BoxGeometry(0.035, bladeHeight * 0.35, 0.006);
+    seg2.translate(0, (bladeHeight * 0.35) / 2, 0);
+    seg2.rotateZ(0.42);
+    seg2.translate(0.08, bladeHeight * 0.38, 0);
+
+    // Segment 3: drooping fine tip
+    const seg3 = new THREE.ConeGeometry(0.02, bladeHeight * 0.28, 3);
+    seg3.rotateZ(0.72);
+    seg3.translate(0.22, bladeHeight * 0.62, 0);
+
+    const bladeGeo = safeMergeGeometries([seg1, seg2, seg3]);
+    bladeGeo.rotateY(angle);
+    parts.push(bladeGeo);
+  }
+
+  // Central seed plume awns
+  for (let p = 0; p < 3; p++) {
+    const pAngle = (p / 3) * Math.PI * 2 + 0.4;
+    const plume = new THREE.ConeGeometry(0.028, 0.36, 4);
+    plume.translate(0, 0.88, 0);
+    plume.rotateZ(0.18);
+    plume.rotateY(pAngle);
+    parts.push(plume);
+  }
+
+  return safeMergeGeometries(parts);
+}
+
+/**
+ * Authentic Arizona Fishhook Barrel Cactus (Ferocactus wislizeni)
+ * Cylindrical accordion pleats with curved dome crown and golden spine tuft cap.
+ */
+export function createRealisticBarrelCactusGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const radialSegments = 32;
+  const heightSegments = 12;
+  const bodyHeight = 0.95;
+  const bodyRadius = 0.42;
+
+  const bodyGeo = new THREE.CylinderGeometry(bodyRadius * 0.78, bodyRadius, bodyHeight, radialSegments, heightSegments);
+  const pos = bodyGeo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const theta = Math.atan2(z, x);
+    const r = Math.hypot(x, z);
+
+    // 16 deep accordion pleats
+    const pleat = 1.0 + 0.12 * Math.cos(theta * 16);
+
+    // Curvature at summit
+    const normY = (y + bodyHeight / 2) / bodyHeight;
+    let profile = 1.0;
+    if (normY > 0.72) {
+      const domeT = (normY - 0.72) / 0.28;
+      profile = Math.sqrt(Math.max(0.02, 1.0 - domeT * domeT * 0.78));
+    } else if (normY < 0.15) {
+      profile = 0.85 + 0.15 * (normY / 0.15);
+    }
+
+    const newR = r * pleat * profile;
+    pos.setXYZ(i, Math.cos(theta) * newR, y, Math.sin(theta) * newR);
+  }
+  bodyGeo.computeVertexNormals();
+  parts.push(bodyGeo);
+
+  // Spiny crown summit with yellow flower buds
+  const crownGeo = new THREE.CylinderGeometry(0.16, 0.22, 0.08, 12);
+  crownGeo.translate(0, bodyHeight / 2 + 0.03, 0);
+  parts.push(crownGeo);
+
+  for (let s = 0; s < 8; s++) {
+    const sAngle = (s / 8) * Math.PI * 2;
+    const spine = new THREE.ConeGeometry(0.024, 0.12, 4);
+    spine.rotateX(0.35);
+    spine.rotateY(sAngle);
+    spine.translate(Math.cos(sAngle) * 0.13, bodyHeight / 2 + 0.06, Math.sin(sAngle) * 0.13);
+    parts.push(spine);
+  }
+
+  return safeMergeGeometries(parts);
+}
+
+/**
+ * Authentic Engelmann's Prickly Pear Cactus (Opuntia engelmannii)
+ * Branching flattened oval paddle pads with scarlet tuna fruits.
+ */
+export function createRealisticPricklyPearGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+
+  const createPad = (
+    scaleX: number,
+    scaleY: number,
+    scaleZ: number,
+    posX: number,
+    posY: number,
+    posZ: number,
+    rotX: number,
+    rotY: number,
+    rotZ: number
+  ) => {
+    const pad = new THREE.CylinderGeometry(0.36, 0.36, 0.055, 12);
+    pad.scale(scaleX, scaleY, scaleZ);
+    pad.rotateX(rotX);
+    pad.rotateY(rotY);
+    pad.rotateZ(rotZ);
+    pad.translate(posX, posY, posZ);
+    return pad;
+  };
+
+  // Base Pad rooted in soil
+  parts.push(createPad(1.0, 1.0, 1.25, 0, 0.35, 0, 0.08, 0, -0.05));
+
+  // Tier 1 Daughter Pads
+  parts.push(createPad(0.9, 0.95, 1.15, -0.32, 0.78, 0.02, 0.12, 0.25, -0.35));
+  parts.push(createPad(0.85, 0.9, 1.1, 0.35, 0.82, -0.02, -0.08, -0.2, 0.32));
+
+  // Tier 2 Daughter Pads
+  parts.push(createPad(0.75, 0.85, 1.0, -0.52, 1.22, 0.08, 0.18, 0.45, -0.42));
+  parts.push(createPad(0.8, 0.85, 1.05, 0.12, 1.28, 0.03, -0.05, 0.1, 0.08));
+  parts.push(createPad(0.7, 0.8, 0.95, 0.62, 1.18, -0.06, -0.15, -0.35, 0.45));
+
+  // Crimson / Magenta Prickly Pear Tuna Fruits
+  const fruitPositions = [
+    { x: -0.62, y: 1.48, z: 0.12 },
+    { x: -0.42, y: 1.54, z: 0.05 },
+    { x: 0.05, y: 1.58, z: 0.04 },
+    { x: 0.22, y: 1.56, z: 0.02 },
+    { x: 0.72, y: 1.42, z: -0.08 },
+  ];
+  for (const fp of fruitPositions) {
+    const fruit = new THREE.CylinderGeometry(0.038, 0.032, 0.11, 6);
+    fruit.translate(fp.x, fp.y, fp.z);
+    parts.push(fruit);
+  }
+
+  return safeMergeGeometries(parts);
+}
+
+/**
+ * Authentic Jumping / Teddy Bear Cholla (Cylindropuntia fulgida)
+ * Densely jointed branching spiny segments with dropping chains.
+ */
+export function createRealisticChollaGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+
+  // Central woody stem
+  const trunk = new THREE.CylinderGeometry(0.08, 0.11, 0.85, 6);
+  trunk.translate(0, 0.42, 0);
+  parts.push(trunk);
+
+  // Whorls of jointed spiny branch segments
+  const jointCount = 8;
+  for (let j = 0; j < jointCount; j++) {
+    const angle = (j / jointCount) * Math.PI * 2 + ((j * 1.4) % 0.3);
+    const tier = j < 4 ? 0.65 : 0.92;
+    const length = 0.38 + (j % 3) * 0.1;
+    const jointRadius = 0.08;
+
+    const joint = new THREE.CylinderGeometry(jointRadius, jointRadius * 0.88, length, 6);
+    joint.translate(0, length / 2, 0);
+    const tilt = 0.48 + (j < 4 ? 0.25 : 0.12);
+    joint.rotateZ(tilt);
+    joint.rotateY(angle);
+    joint.translate(Math.cos(angle) * 0.08, tier, Math.sin(angle) * 0.08);
+    parts.push(joint);
+
+    // Dropping chain joint
+    if (j % 2 === 0) {
+      const dropLength = 0.26;
+      const dropJoint = new THREE.CylinderGeometry(jointRadius * 0.9, jointRadius * 0.72, dropLength, 6);
+      dropJoint.translate(0, -dropLength / 2, 0);
+      dropJoint.rotateZ(0.2);
+      dropJoint.rotateY(angle);
+      const tipDist = Math.sin(tilt) * length + 0.11;
+      const tipY = tier + Math.cos(tilt) * length;
+      dropJoint.translate(Math.cos(angle) * tipDist, tipY, Math.sin(angle) * tipDist);
+      parts.push(dropJoint);
+    }
+  }
+
+  return safeMergeGeometries(parts);
+}
+
+/**
+ * Authentic Sonoran Desert Ocotillo (Fouquieria splendens)
+ * 12 tall whiplike thorny canes radiating outward in an inverted vase shape with scarlet tips.
+ */
+export function createRealisticOcotilloGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const caneCount = 12;
+
+  for (let i = 0; i < caneCount; i++) {
+    const angle = (i / caneCount) * Math.PI * 2 + ((i * 1.3) % 0.25);
+    const caneHeight = 3.2 + (i % 3) * 0.45;
+    const flare = 0.25 + (i % 4) * 0.05;
+
+    // Lower cane segment
+    const seg1 = new THREE.CylinderGeometry(0.032, 0.052, caneHeight * 0.5, 5);
+    seg1.translate(0, (caneHeight * 0.5) / 2, 0);
+    seg1.rotateZ(flare * 0.75);
+    seg1.rotateY(angle);
+    parts.push(seg1);
+
+    // Upper cane segment with graceful flare
+    const seg2 = new THREE.CylinderGeometry(0.018, 0.032, caneHeight * 0.5, 5);
+    seg2.translate(0, (caneHeight * 0.5) / 2, 0);
+    seg2.rotateZ(flare * 1.22);
+    seg2.rotateY(angle);
+
+    const midX = Math.sin(flare * 0.75) * Math.cos(angle) * (caneHeight * 0.5);
+    const midY = Math.cos(flare * 0.75) * (caneHeight * 0.5);
+    const midZ = Math.sin(flare * 0.75) * Math.sin(angle) * (caneHeight * 0.5);
+    seg2.translate(midX, midY, midZ);
+    parts.push(seg2);
+
+    // Scarlet blossom cone at tip
+    const flower = new THREE.ConeGeometry(0.065, 0.32, 5);
+    flower.rotateZ(flare * 1.25);
+    flower.rotateY(angle);
+    const tipX = midX + Math.sin(flare * 1.22) * Math.cos(angle) * (caneHeight * 0.5);
+    const tipY = midY + Math.cos(flare * 1.22) * (caneHeight * 0.5);
+    const tipZ = midZ + Math.sin(flare * 1.22) * Math.sin(angle) * (caneHeight * 0.5);
+    flower.translate(tipX, tipY, tipZ);
+    parts.push(flower);
+  }
+
+  return safeMergeGeometries(parts);
+}
+
+/**
+ * Authentic Desert Century Plant / Agave (Agave chrysantha)
+ * Rosette of thick fleshy spear-shaped succulent leaves with central bloom mast.
+ */
+export function createRealisticAgaveGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const leafCount = 16;
+
+  for (let i = 0; i < leafCount; i++) {
+    const angle = (i / leafCount) * Math.PI * 2 + i * 0.618;
+    const tier = i / leafCount;
+    const leafLength = 0.65 + (1.0 - tier) * 0.5;
+    const archAngle = 0.42 + (1.0 - tier) * 0.42;
+
+    const blade = new THREE.ConeGeometry(0.08 * (1.2 - tier * 0.35), leafLength, 4);
+    blade.scale(1.35, 1.0, 0.42);
+    blade.translate(0, leafLength / 2, 0);
+    blade.rotateZ(archAngle);
+    blade.rotateY(angle);
+    blade.translate(Math.cos(angle) * 0.08 * tier, 0.05 + 0.12 * tier, Math.sin(angle) * 0.08 * tier);
+    parts.push(blade);
+  }
+
+  // Tall candelabra flower mast (~3.4m tall)
+  const mast = new THREE.CylinderGeometry(0.035, 0.075, 3.4, 6);
+  mast.translate(0, 1.7, 0);
+  parts.push(mast);
+
+  for (let b = 0; b < 5; b++) {
+    const bAngle = (b / 5) * Math.PI * 2;
+    const branch = new THREE.CylinderGeometry(0.015, 0.024, 0.42, 4);
+    branch.rotateZ(Math.PI / 2.3);
+    branch.rotateY(bAngle);
+    branch.translate(0, 2.3 + b * 0.18, 0);
+    parts.push(branch);
+  }
+
+  return safeMergeGeometries(parts);
+}
+
+/**
+ * Twisted, gnarled multi-limbed trunk for Riparian Trees (Cottonwood & Mesquite).
+ */
+export function createRealisticTreeTrunkGeometry(isCottonwood: boolean): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const trunkHeight = isCottonwood ? 4.8 : 3.8;
+  const baseRadius = isCottonwood ? 0.48 : 0.42;
+
+  // Main twisted trunk
+  const mainTrunk = new THREE.CylinderGeometry(baseRadius * 0.72, baseRadius, trunkHeight * 0.6, 8, 4);
+  const pos = mainTrunk.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    let x = pos.getX(i);
+    const y = pos.getY(i);
+    let z = pos.getZ(i);
+    x += Math.sin(y * 1.8) * 0.12;
+    z += Math.cos(y * 1.5) * 0.12;
+    pos.setXYZ(i, x, y, z);
+  }
+  mainTrunk.computeVertexNormals();
+  mainTrunk.translate(0, (trunkHeight * 0.6) / 2, 0);
+  parts.push(mainTrunk);
+
+  // 3 Major spreading scaffold boughs
+  const branchAngles = [0.2, 2.3, 4.4];
+  for (let b = 0; b < branchAngles.length; b++) {
+    const angle = branchAngles[b];
+    const bLength = trunkHeight * 0.55;
+    const bRadius = baseRadius * 0.48;
+    const bGeo = new THREE.CylinderGeometry(bRadius * 0.55, bRadius, bLength, 6);
+    bGeo.translate(0, bLength / 2, 0);
+    const tilt = 0.48 + (b % 2) * 0.22;
+    bGeo.rotateZ(tilt);
+    bGeo.rotateY(angle);
+    bGeo.translate(Math.cos(angle) * 0.12, trunkHeight * 0.52, Math.sin(angle) * 0.12);
+    parts.push(bGeo);
+  }
+
+  return safeMergeGeometries(parts);
+}
+
+/**
+ * Layered, asymmetrical cloud canopy with negative space between foliage masses.
+ */
+export function createRealisticTreeCanopyGeometry(isCottonwood: boolean): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const clusterCount = isCottonwood ? 8 : 7;
+  for (let c = 0; c < clusterCount; c++) {
+    const angle = (c / clusterCount) * Math.PI * 2 + c * 0.75;
+    const dist = 1.1 + (c % 3) * 0.7;
+    const yOffset = (c % 3) * 0.85 + (c / clusterCount) * 0.9;
+    const scale = 1.2 + (c % 2) * 0.6;
+
+    const cluster = new THREE.DodecahedronGeometry(scale, 1);
+    const pos = cluster.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      let x = pos.getX(i);
+      let y = pos.getY(i);
+      let z = pos.getZ(i);
+      x += Math.sin(y * 3.1 + z * 2.2) * (scale * 0.16);
+      y += Math.cos(x * 2.8 + z * 1.9) * (scale * 0.12);
+      z += Math.sin(x * 2.5 + y * 2.0) * (scale * 0.16);
+      pos.setXYZ(i, x, y, z);
+    }
+    cluster.computeVertexNormals();
+    cluster.scale(1.2, 0.75, 1.2);
+    cluster.translate(Math.cos(angle) * dist, yOffset, Math.sin(angle) * dist);
+    parts.push(cluster);
+  }
+
+  return safeMergeGeometries(parts);
+}
+
 const _scratchFoliageBoreDirs = Array.from({ length: 16 }, () => new THREE.Vector3());
 
 export class DesertFoliageManager {
@@ -463,6 +956,8 @@ export class DesertFoliageManager {
   public grassMesh!: THREE.InstancedMesh;
   public pricklyMesh!: THREE.InstancedMesh;
   public chollaMesh!: THREE.InstancedMesh;
+  public ocotilloMesh!: THREE.InstancedMesh;
+  public agaveMesh!: THREE.InstancedMesh;
   public outcroppingMesh!: THREE.InstancedMesh;
   public outcroppingMeshes: THREE.InstancedMesh[] = [];
   public boulderHitsMap: Map<string, number> = new Map();
@@ -534,9 +1029,9 @@ export class DesertFoliageManager {
       bumpScale: 0.05,
     });
 
-    const trunkGeo = new THREE.CylinderGeometry(0.35, 0.45, 6, 8);
-    const armVerticalGeo = new THREE.CylinderGeometry(0.25, 0.28, 2.5, 6);
-    const armHorizontalGeo = new THREE.CylinderGeometry(0.24, 0.24, 1.4, 6);
+    const trunkGeo = createFlutedCylinderGeometry(0.35, 0.45, 6, 24, 16, 0.08, true);
+    const armVerticalGeo = createFlutedCylinderGeometry(0.24, 0.28, 2.5, 18, 12, 0.07, true);
+    const armHorizontalGeo = createFlutedCylinderGeometry(0.24, 0.24, 1.4, 18, 12, 0.06, false);
     armHorizontalGeo.rotateZ(Math.PI / 2);
 
     for (let i = 0; i < saguaroCount; i++) {
@@ -613,11 +1108,10 @@ export class DesertFoliageManager {
     // 2. Barrel Cacti & Prickly Pears (Instanced)
     // ==========================================
     const barrelCount = 280;
-    const barrelGeo = new THREE.SphereGeometry(0.55, 6, 6);
-    barrelGeo.scale(1, 1.3, 1);
+    const barrelGeo = createRealisticBarrelCactusGeometry();
     const barrelMat = new THREE.MeshStandardMaterial({
-      color: 0x486b38,
-      roughness: 0.9,
+      color: 0x3d6632,
+      roughness: 0.82,
     });
     this.barrelMesh = new THREE.InstancedMesh(barrelGeo, barrelMat, barrelCount);
     this.barrelMesh.castShadow = true;
@@ -631,9 +1125,9 @@ export class DesertFoliageManager {
       if (ry > 50 || isNearPeraltaCamp(rx, rz, 16)) continue;
 
       const bScale = 0.5 + Math.random() * 0.7;
-      dummy.position.set(rx, ry + 0.3 * bScale, rz);
+      dummy.position.set(rx, ry + 0.45 * bScale, rz);
       dummy.scale.set(bScale, bScale, bScale);
-      dummy.rotation.set(Math.random() * 0.2, Math.random() * Math.PI, Math.random() * 0.2);
+      dummy.rotation.set(Math.random() * 0.1, Math.random() * Math.PI * 2, Math.random() * 0.1);
       dummy.updateMatrix();
       this.barrelMesh.setMatrixAt(bIdx++, dummy.matrix);
     }
@@ -745,15 +1239,16 @@ export class DesertFoliageManager {
     this.boulderMesh = this.boulderMeshes[0];
 
     // ==========================================
-    // 4. Desert Scrub & Creosote Bushes
+    // 4. Authentic Sonoran Creosote Bushes (Larrea tridentata)
     // ==========================================
     const scrubCount = 350;
-    const scrubGeo = new THREE.IcosahedronGeometry(0.8, 1);
+    const scrubGeo = createRealisticCreosoteGeometry();
     const scrubMat = new THREE.MeshStandardMaterial({
-      color: 0x6e7845,
-      roughness: 0.9,
+      color: 0x5a6d3b,
+      roughness: 0.82,
     });
     this.scrubMesh = new THREE.InstancedMesh(scrubGeo, scrubMat, scrubCount);
+    this.scrubMesh.castShadow = true;
     this.scrubMesh.frustumCulled = false;
     let sIdx = 0;
     for (let i = 0; i < scrubCount; i++) {
@@ -762,10 +1257,10 @@ export class DesertFoliageManager {
       if (isNearPeraltaCamp(rx, rz, 14)) continue;
       const ry = getTerrainHeight(rx, rz);
 
-      const s = 0.5 + Math.random() * 0.8;
-      dummy.position.set(rx, ry + s * 0.4, rz);
-      dummy.scale.set(s * 1.3, s * 0.8, s * 1.3);
-      dummy.rotation.set(0, Math.random() * Math.PI, 0);
+      const s = 0.65 + Math.random() * 0.75;
+      dummy.position.set(rx, ry, rz);
+      dummy.scale.set(s, s, s);
+      dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
       dummy.updateMatrix();
       this.scrubMesh.setMatrixAt(sIdx++, dummy.matrix);
     }
@@ -774,15 +1269,17 @@ export class DesertFoliageManager {
     this.scene.add(this.scrubMesh);
 
     // ==========================================
-    // 4B. Realistic Desert Bunchgrass & Needlegrass
+    // 4B. Realistic Desert Bunchgrass & Purple Three-Awn (Aristida)
     // ==========================================
     const grassCount = 650;
-    const grassBladeGeo = new THREE.ConeGeometry(0.35, 1.1, 4);
+    const grassBladeGeo = createRealisticBunchgrassGeometry();
     const grassMat = new THREE.MeshStandardMaterial({
-      color: 0xb59e5f,
-      roughness: 0.95,
+      color: 0xb59a58,
+      roughness: 0.9,
+      side: THREE.DoubleSide,
     });
     this.grassMesh = new THREE.InstancedMesh(grassBladeGeo, grassMat, grassCount);
+    this.grassMesh.castShadow = true;
     this.grassMesh.frustumCulled = false;
     let gIdx = 0;
     for (let i = 0; i < grassCount; i++) {
@@ -791,10 +1288,10 @@ export class DesertFoliageManager {
       const gy = getTerrainHeight(gx, gz);
       if (gy > 42) continue;
 
-      const scale = 0.6 + Math.random() * 0.7;
-      dummy.position.set(gx, gy + 0.45 * scale, gz);
-      dummy.scale.set(scale * 1.4, scale, scale * 1.4);
-      dummy.rotation.set((Math.random() - 0.5) * 0.2, Math.random() * Math.PI, (Math.random() - 0.5) * 0.2);
+      const scale = 0.7 + Math.random() * 0.6;
+      dummy.position.set(gx, gy, gz);
+      dummy.scale.set(scale, scale, scale);
+      dummy.rotation.set((Math.random() - 0.5) * 0.1, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.1);
       dummy.updateMatrix();
       this.grassMesh.setMatrixAt(gIdx++, dummy.matrix);
     }
@@ -803,39 +1300,28 @@ export class DesertFoliageManager {
     this.scene.add(this.grassMesh);
 
     // ==========================================
-    // 4C. Prickly Pear Cacti Clusters (Opuntia)
+    // 4C. Authentic Engelmann's Prickly Pear Clusters (Opuntia)
     // ==========================================
     const pricklyPearCount = 180;
-    const padGeo = new THREE.BoxGeometry(0.5, 0.6, 0.08);
+    const padGeo = createRealisticPricklyPearGeometry();
     const padMat = new THREE.MeshStandardMaterial({
-      color: 0x3d6e38,
+      color: 0x3d6635,
       roughness: 0.8,
     });
-    this.pricklyMesh = new THREE.InstancedMesh(padGeo, padMat, pricklyPearCount * 3);
+    this.pricklyMesh = new THREE.InstancedMesh(padGeo, padMat, pricklyPearCount);
+    this.pricklyMesh.castShadow = true;
     this.pricklyMesh.frustumCulled = false;
     let ppIdx = 0;
     for (let i = 0; i < pricklyPearCount; i++) {
       const px = (Math.random() - 0.5) * 340;
       const pz = (Math.random() - 0.5) * 340;
       const py = getTerrainHeight(px, pz);
-      if (py > 38) continue;
+      if (py > 38 || isNearPeraltaCamp(px, pz, 14)) continue;
 
-      const clusterRot = Math.random() * Math.PI * 2;
-      dummy.position.set(px, py + 0.35, pz);
-      dummy.scale.set(0.8, 0.9, 0.8);
-      dummy.rotation.set(0.1, clusterRot, 0.15);
-      dummy.updateMatrix();
-      this.pricklyMesh.setMatrixAt(ppIdx++, dummy.matrix);
-
-      dummy.position.set(px - 0.25, py + 0.75, pz);
-      dummy.scale.set(0.7, 0.75, 0.7);
-      dummy.rotation.set(0.2, clusterRot + 0.3, -0.3);
-      dummy.updateMatrix();
-      this.pricklyMesh.setMatrixAt(ppIdx++, dummy.matrix);
-
-      dummy.position.set(px + 0.28, py + 0.7, pz);
-      dummy.scale.set(0.65, 0.7, 0.65);
-      dummy.rotation.set(-0.1, clusterRot - 0.2, 0.35);
+      const scale = 0.75 + Math.random() * 0.5;
+      dummy.position.set(px, py, pz);
+      dummy.scale.set(scale, scale, scale);
+      dummy.rotation.set((Math.random() - 0.5) * 0.1, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.1);
       dummy.updateMatrix();
       this.pricklyMesh.setMatrixAt(ppIdx++, dummy.matrix);
     }
@@ -844,38 +1330,94 @@ export class DesertFoliageManager {
     this.scene.add(this.pricklyMesh);
 
     // ==========================================
-    // 4D. Jumping Cholla Cacti (Cylindropuntia)
+    // 4D. Jumping Cholla Cacti (Cylindropuntia fulgida)
     // ==========================================
-    const chollaCount = 120;
-    const chollaGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.65, 6);
+    const chollaCount = 130;
+    const chollaGeo = createRealisticChollaGeometry();
     const chollaMat = new THREE.MeshStandardMaterial({
-      color: 0x98a36c,
-      roughness: 0.9,
+      color: 0xa6b872,
+      roughness: 0.85,
     });
-    this.chollaMesh = new THREE.InstancedMesh(chollaGeo, chollaMat, chollaCount * 2);
+    this.chollaMesh = new THREE.InstancedMesh(chollaGeo, chollaMat, chollaCount);
+    this.chollaMesh.castShadow = true;
     this.chollaMesh.frustumCulled = false;
     let cIdx = 0;
     for (let i = 0; i < chollaCount; i++) {
       const cx = (Math.random() - 0.5) * 320;
       const cz = (Math.random() - 0.5) * 320;
       const cy = getTerrainHeight(cx, cz);
-      if (cy > 35) continue;
+      if (cy > 36 || isNearPeraltaCamp(cx, cz, 14)) continue;
 
-      dummy.position.set(cx, cy + 0.45, cz);
-      dummy.scale.set(1, 1.4, 1);
-      dummy.rotation.set(0, Math.random() * Math.PI, 0);
-      dummy.updateMatrix();
-      this.chollaMesh.setMatrixAt(cIdx++, dummy.matrix);
-
-      dummy.position.set(cx + 0.15, cy + 0.95, cz + 0.1);
-      dummy.scale.set(0.9, 0.9, 0.9);
-      dummy.rotation.set(0.4, Math.random() * Math.PI, 0.3);
+      const scale = 0.75 + Math.random() * 0.45;
+      dummy.position.set(cx, cy, cz);
+      dummy.scale.set(scale, scale, scale);
+      dummy.rotation.set((Math.random() - 0.5) * 0.1, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.1);
       dummy.updateMatrix();
       this.chollaMesh.setMatrixAt(cIdx++, dummy.matrix);
     }
     this.chollaMesh.count = cIdx;
     this.chollaMesh.instanceMatrix.needsUpdate = true;
     this.scene.add(this.chollaMesh);
+
+    // ==========================================
+    // 4E. Authentic Sonoran Desert Ocotillo (Fouquieria splendens)
+    // ==========================================
+    const ocotilloCount = 140;
+    const ocotilloGeo = createRealisticOcotilloGeometry();
+    const ocotilloMat = new THREE.MeshStandardMaterial({
+      color: 0x544030,
+      roughness: 0.88,
+    });
+    this.ocotilloMesh = new THREE.InstancedMesh(ocotilloGeo, ocotilloMat, ocotilloCount);
+    this.ocotilloMesh.castShadow = true;
+    this.ocotilloMesh.frustumCulled = false;
+    let ocIdx = 0;
+    for (let i = 0; i < ocotilloCount; i++) {
+      const ox = (Math.random() - 0.5) * 360;
+      const oz = (Math.random() - 0.5) * 360;
+      const oy = getTerrainHeight(ox, oz);
+      if (oy > 45 || isNearPeraltaCamp(ox, oz, 16)) continue;
+
+      const scale = 0.8 + Math.random() * 0.5;
+      dummy.position.set(ox, oy, oz);
+      dummy.scale.set(scale, scale, scale);
+      dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+      dummy.updateMatrix();
+      this.ocotilloMesh.setMatrixAt(ocIdx++, dummy.matrix);
+    }
+    this.ocotilloMesh.count = ocIdx;
+    this.ocotilloMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.ocotilloMesh);
+
+    // ==========================================
+    // 4F. Desert Century Agave (Agave chrysantha)
+    // ==========================================
+    const agaveCount = 150;
+    const agaveGeo = createRealisticAgaveGeometry();
+    const agaveMat = new THREE.MeshStandardMaterial({
+      color: 0x486b5d,
+      roughness: 0.78,
+    });
+    this.agaveMesh = new THREE.InstancedMesh(agaveGeo, agaveMat, agaveCount);
+    this.agaveMesh.castShadow = true;
+    this.agaveMesh.frustumCulled = false;
+    let agIdx = 0;
+    for (let i = 0; i < agaveCount; i++) {
+      const ax = (Math.random() - 0.5) * 350;
+      const az = (Math.random() - 0.5) * 350;
+      const ay = getTerrainHeight(ax, az);
+      if (ay > 48 || isNearPeraltaCamp(ax, az, 14)) continue;
+
+      const scale = 0.75 + Math.random() * 0.5;
+      dummy.position.set(ax, ay, az);
+      dummy.scale.set(scale, scale, scale);
+      dummy.rotation.set((Math.random() - 0.5) * 0.1, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.1);
+      dummy.updateMatrix();
+      this.agaveMesh.setMatrixAt(agIdx++, dummy.matrix);
+    }
+    this.agaveMesh.count = agIdx;
+    this.agaveMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.agaveMesh);
 
     // ==========================================
     // 4E. Monumental Southwestern Outcroppings & Canyon Formations (4 Geological Archetypes)
@@ -1107,8 +1649,10 @@ export class DesertFoliageManager {
       roughness: 0.9,
     });
 
-    const trunkGeo = new THREE.CylinderGeometry(0.32, 0.52, 4.4, 8);
-    const crownGeo = new THREE.DodecahedronGeometry(2.4, 1);
+    const trunkGeoCottonwood = createRealisticTreeTrunkGeometry(true);
+    const trunkGeoMesquite = createRealisticTreeTrunkGeometry(false);
+    const crownGeoCottonwood = createRealisticTreeCanopyGeometry(true);
+    const crownGeoMesquite = createRealisticTreeCanopyGeometry(false);
     const stumpGeo = new THREE.CylinderGeometry(0.52, 0.62, 0.65, 8);
 
     springLocations.forEach((spring) => {
@@ -1123,23 +1667,26 @@ export class DesertFoliageManager {
         const treeType = isCottonwood ? 'Riparian Cottonwood Tree' : 'Velvet Mesquite Tree';
         const barkMat = isCottonwood ? barkMatCottonwood : barkMatMesquite;
         const crownMat = isCottonwood ? crownMatCottonwood : crownMatMesquite;
+        const trunkGeo = isCottonwood ? trunkGeoCottonwood : trunkGeoMesquite;
+        const crownGeo = isCottonwood ? crownGeoCottonwood : crownGeoMesquite;
 
         const treeGroup = new THREE.Group();
         treeGroup.position.set(tx, ty, tz);
+        treeGroup.rotation.y = (i * 1.618) % (Math.PI * 2);
 
         const scale = 0.85 + ((i * 17) % 35) * 0.01;
         treeGroup.scale.set(scale, scale, scale);
 
         // Trunk
         const trunk = new THREE.Mesh(trunkGeo, barkMat);
-        trunk.position.y = 2.2;
+        trunk.position.y = 0;
         trunk.castShadow = true;
         trunk.receiveShadow = true;
         treeGroup.add(trunk);
 
         // Foliage Crown
         const crown = new THREE.Mesh(crownGeo, crownMat);
-        crown.position.y = 5.2;
+        crown.position.y = isCottonwood ? 3.8 : 3.0;
         crown.castShadow = true;
         treeGroup.add(crown);
 
@@ -1211,6 +1758,21 @@ export class DesertFoliageManager {
       this.outcroppingMeshes.forEach((mesh) => {
         mesh.castShadow = !isPerf;
       });
+    }
+    if (this.scrubMesh) {
+      this.scrubMesh.castShadow = !isPerf;
+    }
+    if (this.pricklyMesh) {
+      this.pricklyMesh.castShadow = !isPerf;
+    }
+    if (this.chollaMesh) {
+      this.chollaMesh.castShadow = !isPerf;
+    }
+    if (this.ocotilloMesh) {
+      this.ocotilloMesh.castShadow = !isPerf;
+    }
+    if (this.agaveMesh) {
+      this.agaveMesh.castShadow = !isPerf;
     }
   }
 
@@ -1957,6 +2519,14 @@ export class DesertFoliageManager {
     if (this.chollaMesh) {
       this.scene.remove(this.chollaMesh);
       this.chollaMesh.geometry.dispose();
+    }
+    if (this.ocotilloMesh) {
+      this.scene.remove(this.ocotilloMesh);
+      this.ocotilloMesh.geometry.dispose();
+    }
+    if (this.agaveMesh) {
+      this.scene.remove(this.agaveMesh);
+      this.agaveMesh.geometry.dispose();
     }
     for (const ocMesh of this.outcroppingMeshes) {
       this.scene.remove(ocMesh);

@@ -7,7 +7,18 @@ import {
   generateTerrainNoiseTexture,
   setTerrainHoleListener,
 } from './terrain';
-import { WorldRockCollider, DesertFoliageManager } from './foliage';
+import {
+  WorldRockCollider,
+  DesertFoliageManager,
+  createFlutedCylinderGeometry,
+  createRealisticBarrelCactusGeometry,
+  createRealisticCreosoteGeometry,
+  createRealisticBunchgrassGeometry,
+  createRealisticPricklyPearGeometry,
+  createRealisticChollaGeometry,
+  createRealisticOcotilloGeometry,
+  createRealisticAgaveGeometry,
+} from './foliage';
 
 export const CHUNK_SIZE = 140;
 export const CHUNK_SEGMENTS = 28; // 29 x 29 vertices per chunk = 841 vertices (crisp fidelity, peak 60+ FPS)
@@ -42,15 +53,23 @@ export class EndlessTerrainManager {
 
   // Shared geometries and materials for endless wilderness scatter
   private saguaroMat: THREE.MeshStandardMaterial;
-  private trunkGeo: THREE.CylinderGeometry;
-  private armVerticalGeo: THREE.CylinderGeometry;
-  private armHorizontalGeo: THREE.CylinderGeometry;
+  private trunkGeo: THREE.BufferGeometry;
+  private armVerticalGeo: THREE.BufferGeometry;
+  private armHorizontalGeo: THREE.BufferGeometry;
   private boulderGeo: THREE.DodecahedronGeometry;
   private boulderMat: THREE.MeshStandardMaterial;
-  private scrubGeo: THREE.ConeGeometry;
+  private scrubGeo: THREE.BufferGeometry;
   private scrubMat: THREE.MeshStandardMaterial;
-  private barrelGeo: THREE.CylinderGeometry;
+  private barrelGeo: THREE.BufferGeometry;
   private barrelMat: THREE.MeshStandardMaterial;
+  private pricklyGeo: THREE.BufferGeometry;
+  private pricklyMat: THREE.MeshStandardMaterial;
+  private chollaGeo: THREE.BufferGeometry;
+  private chollaMat: THREE.MeshStandardMaterial;
+  private ocotilloGeo: THREE.BufferGeometry;
+  private ocotilloMat: THREE.MeshStandardMaterial;
+  private agaveGeo: THREE.BufferGeometry;
+  private agaveMat: THREE.MeshStandardMaterial;
   private goldOutcropMat: THREE.MeshStandardMaterial;
 
   constructor(scene: THREE.Scene, foliageManager?: DesertFoliageManager) {
@@ -66,9 +85,9 @@ export class EndlessTerrainManager {
       roughness: 0.85,
       metalness: 0.05,
     });
-    this.trunkGeo = new THREE.CylinderGeometry(0.35, 0.45, 6, 8);
-    this.armVerticalGeo = new THREE.CylinderGeometry(0.25, 0.28, 2.5, 6);
-    this.armHorizontalGeo = new THREE.CylinderGeometry(0.24, 0.24, 1.4, 6);
+    this.trunkGeo = createFlutedCylinderGeometry(0.35, 0.45, 6, 20, 14, 0.08, true);
+    this.armVerticalGeo = createFlutedCylinderGeometry(0.24, 0.28, 2.5, 16, 10, 0.07, true);
+    this.armHorizontalGeo = createFlutedCylinderGeometry(0.24, 0.24, 1.4, 16, 10, 0.06, false);
     this.armHorizontalGeo.rotateZ(Math.PI / 2);
 
     // Sculpted desert boulder geometry with natural cleavage facets and flat subterranean base
@@ -100,16 +119,40 @@ export class EndlessTerrainManager {
       flatShading: true,
     });
 
-    this.scrubGeo = new THREE.ConeGeometry(0.8, 1.2, 5);
+    this.scrubGeo = createRealisticCreosoteGeometry();
     this.scrubMat = new THREE.MeshStandardMaterial({
-      color: 0x475b36,
-      roughness: 0.9,
+      color: 0x5a6d3b,
+      roughness: 0.82,
     });
 
-    this.barrelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.7, 7);
+    this.barrelGeo = createRealisticBarrelCactusGeometry();
     this.barrelMat = new THREE.MeshStandardMaterial({
       color: 0x3d6632,
+      roughness: 0.82,
+    });
+
+    this.pricklyGeo = createRealisticPricklyPearGeometry();
+    this.pricklyMat = new THREE.MeshStandardMaterial({
+      color: 0x3d6635,
       roughness: 0.8,
+    });
+
+    this.chollaGeo = createRealisticChollaGeometry();
+    this.chollaMat = new THREE.MeshStandardMaterial({
+      color: 0xa6b872,
+      roughness: 0.85,
+    });
+
+    this.ocotilloGeo = createRealisticOcotilloGeometry();
+    this.ocotilloMat = new THREE.MeshStandardMaterial({
+      color: 0x544030,
+      roughness: 0.88,
+    });
+
+    this.agaveGeo = createRealisticAgaveGeometry();
+    this.agaveMat = new THREE.MeshStandardMaterial({
+      color: 0x486b5d,
+      roughness: 0.78,
     });
 
     this.goldOutcropMat = new THREE.MeshStandardMaterial({
@@ -425,28 +468,64 @@ export class EndlessTerrainManager {
       }
     }
 
-    // 3. Desert Creosote Scrub & Barrel Cacti (8 to 14 per chunk)
-    const floraCount = 8 + Math.floor(pseudoRandom(seed + 100) * 7);
+    // 3. Authentic Sonoran Desert Flora Distribution (10 to 18 plants per chunk)
+    const floraCount = 10 + Math.floor(pseudoRandom(seed + 100) * 8);
     for (let i = 0; i < floraCount; i++) {
       const rx = (pseudoRandom(seed + 110 + i * 3) - 0.5) * (CHUNK_SIZE - 10);
       const rz = (pseudoRandom(seed + 111 + i * 3) - 0.5) * (CHUNK_SIZE - 10);
       const worldX = originX + rx;
       const worldZ = originZ + rz;
       const worldY = getTerrainHeight(worldX, worldZ);
+      const floraTypeVal = pseudoRandom(seed + 112 + i * 5);
 
-      const isBarrel = pseudoRandom(seed + 112 + i * 3) > 0.65;
-      if (isBarrel) {
-        const barrel = new THREE.Mesh(this.barrelGeo, this.barrelMat);
-        const bScale = 0.7 + pseudoRandom(seed + 113 + i) * 0.6;
-        barrel.position.set(worldX, worldY + 0.35 * bScale, worldZ);
-        barrel.scale.set(bScale, bScale, bScale);
-        group.add(barrel);
-      } else {
+      if (floraTypeVal < 0.28) {
+        // Creosote Bush
         const scrub = new THREE.Mesh(this.scrubGeo, this.scrubMat);
-        const sScale = 0.6 + pseudoRandom(seed + 114 + i) * 0.8;
-        scrub.position.set(worldX, worldY + 0.6 * sScale, worldZ);
+        const sScale = 0.65 + pseudoRandom(seed + 113 + i) * 0.55;
+        scrub.position.set(worldX, worldY, worldZ);
         scrub.scale.set(sScale, sScale, sScale);
+        scrub.rotation.y = pseudoRandom(seed + 114 + i) * Math.PI * 2;
         group.add(scrub);
+      } else if (floraTypeVal < 0.48) {
+        // Fishhook Barrel Cactus
+        const barrel = new THREE.Mesh(this.barrelGeo, this.barrelMat);
+        const bScale = 0.65 + pseudoRandom(seed + 115 + i) * 0.5;
+        barrel.position.set(worldX, worldY + 0.42 * bScale, worldZ);
+        barrel.scale.set(bScale, bScale, bScale);
+        barrel.rotation.y = pseudoRandom(seed + 116 + i) * Math.PI * 2;
+        group.add(barrel);
+      } else if (floraTypeVal < 0.68) {
+        // Prickly Pear Cactus
+        const prickly = new THREE.Mesh(this.pricklyGeo, this.pricklyMat);
+        const pScale = 0.7 + pseudoRandom(seed + 117 + i) * 0.45;
+        prickly.position.set(worldX, worldY, worldZ);
+        prickly.scale.set(pScale, pScale, pScale);
+        prickly.rotation.y = pseudoRandom(seed + 118 + i) * Math.PI * 2;
+        group.add(prickly);
+      } else if (floraTypeVal < 0.82) {
+        // Jumping Cholla Cactus
+        const cholla = new THREE.Mesh(this.chollaGeo, this.chollaMat);
+        const cScale = 0.7 + pseudoRandom(seed + 119 + i) * 0.4;
+        cholla.position.set(worldX, worldY, worldZ);
+        cholla.scale.set(cScale, cScale, cScale);
+        cholla.rotation.y = pseudoRandom(seed + 120 + i) * Math.PI * 2;
+        group.add(cholla);
+      } else if (floraTypeVal < 0.92) {
+        // Whiplike Ocotillo
+        const ocotillo = new THREE.Mesh(this.ocotilloGeo, this.ocotilloMat);
+        const oScale = 0.75 + pseudoRandom(seed + 121 + i) * 0.45;
+        ocotillo.position.set(worldX, worldY, worldZ);
+        ocotillo.scale.set(oScale, oScale, oScale);
+        ocotillo.rotation.y = pseudoRandom(seed + 122 + i) * Math.PI * 2;
+        group.add(ocotillo);
+      } else {
+        // Desert Century Agave
+        const agave = new THREE.Mesh(this.agaveGeo, this.agaveMat);
+        const aScale = 0.7 + pseudoRandom(seed + 123 + i) * 0.45;
+        agave.position.set(worldX, worldY, worldZ);
+        agave.scale.set(aScale, aScale, aScale);
+        agave.rotation.y = pseudoRandom(seed + 124 + i) * Math.PI * 2;
+        group.add(agave);
       }
     }
 

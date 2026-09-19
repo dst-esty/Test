@@ -204,6 +204,12 @@ export default function App() {
   // Prospector's Inspection Goggles: Toggles detailed subterranean strata & shaft HUD
   const [areGogglesActive, setAreGogglesActive] = useState<boolean>(false);
 
+  // Winchester Rifle Scope State
+  const [isAimingRifle, setIsAimingRifle] = useState<boolean>(false);
+  const [rifleScopeZoom, setRifleScopeZoom] = useState<number>(3.0);
+  const toggleScopeHandlerRef = useRef<(() => void) | null>(null);
+  const scopeZoomHandlerRef = useRef<((delta: number) => void) | null>(null);
+
   const handleToggleGoggles = useCallback(() => {
     setAreGogglesActive((prev) => {
       const next = !prev;
@@ -930,6 +936,16 @@ export default function App() {
         onToggleDayNight={handleToggleDayNight}
         graphicsQuality={graphicsQuality}
         onFpsUpdate={setCurrentFps}
+        onAimingRifleChange={(aiming, zoom) => {
+          setIsAimingRifle(aiming);
+          setRifleScopeZoom(zoom);
+        }}
+        onRegisterToggleScopeHandler={(fn) => {
+          toggleScopeHandlerRef.current = fn;
+        }}
+        onRegisterScopeZoomHandler={(fn) => {
+          scopeZoomHandlerRef.current = fn;
+        }}
       />
 
       {/* Compass & Diurnal Cycle HUD with Day/Night Illumination Toggle & Endless Coordinates */}
@@ -970,6 +986,17 @@ export default function App() {
         playerState={playerState}
         timeOfDay={timeOfDay}
         nearestLandmark={nearestLandmark}
+        isAimingRifle={isAimingRifle}
+        scopeZoom={rifleScopeZoom}
+        onToggleAimRifle={() => {
+          if (toggleScopeHandlerRef.current) toggleScopeHandlerRef.current();
+        }}
+        onZoomInScope={() => {
+          if (scopeZoomHandlerRef.current) scopeZoomHandlerRef.current(0.5);
+        }}
+        onZoomOutScope={() => {
+          if (scopeZoomHandlerRef.current) scopeZoomHandlerRef.current(-0.5);
+        }}
         onSelectTool={(tool) => {
           if (tool === 'builder' && !playerState.activeClaim?.isClaimed) {
             showBanner("⚠️ A mine can only be built on a staked claim! Equip Claim Stake [9] to claim territory first.");
