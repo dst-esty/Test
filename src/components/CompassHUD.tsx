@@ -33,7 +33,8 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   const hour = Math.floor(timeOfDay);
   const minute = Math.floor((timeOfDay - hour) * 60);
   const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-  const isNight = timeOfDay < 6 || timeOfDay > 18.5;
+  const isNight = timeOfDay < 5.2 || timeOfDay > 20.2;
+  const isSunset = timeOfDay >= 17.5 && timeOfDay <= 20.2;
 
   return (
     <div className="pointer-events-none absolute top-3 left-0 right-0 z-20 flex flex-col items-center select-none px-4">
@@ -59,7 +60,7 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
           )}
           <span>{timeStr}</span>
           <span className="text-amber-500/70 text-[10px] hidden sm:inline">
-            {isNight ? 'NIGHT' : timeOfDay > 15 ? 'AFTERNOON' : 'DAYLIGHT'}
+            {isNight ? 'NIGHT' : isSunset ? 'SUNSET' : timeOfDay >= 12 ? 'AFTERNOON' : 'MORNING'}
           </span>
         </div>
 

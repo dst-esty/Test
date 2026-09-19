@@ -52,8 +52,8 @@ class MultiplayerService {
     players: {},
     chatMessages: [],
     ping: 35,
-    universalWeather: 'sunset',
-    universalTimeOfDay: 16.0,
+    universalWeather: 'clear',
+    universalTimeOfDay: 9.5,
   };
   private subscribers = new Set<() => void>();
 
@@ -233,7 +233,7 @@ class MultiplayerService {
         if (this.handlers.onWeatherSync && msg.universalWeather) {
           this.handlers.onWeatherSync({
             weather: msg.universalWeather,
-            timeOfDay: typeof msg.universalTimeOfDay === 'number' ? msg.universalTimeOfDay : 16.0,
+            timeOfDay: typeof msg.universalTimeOfDay === 'number' ? msg.universalTimeOfDay : 9.5,
           });
         }
         break;

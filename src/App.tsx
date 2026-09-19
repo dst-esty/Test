@@ -26,6 +26,7 @@ import { MultiplayerHUD } from './components/MultiplayerHUD';
 import { ShaftSinkingStats } from './world/undergroundVoxels';
 import { multiplayer } from './multiplayer/multiplayerService';
 import { getTerrainHeight } from './world/terrain';
+import { advanceDiurnalTime } from './world/atmosphere';
 import { Compass, BookOpen, Map as MapIcon, Sparkles, AlertCircle } from 'lucide-react';
 import { isMobileDevice } from './utils/device';
 
@@ -467,7 +468,7 @@ export default function App() {
   // Universal continuous sun & celestial progression (shared instance)
   useEffect(() => {
     const interval = setInterval(() => {
-      setTimeOfDay((prev) => (prev + 0.04) % 24);
+      setTimeOfDay((prev) => advanceDiurnalTime(prev, 1));
     }, 1000);
     return () => clearInterval(interval);
   }, []);

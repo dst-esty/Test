@@ -145,68 +145,119 @@ async function startServer() {
   // Authoritative Universal Weather & Celestial Sky Simulation
   type WeatherType = 'clear' | 'clouds' | 'sunset' | 'storm' | 'sandstorm' | 'light_rain' | 'night';
 
-  const WEATHER_CYCLE: { weather: WeatherType; durationSec: number; label: string; broadcastMsg: string }[] = [
-    {
-      weather: 'sunset',
-      durationSec: 180,
-      label: 'Golden Hour (4:00 PM)',
-      broadcastMsg: "⛰️ Golden Hour in Superstition Mountains: The shadow of Weaver's Needle points the way.",
-    },
-    {
-      weather: 'clear',
-      durationSec: 160,
-      label: 'Clear Desert Sky',
-      broadcastMsg: '☀️ Brilliant desert sunlight warms the canyon rock formations.',
-    },
-    {
-      weather: 'sandstorm',
-      durationSec: 150,
-      label: 'Haboob Dust Storm',
-      broadcastMsg: '🌪️ Haboob Alert: A violent desert sandstorm is sweeping across the canyon! Keep your claims secured.',
-    },
-    {
-      weather: 'clouds',
-      durationSec: 140,
-      label: 'Desert Cumulus Clouds',
-      broadcastMsg: '☁️ Desert cumulus clouds roll over the spires, providing brief respite from the sun.',
-    },
-    {
-      weather: 'light_rain',
-      durationSec: 130,
-      label: 'Canyon Mist & Rain',
-      broadcastMsg: '🌧️ Refreshing rain begins falling across the Superstitions, moistening the dry dirt.',
-    },
-    {
-      weather: 'storm',
-      durationSec: 150,
-      label: 'Monsoon Thunderstorm',
-      broadcastMsg: '⚡ Desert Monsoon: Lightning flashes illuminate Weaver\'s Needle with roaring thunder!',
-    },
-    {
-      weather: 'night',
-      durationSec: 160,
-      label: 'Starry Desert Night',
-      broadcastMsg: '🌌 Deep desert night settles in. The Milky Way stretches from horizon to horizon.',
-    },
-  ];
+  let universalTimeOfDay = 9.5; // Start at 9:30 AM in crisp, bright morning desert sunshine
+  let universalWeather: WeatherType = 'clear';
+  let currentWeatherDuration = 420; // 7 minutes of initial clear sunshine
+  let currentWeatherElapsed = 0;
+  let currentWeatherLabel = 'Brilliant Desert Sunlight';
+  let lastSandstormTime = -9999; // Cooldown tracker for sandstorms (minimum 15 mins)
+  let lastMonsoonTime = -9999;   // Cooldown tracker for monsoons (minimum 15 mins)
+  let serverUptimeSeconds = 0;
 
-  let weatherCycleIndex = 0;
-  let weatherElapsed = 0;
-  let universalTimeOfDay = 16.0; // 4:00 PM iconic alignment
-  let universalWeather: WeatherType = WEATHER_CYCLE[0].weather;
+  // Realistic diurnal clock pacing:
+  // - 6:00 to 18:30 -> Daytime: ~14 minutes of bright golden sunlight
+  // - 18:30 to 20:30 -> Sunset: ~1.3 minutes of Arizona alpenglow
+  // - 20:30 to 5:00 -> Night: ~2.1 minutes of starry night
+  // - 5:00 to 6:00 -> Dawn: ~33 seconds
+  function advanceDiurnalTime(currentTime: number, deltaSec: number = 1): number {
+    let rate: number;
+    if (currentTime >= 6.0 && currentTime < 18.5) {
+      rate = 0.015;
+    } else if (currentTime >= 18.5 && currentTime < 20.5) {
+      rate = 0.025;
+    } else if (currentTime >= 20.5 || currentTime < 5.0) {
+      rate = 0.065;
+    } else {
+      rate = 0.03;
+    }
+    return ((currentTime + rate * deltaSec) % 24 + 24) % 24;
+  }
+
+  function pickNextWeather(): { weather: WeatherType; durationSec: number; label: string; broadcastMsg: string } {
+    const isLateAfternoon = universalTimeOfDay >= 17.5 && universalTimeOfDay < 19.5;
+    const isNight = universalTimeOfDay >= 20.5 || universalTimeOfDay < 5.0;
+
+    // During late afternoon, natural golden hour
+    if (isLateAfternoon && Math.random() < 0.75) {
+      return {
+        weather: 'sunset',
+        durationSec: 90,
+        label: 'Golden Hour (Sunset)',
+        broadcastMsg: "⛰️ Golden Hour across the Superstitions: The shadow of Weaver's Needle stretches long.",
+      };
+    }
+
+    const roll = Math.random();
+    const timeSinceSandstorm = serverUptimeSeconds - lastSandstormTime;
+    const timeSinceMonsoon = serverUptimeSeconds - lastMonsoonTime;
+
+    // Rare Haboob Dust Squall: Only ~4% chance, minimum 15 mins (900s) cooldown, brief 45-second duration
+    if (roll < 0.04 && timeSinceSandstorm > 900 && !isNight) {
+      lastSandstormTime = serverUptimeSeconds;
+      return {
+        weather: 'sandstorm',
+        durationSec: 45,
+        label: 'Brief Haboob Dust Squall',
+        broadcastMsg: '🌪️ Dust Squall: A brief desert dust squall is gusting through the canyon! It will blow over shortly.',
+      };
+    }
+
+    // Rare Monsoon Storm: Only ~4% chance, minimum 15 mins (900s) cooldown, brief 45-second duration
+    if (roll < 0.08 && timeSinceMonsoon > 900) {
+      lastMonsoonTime = serverUptimeSeconds;
+      return {
+        weather: 'storm',
+        durationSec: 45,
+        label: 'Passing Monsoon Thunderstorm',
+        broadcastMsg: "⚡ Desert Monsoon: Distant lightning flashes illuminate Weaver's Needle with rolling thunder!",
+      };
+    }
+
+    // Rare Light Rain: Only ~5% chance, duration 45 seconds
+    if (roll < 0.13) {
+      return {
+        weather: 'light_rain',
+        durationSec: 45,
+        label: 'Canyon Mist & Light Rain',
+        broadcastMsg: '🌧️ Refreshing desert drizzle dampens the canyon trails.',
+      };
+    }
+
+    // Desert Cumulus Clouds: ~20% chance, duration 2.5 to 3.5 minutes
+    if (roll < 0.33) {
+      return {
+        weather: 'clouds',
+        durationSec: 150 + Math.floor(Math.random() * 60),
+        label: isNight ? 'Passing Night Clouds' : 'Desert Cumulus Clouds',
+        broadcastMsg: isNight
+          ? '☁️ Thin clouds drift across the moonlit desert spires.'
+          : '☁️ High desert clouds provide pleasant shade over the canyon.',
+      };
+    }
+
+    // Dominant weather: Clear Sunny Desert Sky (~67% of transitions, duration 5 to 8 minutes)
+    return {
+      weather: 'clear',
+      durationSec: 320 + Math.floor(Math.random() * 180),
+      label: isNight ? 'Clear Starry Night' : 'Brilliant Desert Sunlight',
+      broadcastMsg: isNight
+        ? '🌌 Clear desert night: The Milky Way glows brightly over the Superstitions.'
+        : '☀️ Brilliant desert sunlight illuminates the canyon rock formations.',
+    };
+  }
 
   // Run authoritative universal clock & meteorological cycle
   setInterval(() => {
-    // Universal time advances: 1 real second = ~0.04 game hours (1 day = 10 minutes)
-    universalTimeOfDay = (universalTimeOfDay + 0.04) % 24;
-    weatherElapsed += 1;
+    universalTimeOfDay = advanceDiurnalTime(universalTimeOfDay, 1);
+    currentWeatherElapsed += 1;
+    serverUptimeSeconds += 1;
 
-    const currentPhase = WEATHER_CYCLE[weatherCycleIndex];
-    if (weatherElapsed >= currentPhase.durationSec) {
-      weatherElapsed = 0;
-      weatherCycleIndex = (weatherCycleIndex + 1) % WEATHER_CYCLE.length;
-      const nextPhase = WEATHER_CYCLE[weatherCycleIndex];
+    if (currentWeatherElapsed >= currentWeatherDuration) {
+      currentWeatherElapsed = 0;
+      const nextPhase = pickNextWeather();
       universalWeather = nextPhase.weather;
+      currentWeatherDuration = nextPhase.durationSec;
+      currentWeatherLabel = nextPhase.label;
 
       // Broadcast system weather announcement in chat
       addChatMessage({
@@ -223,13 +274,13 @@ async function startServer() {
         timeOfDay: universalTimeOfDay,
         label: nextPhase.label,
       });
-    } else if (weatherElapsed % 4 === 0) {
+    } else if (currentWeatherElapsed % 4 === 0) {
       // Periodic synchronization of celestial time every 4 seconds
       broadcast({
         type: 'weather:sync',
         weather: universalWeather,
         timeOfDay: universalTimeOfDay,
-        label: currentPhase.label,
+        label: currentWeatherLabel,
       });
     }
   }, 1000);

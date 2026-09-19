@@ -557,6 +557,28 @@ function getCelestialDirections(time: number): {
   return { sunDir, moonDir, sunY };
 }
 
+/**
+ * Advances the diurnal clock with realistic open-world pacing:
+ * - Daytime (6:00 to 18:30): Relaxed pacing (~14 mins of sunshine)
+ * - Sunset & Dusk (18:30 to 20:30): Cinematic pacing (~1.3 mins of alpenglow)
+ * - Night (20:30 to 5:00): Swift pacing (~2.1 mins of starry night)
+ * - Dawn (5:00 to 6:00): Gentle dawn (~33 secs)
+ * Yields ~88% daylight and ~12% night.
+ */
+export function advanceDiurnalTime(currentTime: number, deltaSec: number = 1): number {
+  let rate: number;
+  if (currentTime >= 6.0 && currentTime < 18.5) {
+    rate = 0.015;
+  } else if (currentTime >= 18.5 && currentTime < 20.5) {
+    rate = 0.025;
+  } else if (currentTime >= 20.5 || currentTime < 5.0) {
+    rate = 0.065;
+  } else {
+    rate = 0.03;
+  }
+  return ((currentTime + rate * deltaSec) % 24 + 24) % 24;
+}
+
 export class AtmosphereManager {
   private scene: THREE.Scene;
   private skyDome: THREE.Mesh;
@@ -599,9 +621,9 @@ export class AtmosphereManager {
   private ambientDustPositions: Float32Array | null = null;
 
   private weather: WeatherType = 'clear';
-  private timeOfDay: number = 16.0; // default 4 PM Weaver's Needle Shadow Legend
-  private currentTimeOfDay: number = 16.0;
-  private targetTimeOfDay: number = 16.0;
+  private timeOfDay: number = 9.5; // default 9:30 AM bright morning desert sunshine
+  private currentTimeOfDay: number = 9.5;
+  private targetTimeOfDay: number = 9.5;
   private isInitialized: boolean = false;
   private weatherWeights = { sandstorm: 0, storm: 0, lightRain: 0 };
   private cachedSunLight?: THREE.DirectionalLight;
@@ -716,7 +738,7 @@ export class AtmosphereManager {
       uniforms: {
         uSunPosition: { value: new THREE.Vector3(0.6, 0.7, 0.3).normalize() },
         uTime: { value: 0 },
-        uTimeOfDay: { value: 16.0 },
+        uTimeOfDay: { value: 9.5 },
         uWeather: { value: 0 },
         uZenithColor: { value: new THREE.Color(0x2458a8) },
         uHorizonColor: { value: new THREE.Color(0xf4b260) },
@@ -1109,9 +1131,9 @@ export class AtmosphereManager {
       finalZenith.lerp(new THREE.Color(0x563418), dustW);
       finalHorizon.lerp(new THREE.Color(0x744926), dustW);
       finalFogColor.lerp(new THREE.Color(0xa66336), dustW);
-      finalFogDensity = THREE.MathUtils.lerp(finalFogDensity, 0.0095, dustW);
+      finalFogDensity = THREE.MathUtils.lerp(finalFogDensity, 0.0055, dustW);
       finalSunColor.lerp(new THREE.Color(0xdf8445), dustW);
-      finalSunIntensity = THREE.MathUtils.lerp(finalSunIntensity, 0.65, dustW);
+      finalSunIntensity = THREE.MathUtils.lerp(finalSunIntensity, 0.90, dustW);
       finalHemiSky.lerp(new THREE.Color(0xca7740), dustW);
       finalHemiGround.lerp(new THREE.Color(0x603418), dustW);
       finalCloudTop.lerp(new THREE.Color(0xa66336), dustW);
