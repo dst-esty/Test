@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { BulletTracer, DynamiteEntity, EnemyBandit, Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
-import { createPeriodCorrectRifle } from './firearmModel';
 
 export interface BanditEntity {
   data: EnemyBandit;
@@ -84,11 +83,27 @@ export class CombatManager {
     crown.position.set(0, 1.9, 0);
     group.add(crown);
 
-    // Authentic Period-Correct Frontier Rifle with Real Barrel & Malcolm Telescopic Sight
-    const rifleParts = createPeriodCorrectRifle({ isFirstPerson: false });
-    rifleParts.root.position.set(0.28, 1.15, 0.25);
-    rifleParts.root.rotation.x = -0.2;
-    group.add(rifleParts.root);
+    // Lever-Action Repeater Rifle
+    const rifleGroup = new THREE.Group();
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.0, 6), gunMat);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = 0.5;
+    const stock = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.14, 0.35),
+      new THREE.MeshStandardMaterial({ color: 0x4a2a18, roughness: 0.8 })
+    );
+    stock.position.z = -0.15;
+    rifleGroup.add(barrel);
+    rifleGroup.add(stock);
+
+    rifleGroup.position.set(0.28, 1.15, 0.3);
+    rifleGroup.rotation.x = -0.2;
+    group.add(rifleGroup);
+
+    // Muzzle Flash light
+    const flash = new THREE.PointLight(0xffaa22, 0, 12);
+    flash.position.set(0.28, 1.15, 1.4);
+    group.add(flash);
 
     // Legs
     const legGeo = new THREE.CylinderGeometry(0.11, 0.12, 0.65, 6);
@@ -116,8 +131,8 @@ export class CombatManager {
         patrolAngle: Math.random() * Math.PI * 2,
       },
       mesh: group,
-      rifleMesh: rifleParts.barrelMesh,
-      muzzleFlash: rifleParts.muzzleFlashLight || new THREE.PointLight(0xffaa22, 0, 10),
+      rifleMesh: barrel,
+      muzzleFlash: flash,
       legs: [leftLeg, rightLeg],
       walkTimer: Math.random() * 10,
     });
