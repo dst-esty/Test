@@ -119,7 +119,7 @@ interface WorldCanvasProps {
   onFpsUpdate?: (fps: number) => void;
 }
 
-const getTargetPixelRatio = (quality: GraphicsQuality) => {
+const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
   const isMobile = isMobileDevice();
   const rawDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
   if (quality === 'performance') {
@@ -183,7 +183,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onRegisterMobileJumpHandler,
   onRegisterMobileInteractHandler,
   onRegisterMobileMoveHandler,
-  graphicsQuality = 'balanced',
+  graphicsQuality = 'balanced' as GraphicsQuality,
   onFpsUpdate,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -959,8 +959,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (undergroundLayersRef.current) {
         const uLayers = undergroundLayersRef.current;
         const targetedVoxel = uLayers.voxelEngine.targetedVoxel;
-        const isNearShaft = uLayers.isNearShaft(playerPos.current, 5.5) || uLayers.currentLevel > 0;
-        if (targetedVoxel || uLayers.currentLevel > 0 || (isNearShaft && uLayers.isNearExcavationPit(playerPos.current))) {
+        if (targetedVoxel || uLayers.currentLevel > 0) {
           executeSubterraneanVoxelMine(playerStateRef.current.equippedTool || 'pickaxe');
           return;
         }
@@ -1121,6 +1120,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const res = miningSystemRef.current.digVoxelAtRay(raycaster, playerPos.current, lookDir);
 
       if (res.hit) {
+        foliageManagerRef.current?.updateMountainHoleCutouts();
         if (res.slumpOccurred && res.slumpDamage && res.slumpDamage > 0) {
           if (onTriggerDamageFlash) onTriggerDamageFlash();
           const nextHealth = playerStateRef.current.health - (res.slumpDamage || 0);
@@ -1214,8 +1214,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (undergroundLayersRef.current) {
         const uLayers = undergroundLayersRef.current;
         const targetedVoxel = uLayers.voxelEngine.targetedVoxel;
-        const isNearShaft = uLayers.isNearShaft(playerPos.current, 5.5) || uLayers.currentLevel > 0;
-        if (targetedVoxel || (isNearShaft && uLayers.isNearExcavationPit(playerPos.current))) {
+        if (targetedVoxel || uLayers.currentLevel > 0) {
           executeSubterraneanVoxelMine('shovel');
           return;
         }
@@ -1795,31 +1794,70 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         camera.getWorldDirection(camDir);
         const origin = camera.position.clone();
         const wallRay = new THREE.Raycaster(origin, camDir, 0.1, 7.5);
-        const cavernHit = uLayers.raycastCavernWall(wallRay, 6.0);
+        const cavernHit = uLayers.raycastCavernWall(wallRay, 7.2);
 
-        const wallHit = cavernHit.hit && cavernHit.point
-          ? cavernHit.point
-          : new THREE.Vector3(
-              playerPos.current.x + camDir.x * 4.5,
-              playerPos.current.y + camDir.y * 4.5,
-              playerPos.current.z + camDir.z * 4.5
-            );
-
-        const wallRes = uLayers.strikeCavernWall(wallHit, activeTool, cavernHit.normal);
-        if (wallRes.oreYield > 0) {
-          setPlayerState((prev) => ({
-            ...prev,
-            goldFound: (prev.goldFound || 0) + wallRes.oreYield,
-            blocksDug: (prev.blocksDug || 0) + 1,
-          }));
-        } else {
-          setPlayerState((prev) => ({
-            ...prev,
-            blocksDug: (prev.blocksDug || 0) + 1,
-          }));
+        if (!cavernHit.hit || !cavernHit.point) {
+          toolSwingProgress.current = 1.0;
+          soundEngine.playPickaxe();
+          if (onShowBanner) {
+            onShowBanner('⛏️ Aim closer to the cavern wall or tunnel face to excavate.');
+          }
+          return;
         }
-        if (wallRes.message && onShowBanner) {
-          onShowBanner(wallRes.message);
+
+        toolSwingProgress.current = 1.0;
+        if (activeTool === 'dynamite') {
+          soundEngine.playFuseHiss();
+        } else {
+          soundEngine.playPickaxe();
+        }
+
+        const wallRes = uLayers.strikeCavernWall(
+          cavernHit.point,
+          activeTool,
+          cavernHit.normal,
+          cavernHit.existingHole
+        );
+
+        if (wallRes.success) {
+          if (onTriggerHitMarker) onTriggerHitMarker();
+
+          const oreYield = wallRes.oreYield || 0;
+          const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
+          const cashEarned = isAutoRedeem && oreYield > 0 ? Number((oreYield * 20.67).toFixed(2)) : 0;
+
+          if (oreYield > 0 && onPayDirtHit) {
+            onPayDirtHit(oreYield);
+          }
+          if (cashEarned > 0) {
+            soundEngine.playCashRegister();
+          }
+
+          setPlayerState((prev) => ({
+            ...prev,
+            blocksDug: (prev.blocksDug || 0) + 1,
+            goldFound: (prev.goldFound || 0) + oreYield,
+            cashDollars: (prev.cashDollars || 0) + cashEarned,
+          }));
+
+          // Spawn physical chipped rocks identical to surface mountain excavation
+          if (movableRockManagerRef.current && cavernHit.point) {
+            const ejectionDir = cavernHit.normal ? cavernHit.normal.clone() : new THREE.Vector3(0, 0.5, 0);
+            ejectionDir.y = 0.45;
+            ejectionDir.normalize();
+            movableRockManagerRef.current.spawnLooseRock({
+              position: cavernHit.point.clone().add(new THREE.Vector3(0, 0.2, 0)),
+              color: wallRes.hole?.rockColor || 0x846854,
+              scale: 0.38 + Math.random() * 0.15,
+              weightLbs: 12 + Math.floor(Math.random() * 8),
+              ejectionDir,
+              isChippedFragment: true,
+            });
+          }
+
+          if (wallRes.message && onShowBanner) {
+            onShowBanner(wallRes.message);
+          }
         }
       }
     };
@@ -2842,8 +2880,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             const cam = cameraRef.current;
             const lookDir = new THREE.Vector3();
             cam.getWorldDirection(lookDir);
-            const wallRay = new THREE.Raycaster(cam.position, lookDir, 0.1, 6.0);
-            const cavernHit = uLayers.raycastCavernWall(wallRay, 5.0);
+            const wallRay = new THREE.Raycaster(cam.position, lookDir, 0.1, 7.5);
+            const cavernHit = uLayers.raycastCavernWall(wallRay, 7.0);
             if (cavernHit.hit) {
               const hole = cavernHit.existingHole;
               let wallLabel = `⛏️ Dig Cavern Wall into Bedrock [Left Click / E]`;
@@ -3281,11 +3319,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         if (mtnHole) {
           const isDeepAdit = mtnHole.depth >= 2.0;
           const veinText = mtnHole.hasExposedGoldVein ? ' | ✨ High-Grade Gold Vein' : '';
+          const aditType = isUndergroundNow ? 'Mine Drift' : 'Mountain Adit';
           const label = tunnelStatus.inside
-            ? `⛏️ Inside Mountain Adit (Bore: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Working-Face with Pickaxe [3] or Blast Dynamite [5]]`
+            ? `⛏️ Inside ${aditType} (Bore: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Working-Face with Pickaxe [3] or Blast Dynamite [5]]`
             : isDeepAdit
-            ? `🚪 Mountain Drift Portal (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Step Inside or Strike to Bore Deeper]`
-            : `⛏️ Mountain Excavation (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Pickaxe to Bore Deeper]`;
+            ? `🚪 ${aditType} Portal (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Step Inside or Strike to Bore Deeper]`
+            : `⛏️ ${aditType} Excavation (Depth: -${mtnHole.depth.toFixed(1)}m${veinText}) [Strike Pickaxe to Bore Deeper]`;
 
           if (executeAction) {
             if (mtnHole.hasExposedGoldVein && Math.random() < 0.4) {
@@ -3404,22 +3443,34 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const targetDx = moveDir.x * moveSpeed;
         const targetDz = moveDir.z * moveSpeed;
 
-        // Boundary & Obstacle checks: if underground, constrain to cavern chamber; if surface, resolve rock/mountain/slope collisions
+        // Boundary & Obstacle checks: if underground, constrain to cavern chamber unless inside dug tunnels/rooms; if surface, resolve collisions
         const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
         if (isUnderground && undergroundLayersRef.current) {
+          const uLayers = undergroundLayersRef.current;
           const candX = playerPos.current.x + targetDx;
           const candZ = playerPos.current.z + targetDz;
-          const dx = candX - undergroundLayersRef.current.surfacePos.x;
-          const dz = candZ - undergroundLayersRef.current.surfacePos.z;
+          const dx = candX - uLayers.surfacePos.x;
+          const dz = candZ - uLayers.surfacePos.z;
           const dist = Math.hypot(dx, dz);
-          const maxRadius = 12.0;
-          if (dist <= maxRadius) {
+
+          const curLayer = uLayers.layers.find((l) => l.level === uLayers.currentLevel);
+          const chamberRadius = curLayer ? (curLayer.level === 1 ? 12.0 : curLayer.level === 2 ? 13.5 : 15.0) : 12.0;
+
+          // Check if candidate position is inside a dug mountain hole / drift tunnel!
+          const isInsideTunnel = Boolean(
+            uLayers.holeManager?.isInsideMountainTunnel(candX, playerPos.current.y, candZ, 0.65)?.inside
+          );
+          // Check if candidate position is inside cardinal drift rooms
+          const isInsideRooms = uLayers.isInsideCavernOrRooms(candX, candZ, uLayers.currentLevel);
+
+          if (dist <= chamberRadius || isInsideTunnel || isInsideRooms) {
             playerPos.current.x = candX;
             playerPos.current.z = candZ;
           } else {
+            const maxRadius = chamberRadius;
             const ratio = maxRadius / dist;
-            playerPos.current.x = undergroundLayersRef.current.surfacePos.x + dx * ratio;
-            playerPos.current.z = undergroundLayersRef.current.surfacePos.z + dz * ratio;
+            playerPos.current.x = uLayers.surfacePos.x + dx * ratio;
+            playerPos.current.z = uLayers.surfacePos.z + dz * ratio;
           }
         } else {
           // Terrain slope, steep hills, boulders, and mountain outcropping collision resolution with smooth wall sliding
@@ -4130,13 +4181,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               fBlast.destroyedPoints.forEach((dp) => {
                 miningSystemRef.current?.spawnDigDebris(dp.pos, dp.type, 2.4);
               });
+              foliageManagerRef.current.updateMountainHoleCutouts();
             }
 
-            // Check if blast affects shaft mini-voxels
+            // Check if blast affects shaft mini-voxels or cavern wall tunnels
             if (undergroundLayersRef.current) {
               const uLayers = undergroundLayersRef.current;
               const distToShaft = Math.hypot(blastPos.x - uLayers.surfacePos.x, blastPos.z - uLayers.surfacePos.z);
-              if (distToShaft < 4.5 || uLayers.currentLevel > 0) {
+              if (distToShaft < 4.5 || (uLayers.currentLevel > 0 && distToShaft <= 6.5)) {
                 const sinkRes = uLayers.voxelEngine.sinkShaftDown('dynamite');
                 if (sinkRes.destroyed) {
                   goldBlasted += sinkRes.oreYield || 0;
@@ -4151,6 +4203,21 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                     }
                     if (breachRes.message && onShowBanner) {
                       onShowBanner(breachRes.message);
+                    }
+                  }
+                }
+              } else if (uLayers.currentLevel > 0 && distToShaft > 6.5) {
+                // Blast against cavern wall or existing tunnel face
+                const blastDir = new THREE.Vector3(blastPos.x - uLayers.surfacePos.x, 0, blastPos.z - uLayers.surfacePos.z).normalize();
+                const blastRay = new THREE.Raycaster(blastPos, blastDir, 0.1, 7.0);
+                const cavernHit = uLayers.raycastCavernWall(blastRay, 7.0);
+                if (cavernHit.hit && cavernHit.point) {
+                  const wallRes = uLayers.strikeCavernWall(cavernHit.point, 'dynamite', cavernHit.normal, cavernHit.existingHole);
+                  if (wallRes.success) {
+                    goldBlasted += wallRes.oreYield || 0;
+                    extraRocks += 3;
+                    if (wallRes.message && onShowBanner) {
+                      onShowBanner(wallRes.message);
                     }
                   }
                 }

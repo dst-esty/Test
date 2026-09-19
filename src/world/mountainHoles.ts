@@ -190,12 +190,6 @@ export class MountainHoleManager {
       normal.normalize();
     }
 
-    // Reverse surface excavation vector so the tunnel burrows subterranean into the mountain/rock
-    // instead of poking out on the surface into the air
-    if (isSurface) {
-      normal.negate();
-    }
-
     // Check if an existing hole is close enough to be deepened
     // Check both entrance proximity and along tunnel bore proximity
     let existing = this.findNearbyHole(hitPoint, 1.6);
@@ -455,7 +449,7 @@ export class MountainHoleManager {
       color: darkInteriorColor,
       roughness: 0.88,
       metalness: 0.05,
-      side: THREE.DoubleSide, // Allows viewing inside the carved cave
+      side: THREE.BackSide, // Only interior tunnel walls render: exterior is culled so it never shows as a tube in open air
       flatShading: true,
     });
 
@@ -472,7 +466,14 @@ export class MountainHoleManager {
     }
     backWallGeo.computeVertexNormals();
 
-    const backWallMesh = new THREE.Mesh(backWallGeo, cavityMat);
+    const backWallMat = new THREE.MeshStandardMaterial({
+      color: darkInteriorColor,
+      roughness: 0.92,
+      metalness: 0.05,
+      side: THREE.FrontSide, // Front side faces toward entrance (+Z)
+      flatShading: true,
+    });
+    const backWallMesh = new THREE.Mesh(backWallGeo, backWallMat);
     backWallMesh.position.set(0, 0, -D);
     hole.group.add(backWallMesh);
 

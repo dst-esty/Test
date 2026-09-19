@@ -440,10 +440,13 @@ export class MiningSystem {
       let mountainHoleMsg = '';
       let mtnGold = 0;
       if (hitNormal && hitNormal.y < 0.76 && this.mountainHoleManager) {
-        // isSurface is true: reverses excavation vector so the tunnel burrows subterranean instead of poking out
+        const norm = hitNormal.clone().normalize();
+        if (raycaster && norm.dot(raycaster.ray.direction) > 0) {
+          norm.negate();
+        }
         const mRes = this.mountainHoleManager.digMountainHole(
           targetPoint,
-          hitNormal,
+          norm,
           0x7c3820,
           'granite',
           'pickaxe',

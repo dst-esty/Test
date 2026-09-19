@@ -259,11 +259,16 @@ export class UndergroundLayersManager {
     );
     for (let u = 0; u < this.wallUniformsList.length; u++) {
       const uniforms = this.wallUniformsList[u];
-      const count = Math.min(8, undergroundHoles.length);
+      const layer = this.layers[u];
+      const layerFloorY = layer ? this.surfaceY - layer.depthMeters : this.surfaceY - 8.5;
+      const sortedHoles = [...undergroundHoles].sort(
+        (a, b) => Math.abs(a.position.y - layerFloorY) - Math.abs(b.position.y - layerFloorY)
+      );
+      const count = Math.min(8, sortedHoles.length);
       uniforms.uHoleCount.value = count;
       for (let i = 0; i < count; i++) {
-        uniforms.uHolePositions.value[i].copy(undergroundHoles[i].position);
-        uniforms.uHoleRadii.value[i] = undergroundHoles[i].radius * 0.94;
+        uniforms.uHolePositions.value[i].copy(sortedHoles[i].position);
+        uniforms.uHoleRadii.value[i] = sortedHoles[i].radius * 0.98;
       }
     }
   }
@@ -2321,7 +2326,7 @@ export class UndergroundLayersManager {
    */
   public raycastCavernWall(
     raycaster: THREE.Raycaster,
-    maxDistance = 6.0
+    maxDistance = 7.5
   ): {
     hit: boolean;
     point?: THREE.Vector3;
@@ -2335,17 +2340,11 @@ export class UndergroundLayersManager {
     // 1. First test existing excavated holes in the cavern
     if (this.holeManager) {
       const holeHit = this.holeManager.raycastMountainHoles(raycaster, maxDistance);
-      if (holeHit.hit && holeHit.point) {
-        // Enforce vector pointing strictly inward from the wall into the cavern toward the mine shaft center
-        const wallNormal = new THREE.Vector3(
-          this.surfacePos.x - holeHit.point.x,
-          0.05,
-          this.surfacePos.z - holeHit.point.z
-        ).normalize();
+      if (holeHit.hit && holeHit.hole && holeHit.point) {
         return {
           hit: true,
           point: holeHit.point,
-          normal: wallNormal,
+          normal: holeHit.hole.normal.clone(),
           distance: holeHit.distance,
           existingHole: holeHit.hole,
         };
@@ -2363,14 +2362,13 @@ export class UndergroundLayersManager {
           0,
           this.surfacePos.z - hit.point.z
         ).normalize();
-        const normal = toShaft.clone();
-        normal.y = 0.06;
-        normal.normalize();
+        toShaft.y = 0.05;
+        toShaft.normalize();
 
         return {
           hit: true,
           point: hit.point,
-          normal,
+          normal: toShaft,
           mesh: hit.object as THREE.Mesh,
           distance: hit.distance,
         };
@@ -2418,7 +2416,8 @@ export class UndergroundLayersManager {
   public strikeCavernWall(
     hitPoint: THREE.Vector3,
     tool: string = 'pickaxe',
-    customNormal?: THREE.Vector3
+    customNormal?: THREE.Vector3,
+    existingHoleTarget?: MountainHole
   ): {
     success: boolean;
     heading: number;
@@ -2473,12 +2472,12 @@ export class UndergroundLayersManager {
       0,
       this.surfacePos.z - hitPoint.z
     ).normalize();
+    toShaft.y = 0.05;
+    toShaft.normalize();
 
     let wallNormal = customNormal?.clone();
-    if (!wallNormal || wallNormal.lengthSq() < 0.01 || wallNormal.dot(toShaft) < 0.2) {
+    if (!wallNormal || wallNormal.lengthSq() < 0.01) {
       wallNormal = toShaft.clone();
-      wallNormal.y = 0.06;
-      wallNormal.normalize();
     }
 
     // Procedural volumetric hole excavation inside the mine!
@@ -2487,11 +2486,21 @@ export class UndergroundLayersManager {
     let holeResult: { goldAwarded: number; message: string } | null = null;
 
     if (this.holeManager) {
+      const targetHole =
+        existingHoleTarget ||
+        this.holeManager.findNearbyHole(hitPoint, 2.2) ||
+        this.holeManager.isInsideMountainTunnel(hitPoint.x, hitPoint.y, hitPoint.z, 1.2)?.hole;
+
+      const digTargetPos = targetHole ? targetHole.position : hitPoint;
+      const digTargetNormal = targetHole ? targetHole.normal : wallNormal;
+      const digTargetColor = targetHole ? targetHole.rockColor : wallColorHex;
+      const digTargetType = targetHole ? targetHole.rockType : particleMatType;
+
       const digRes = this.holeManager.digMountainHole(
-        hitPoint,
-        wallNormal,
-        wallColorHex,
-        particleMatType,
+        digTargetPos,
+        digTargetNormal,
+        digTargetColor,
+        digTargetType,
         tool
       );
       createdHole = digRes.hole;
@@ -2537,11 +2546,9 @@ export class UndergroundLayersManager {
       );
     }
 
-    let message = `⛏️ Chiseled ${compassLabel} Cavern Wall (-${holeDepth.toFixed(1)}m): Solid ${rockType} host rock.`;
-    if (struckVein && oreYield > 0) {
+    let message = holeResult?.message || `⛏️ Chiseled ${compassLabel} Cavern Wall (-${holeDepth.toFixed(1)}m): Solid ${rockType} host rock.`;
+    if (struckVein && oreYield > 0 && !holeResult?.goldAwarded) {
       message = `🪙 Struck Hydrothermal Quartz Vein in Cavern Wall at ${compassLabel} (-${holeDepth.toFixed(1)}m)! Yielded +${oreYield} oz ${oreType}!`;
-    } else if (holeResult?.message) {
-      message = holeResult.message;
     }
 
     return {
