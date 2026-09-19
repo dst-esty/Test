@@ -142,6 +142,7 @@ export function createLandmarkStructures(
     vertexColors: true,
     roughness: 0.90,
     metalness: 0.06,
+    side: THREE.DoubleSide,
     flatShading: false,
   });
 
@@ -149,6 +150,7 @@ export function createLandmarkStructures(
   spire.position.y = spireHeight * 0.5 - 2.0;
   spire.castShadow = true;
   spire.receiveShadow = true;
+  spire.frustumCulled = false;
   needleGroup.add(spire);
 
   // Radiating Volcanic Dike Fins & Scree Buttresses:

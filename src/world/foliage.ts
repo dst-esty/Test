@@ -649,6 +649,7 @@ export class DesertFoliageManager {
     });
     this.barrelMesh = new THREE.InstancedMesh(barrelGeo, barrelMat, barrelCount);
     this.barrelMesh.castShadow = true;
+    this.barrelMesh.frustumCulled = false;
 
     let bIdx = 0;
     for (let i = 0; i < barrelCount; i++) {
@@ -688,6 +689,7 @@ export class DesertFoliageManager {
       const mat = new THREE.MeshStandardMaterial({
         roughness: 0.94,
         metalness: 0.08,
+        side: THREE.DoubleSide,
         flatShading: arch.flatShading,
       });
       applyMountainHoleShaderToMaterial(mat, `boulder_${archIdx}`);
@@ -695,6 +697,7 @@ export class DesertFoliageManager {
       const mesh = new THREE.InstancedMesh(arch.geo, mat, arch.count);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
 
       let rCount = 0;
       for (let i = 0; i < arch.count; i++) {
@@ -778,6 +781,7 @@ export class DesertFoliageManager {
       roughness: 0.9,
     });
     this.scrubMesh = new THREE.InstancedMesh(scrubGeo, scrubMat, scrubCount);
+    this.scrubMesh.frustumCulled = false;
     let sIdx = 0;
     for (let i = 0; i < scrubCount; i++) {
       const rx = (Math.random() - 0.5) * 380;
@@ -806,6 +810,7 @@ export class DesertFoliageManager {
       roughness: 0.95,
     });
     this.grassMesh = new THREE.InstancedMesh(grassBladeGeo, grassMat, grassCount);
+    this.grassMesh.frustumCulled = false;
     let gIdx = 0;
     for (let i = 0; i < grassCount; i++) {
       const gx = (Math.random() - 0.5) * 360;
@@ -834,6 +839,7 @@ export class DesertFoliageManager {
       roughness: 0.8,
     });
     this.pricklyMesh = new THREE.InstancedMesh(padGeo, padMat, pricklyPearCount * 3);
+    this.pricklyMesh.frustumCulled = false;
     let ppIdx = 0;
     for (let i = 0; i < pricklyPearCount; i++) {
       const px = (Math.random() - 0.5) * 340;
@@ -874,6 +880,7 @@ export class DesertFoliageManager {
       roughness: 0.9,
     });
     this.chollaMesh = new THREE.InstancedMesh(chollaGeo, chollaMat, chollaCount * 2);
+    this.chollaMesh.frustumCulled = false;
     let cIdx = 0;
     for (let i = 0; i < chollaCount; i++) {
       const cx = (Math.random() - 0.5) * 320;
@@ -948,6 +955,7 @@ export class DesertFoliageManager {
         vertexColors: true,
         roughness: 0.92,
         metalness: 0.06,
+        side: THREE.DoubleSide,
         flatShading: false,
       });
       applyMountainHoleShaderToMaterial(mat, `outcrop_${arch.name}`);
@@ -955,6 +963,7 @@ export class DesertFoliageManager {
       const mesh = new THREE.InstancedMesh(arch.geo, mat, arch.count);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
 
       let ocCount = 0;
       for (let i = 0; i < arch.count; i++) {

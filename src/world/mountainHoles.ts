@@ -31,6 +31,8 @@ export interface MountainHole {
   cavityMesh: THREE.Mesh;
   backWallMesh?: THREE.Mesh;
   exitRimMesh?: THREE.Mesh;
+  portalRocksMesh?: THREE.Mesh;
+  exitPortalRocksMesh?: THREE.Mesh;
   veinMesh?: THREE.Mesh;
   sillRubbleMesh?: THREE.Mesh;
   timberLintel?: THREE.Mesh;
@@ -864,20 +866,121 @@ export class MountainHoleManager {
       let mesh: THREE.Mesh | undefined;
       if (geos.length === 1) {
         mesh = new THREE.Mesh(geos[0], material);
+        mesh.frustumCulled = false;
         hole.group.add(mesh);
       } else {
         const merged = mergeGeometries(geos, false);
         geos.forEach((g) => g.dispose());
         if (merged) {
           mesh = new THREE.Mesh(merged, material);
+          mesh.frustumCulled = false;
           hole.group.add(mesh);
         }
       }
       return mesh;
     };
 
+    // Helper to generate an organic, fractured desert boulder geometry
+    const makeBoulderGeo = (
+      radius: number,
+      scaleX: number,
+      scaleY: number,
+      scaleZ: number,
+      seed: number
+    ): THREE.BufferGeometry => {
+      const geo = new THREE.DodecahedronGeometry(radius, 0);
+      geo.scale(scaleX, scaleY, scaleZ);
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        const z = pos.getZ(i);
+        const n = 1.0 + Math.sin(x * 5.2 + seed) * 0.14 + Math.cos(y * 6.1 + z * 4.3 + seed * 1.7) * 0.12;
+        pos.setXYZ(i, x * n, y * n, z * n);
+      }
+      geo.computeVertexNormals();
+      return geo;
+    };
+
+    // Helper to construct a comprehensive natural boulder screen/buttress around a portal
+    const createPortalRocksCluster = (originZ: number, deltaGradeY: number): THREE.BufferGeometry[] => {
+      const geos: THREE.BufferGeometry[] = [];
+
+      // 1. Radial rim boulders directly around the entrance opening (sealing seams and cylinder edge)
+      const numRimRocks = 14;
+      for (let i = 0; i < numRimRocks; i++) {
+        const angle = (i / numRimRocks) * Math.PI * 2;
+        const isFloor = Math.abs(angle - (-Math.PI * 0.5)) < 0.38;
+        const bR = isFloor ? R * 0.30 : R * (0.45 + (Math.sin(i * 3.7) * 0.5 + 0.5) * 0.28);
+        const dist = R * (isFloor ? 0.98 : 1.16 + (Math.cos(i * 2.3) * 0.5 + 0.5) * 0.24);
+        const bx = Math.cos(angle) * dist;
+        const by = Math.sin(angle) * dist + deltaGradeY;
+        const bz = originZ + (Math.sin(i * 4.1) * 0.2 - 0.18);
+
+        const bGeo = makeBoulderGeo(
+          bR,
+          0.90 + (Math.cos(i * 5) * 0.5 + 0.5) * 0.35,
+          0.85 + (Math.sin(i * 3) * 0.5 + 0.5) * 0.35,
+          1.15 + (Math.sin(i * 7) * 0.5 + 0.5) * 0.45,
+          i * 3.1
+        );
+        const rotM = new THREE.Matrix4().makeRotationFromEuler(
+          new THREE.Euler(angle * 0.4, angle * 0.6, (i * 1.3) % Math.PI)
+        );
+        rotM.setPosition(bx, by, bz);
+        bGeo.applyMatrix4(rotM);
+        geos.push(bGeo);
+      }
+
+      // 2. Heavy Flanking Buttress Rocks (Left & Right)
+      // These step outwards and backwards into the mountain slope to conceal the sides of the tunnel
+      const flankLayers = [
+        // Left flank
+        { x: -R * 1.35, y: -R * 0.55, z: originZ - 0.3, rad: R * 0.70, sx: 1.25, sy: 0.95, sz: 1.35 },
+        { x: -R * 1.55, y: R * 0.05,  z: originZ - 0.5, rad: R * 0.78, sx: 1.15, sy: 1.25, sz: 1.45 },
+        { x: -R * 1.40, y: R * 0.65,  z: originZ - 0.4, rad: R * 0.68, sx: 1.35, sy: 1.05, sz: 1.25 },
+        { x: -R * 1.85, y: -R * 0.20, z: originZ - 0.9, rad: R * 0.92, sx: 1.45, sy: 1.35, sz: 1.55 },
+        { x: -R * 1.70, y: R * 0.50,  z: originZ - 0.8, rad: R * 0.84, sx: 1.25, sy: 1.15, sz: 1.35 },
+        { x: -R * 2.15, y: R * 0.10,  z: originZ - 1.2, rad: R * 1.10, sx: 1.55, sy: 1.45, sz: 1.65 },
+
+        // Right flank (where the user's camera looks across the exposed slope)
+        { x: R * 1.35,  y: -R * 0.55, z: originZ - 0.3, rad: R * 0.70, sx: 1.25, sy: 0.95, sz: 1.35 },
+        { x: R * 1.55,  y: R * 0.05,  z: originZ - 0.5, rad: R * 0.78, sx: 1.15, sy: 1.25, sz: 1.45 },
+        { x: R * 1.40,  y: R * 0.65,  z: originZ - 0.4, rad: R * 0.68, sx: 1.35, sy: 1.05, sz: 1.25 },
+        { x: R * 1.85,  y: -R * 0.20, z: originZ - 0.9, rad: R * 0.92, sx: 1.45, sy: 1.35, sz: 1.55 },
+        { x: R * 1.70,  y: R * 0.50,  z: originZ - 0.8, rad: R * 0.84, sx: 1.25, sy: 1.15, sz: 1.35 },
+        { x: R * 2.15,  y: R * 0.10,  z: originZ - 1.2, rad: R * 1.10, sx: 1.55, sy: 1.45, sz: 1.65 },
+
+        // 3. Top Rock Brow / Natural Overhanging Keystone Ledge
+        { x: -R * 0.65, y: R * 1.18, z: originZ - 0.25, rad: R * 0.68, sx: 1.35, sy: 0.85, sz: 1.45 },
+        { x: 0,         y: R * 1.32, z: originZ - 0.20, rad: R * 0.76, sx: 1.45, sy: 0.90, sz: 1.55 },
+        { x: R * 0.65,  y: R * 1.18, z: originZ - 0.25, rad: R * 0.68, sx: 1.35, sy: 0.85, sz: 1.45 },
+        { x: -R * 0.35, y: R * 1.55, z: originZ - 0.60, rad: R * 0.88, sx: 1.55, sy: 1.15, sz: 1.55 },
+        { x: R * 0.35,  y: R * 1.55, z: originZ - 0.60, rad: R * 0.88, sx: 1.55, sy: 1.15, sz: 1.55 },
+        { x: 0,         y: R * 1.80, z: originZ - 1.00, rad: R * 1.15, sx: 1.65, sy: 1.25, sz: 1.65 },
+
+        // 4. Base Scree & Talus Apron (Natural ground transition)
+        { x: -R * 1.12, y: -R * 0.85, z: originZ + 0.18, rad: R * 0.44, sx: 1.3, sy: 0.5, sz: 1.2 },
+        { x: R * 1.12,  y: -R * 0.85, z: originZ + 0.18, rad: R * 0.44, sx: 1.3, sy: 0.5, sz: 1.2 },
+        { x: -R * 1.48, y: -R * 0.88, z: originZ + 0.35, rad: R * 0.58, sx: 1.4, sy: 0.6, sz: 1.3 },
+        { x: R * 1.48,  y: -R * 0.88, z: originZ + 0.35, rad: R * 0.58, sx: 1.4, sy: 0.6, sz: 1.3 },
+      ];
+
+      for (let f = 0; f < flankLayers.length; f++) {
+        const item = flankLayers[f];
+        const fGeo = makeBoulderGeo(item.rad, item.sx, item.sy, item.sz, f * 4.7 + originZ);
+        const fMat = new THREE.Matrix4()
+          .makeRotationFromEuler(new THREE.Euler(0.25 * Math.sin(f), 0.35 * Math.cos(f), 0.2 * f))
+          .setPosition(item.x, item.y + deltaGradeY, item.z);
+        fGeo.applyMatrix4(fMat);
+        geos.push(fGeo);
+      }
+
+      return geos;
+    };
+
     // 1. Organic 3D Mountain Rock Collar Ring (Flared Volumetric Rock Collar that seals entrance seam)
-    const collarLength = 0.55;
+    const collarLength = 0.65;
     const collarOuterR = R * 1.34;
     const collarInnerR = R * 0.95;
     const collarGeo = new THREE.CylinderGeometry(
@@ -889,7 +992,7 @@ export class MountainHoleManager {
       true
     );
     collarGeo.rotateX(Math.PI / 2);
-    collarGeo.translate(0, 0, -collarLength * 0.5 + 0.14);
+    collarGeo.translate(0, 0, -collarLength * 0.5 - 0.04);
 
     const colAttr = collarGeo.attributes.position;
     for (let i = 0; i < colAttr.count; i++) {
@@ -909,8 +1012,13 @@ export class MountainHoleManager {
     }));
 
     const rimMesh = new THREE.Mesh(collarGeo, rimMat);
+    rimMesh.frustumCulled = false;
     hole.group.add(rimMesh);
     hole.rimMesh = rimMesh;
+
+    // 1b. Heavy Natural Mountain Boulders Surrounding Entrance to Conceal Tunnel
+    const entranceRockGeos = createPortalRocksCluster(0, 0);
+    hole.portalRocksMesh = mergeAndAdd(entranceRockGeos, rimMat);
 
     // 2. Excavated Interior Cavity Bore (Deep into the Mountain along -Z)
     const isAdit = D >= 1.4;
@@ -960,6 +1068,7 @@ export class MountainHoleManager {
     }));
 
     const cavityMesh = new THREE.Mesh(cavityGeo, cavityMat);
+    cavityMesh.frustumCulled = false;
     hole.group.add(cavityMesh);
     hole.cavityMesh = cavityMesh;
 
@@ -980,9 +1089,11 @@ export class MountainHoleManager {
         flatShading: true,
       }));
       const backWallMesh = new THREE.Mesh(backWallGeo, backWallMat);
+      backWallMesh.frustumCulled = false;
       backWallMesh.position.set(0, 0, -D);
       hole.group.add(backWallMesh);
       hole.backWallMesh = backWallMesh;
+      hole.exitPortalRocksMesh = undefined;
     } else {
       hole.backWallMesh = undefined;
       const exitCollarGeo = new THREE.TorusGeometry(rearR * 0.96, 0.16, 8, 20);
@@ -993,9 +1104,14 @@ export class MountainHoleManager {
         flatShading: true,
       }));
       const exitRimMesh = new THREE.Mesh(exitCollarGeo, exitRimMat);
+      exitRimMesh.frustumCulled = false;
       exitRimMesh.position.set(0, deltaY, -D - 0.02);
       hole.group.add(exitRimMesh);
       hole.exitRimMesh = exitRimMesh;
+
+      // Heavy Natural Mountain Boulders Surrounding Exit Portal
+      const exitRockGeos = createPortalRocksCluster(-D, deltaY);
+      hole.exitPortalRocksMesh = mergeAndAdd(exitRockGeos, exitRimMat);
     }
 
     // Shared materials

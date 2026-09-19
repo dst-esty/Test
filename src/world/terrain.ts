@@ -1603,7 +1603,7 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
     roughness: 0.88,
     metalness: 0.04,
     flatShading: false,
-    side: THREE.FrontSide,
+    side: THREE.DoubleSide,
     shadowSide: THREE.FrontSide,
   });
 
@@ -1789,6 +1789,7 @@ export function createTerrainMesh(): THREE.Mesh {
   const mesh = new THREE.Mesh(geometry, material);
   mesh.receiveShadow = true;
   mesh.castShadow = false;
+  mesh.frustumCulled = false;
   activeTerrainMesh = mesh;
   return mesh;
 }

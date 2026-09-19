@@ -1232,17 +1232,28 @@ export class MineBuildingSystem {
     brassPlate.position.set(0, 5.0, 0.12);
     group.add(brassPlate);
 
-    // Rock retaining walls flanking the portal
-    for (let r = 0; r < 8; r++) {
-      const rockL = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7 + Math.random() * 0.4, 0), rockMat);
-      rockL.position.set(-2.8 - Math.random() * 0.8, 0.8 + r * 0.45, -Math.random() * 2);
+    // Rock retaining walls flanking and overarching the portal
+    for (let r = 0; r < 12; r++) {
+      const rockL = new THREE.Mesh(new THREE.DodecahedronGeometry(0.75 + Math.random() * 0.45, 0), rockMat);
+      rockL.position.set(-2.4 - Math.random() * 0.9, 0.6 + r * 0.42, -Math.random() * 2.6);
       rockL.castShadow = true;
+      rockL.frustumCulled = false;
       group.add(rockL);
 
-      const rockR = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7 + Math.random() * 0.4, 0), rockMat);
-      rockR.position.set(2.8 + Math.random() * 0.8, 0.8 + r * 0.45, -Math.random() * 2);
+      const rockR = new THREE.Mesh(new THREE.DodecahedronGeometry(0.75 + Math.random() * 0.45, 0), rockMat);
+      rockR.position.set(2.4 + Math.random() * 0.9, 0.6 + r * 0.42, -Math.random() * 2.6);
       rockR.castShadow = true;
+      rockR.frustumCulled = false;
       group.add(rockR);
+    }
+
+    // Overhead rock brow above the timber lintel
+    for (let r = 0; r < 6; r++) {
+      const rockTop = new THREE.Mesh(new THREE.DodecahedronGeometry(0.85 + Math.random() * 0.4, 0), rockMat);
+      rockTop.position.set(-2.0 + r * 0.8 + (Math.random() - 0.5) * 0.3, 5.3 + (Math.random() - 0.5) * 0.4, -0.6 - Math.random() * 1.5);
+      rockTop.castShadow = true;
+      rockTop.frustumCulled = false;
+      group.add(rockTop);
     }
 
     // Working Hanging Miner's Lantern
