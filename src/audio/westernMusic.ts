@@ -111,7 +111,10 @@ class WesternMusicEngine {
       this.ctx = new AudioCtx();
 
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+      this.masterGain.gain.setValueAtTime(
+        this.isPlaying && !this.isMuted ? this.volume : 0,
+        this.ctx.currentTime
+      );
       this.masterGain.connect(this.ctx.destination);
     }
 
@@ -153,7 +156,7 @@ class WesternMusicEngine {
     this.volume = Math.max(0, Math.min(1, vol));
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setValueAtTime(
-        this.isMuted ? 0 : this.volume,
+        this.isPlaying && !this.isMuted ? this.volume : 0,
         this.ctx.currentTime
       );
     }
@@ -164,7 +167,7 @@ class WesternMusicEngine {
     this.isMuted = !this.isMuted;
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setValueAtTime(
-        this.isMuted ? 0 : this.volume,
+        this.isPlaying && !this.isMuted ? this.volume : 0,
         this.ctx.currentTime
       );
     }
@@ -200,6 +203,9 @@ class WesternMusicEngine {
     this.initContext();
     if (this.isPlaying) return;
     this.isPlaying = true;
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+    }
     this.currentStep = 0;
     this.scheduleNextBar();
     this.notify();
@@ -210,6 +216,9 @@ class WesternMusicEngine {
     if (this.loopTimer) {
       window.clearTimeout(this.loopTimer);
       this.loopTimer = null;
+    }
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
     }
     this.notify();
   }

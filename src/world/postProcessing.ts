@@ -25,6 +25,8 @@ export const RDRColorGradeShader = {
     uColorGradingStrength: { value: 0.75 },
     uWarmth: { value: 1.08 },
     uGrainIntensity: { value: 0.022 },
+    uGogglesActive: { value: 0.0 },
+    uResolution: { value: new THREE.Vector2(1920, 1080) },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -42,6 +44,8 @@ export const RDRColorGradeShader = {
     uniform float uColorGradingStrength;
     uniform float uWarmth;
     uniform float uGrainIntensity;
+    uniform float uGogglesActive;
+    uniform vec2 uResolution;
 
     varying vec2 vUv;
 
@@ -82,10 +86,10 @@ export const RDRColorGradeShader = {
       float night = clamp(abs(uTimeOfDay - 12.0) / 6.0 - 0.5, 0.0, 1.0);
 
       // Warm desert highlights & umber midtones
-      vec3 desertGraded = max(col, vec3(0.0));
-      desertGraded.r = pow(desertGraded.r, 0.94) * (1.0 + 0.08 * uWarmth);
-      desertGraded.g = pow(desertGraded.g, 0.98) * (1.0 + 0.02 * uWarmth);
-      desertGraded.b = pow(desertGraded.b, 1.05) * 0.92;
+      vec3 desertGraded = max(col, vec3(0.0001));
+      desertGraded.r = pow(max(desertGraded.r, 0.0001), 0.94) * (1.0 + 0.08 * uWarmth);
+      desertGraded.g = pow(max(desertGraded.g, 0.0001), 0.98) * (1.0 + 0.02 * uWarmth);
+      desertGraded.b = pow(max(desertGraded.b, 0.0001), 1.05) * 0.92;
 
       // Subtle shadow split toning: cool indigo in night/deep shadows, warm amber in highlights
       // Crucial: Only tint neutral/cool dark shadows; strictly preserve warm amber light sources, fires, torches, and lanterns
@@ -104,13 +108,66 @@ export const RDRColorGradeShader = {
         col.g += sunset * 0.015 * lum;
       }
 
-      // 4. Cinematic Vignette (Subtle natural camera lens falloff)
+      // 4. Prospector Goggles Optical Peripheral Blur
+      // When goggles are active, what is inside the two circular ocular lenses remains razor-sharp and crystal clear.
+      // The surrounding peripheral area remains completely accurate to the 3D scene (desert terrain, boulders, mountains, sky),
+      // but becomes fuzzy and out-of-focus (optical depth-of-field / peripheral bokeh).
+      if (uGogglesActive > 0.005) {
+        float aspect = uResolution.x / max(uResolution.y, 1.0);
+        float svgAspect = 1000.0 / 600.0; // 1.66667 matching the goggles overlay aspect ratio
+
+        vec2 svgUv;
+        if (aspect >= svgAspect) {
+          float scale = aspect / svgAspect;
+          svgUv.x = (vUv.x - 0.5) * scale + 0.5;
+          svgUv.y = vUv.y;
+        } else {
+          float scale = svgAspect / aspect;
+          svgUv.x = vUv.x;
+          svgUv.y = (vUv.y - 0.5) * scale + 0.5;
+        }
+
+        // Left ocular lens center: (0.32, 0.50), Right ocular lens center: (0.68, 0.50)
+        float dX_L = (svgUv.x - 0.32) * svgAspect;
+        float dY_L = svgUv.y - 0.50;
+        float distL = sqrt(dX_L * dX_L + dY_L * dY_L);
+
+        float dX_R = (svgUv.x - 0.68) * svgAspect;
+        float dY_R = svgUv.y - 0.50;
+        float distR = sqrt(dX_R * dX_R + dY_R * dY_R);
+
+        float distLens = min(distL, distR);
+        float lensRadius = 175.0 / 600.0; // ~0.2917
+
+        float peripheralFuzz = smoothstep(lensRadius - 0.015, lensRadius + 0.045, distLens) * uGogglesActive;
+
+        if (peripheralFuzz > 0.001) {
+          vec2 texel = (1.0 / uResolution) * (3.0 + peripheralFuzz * 4.5);
+          vec3 blurred = vec3(0.0);
+          blurred += texture2D(tDiffuse, vUv + vec2(-1.0, -1.0) * texel).rgb * 0.075;
+          blurred += texture2D(tDiffuse, vUv + vec2( 0.0, -1.3) * texel).rgb * 0.12;
+          blurred += texture2D(tDiffuse, vUv + vec2( 1.0, -1.0) * texel).rgb * 0.075;
+          blurred += texture2D(tDiffuse, vUv + vec2(-1.3,  0.0) * texel).rgb * 0.12;
+          blurred += texture2D(tDiffuse, vUv).rgb                           * 0.22;
+          blurred += texture2D(tDiffuse, vUv + vec2( 1.3,  0.0) * texel).rgb * 0.12;
+          blurred += texture2D(tDiffuse, vUv + vec2(-1.0,  1.0) * texel).rgb * 0.075;
+          blurred += texture2D(tDiffuse, vUv + vec2( 0.0,  1.3) * texel).rgb * 0.12;
+          blurred += texture2D(tDiffuse, vUv + vec2( 1.0,  1.0) * texel).rgb * 0.075;
+
+          vec3 blurredGraded = acesFilm(blurred);
+          // Controlled contrast and subtle desaturation for the out-of-focus peripheral field
+          blurredGraded = mix(blurredGraded, vec3(dot(blurredGraded, vec3(0.299, 0.587, 0.114))), 0.12);
+          col = mix(col, blurredGraded, peripheralFuzz * 0.90);
+        }
+      }
+
+      // 5. Cinematic Vignette (Subtle natural camera lens falloff)
       vec2 coord = (vUv - 0.5) * vec2(1.0, uVignetteRoundness);
       float dist = length(coord);
       float vignette = smoothstep(0.75, 0.3, dist * (uVignetteIntensity * 2.2));
       col *= mix(1.0, vignette, uVignetteIntensity);
 
-      // 5. Subtle 35mm Film Grain (Breaks banding on desert sky gradients & adds physical camera grit)
+      // 6. Subtle 35mm Film Grain (Breaks banding on desert sky gradients & adds physical camera grit)
       float grain = (hash(vUv * 400.0 + fract(uTime * 17.1)) - 0.5) * uGrainIntensity;
       col += grain * (0.6 + 0.4 * lum);
 
@@ -124,7 +181,7 @@ export interface PostProcessingPipeline {
   bloomPass: UnrealBloomPass;
   colorGradePass: ShaderPass;
   resize: (width: number, height: number) => void;
-  update: (delta: number, timeOfDay: number, quality: GraphicsQuality) => void;
+  update: (delta: number, timeOfDay: number, quality: GraphicsQuality, areGogglesActive?: boolean) => void;
   dispose: () => void;
 }
 
@@ -142,7 +199,7 @@ export function createPostProcessingPipeline(
 ): PostProcessingPipeline {
   // Create high-precision render target for HDR tone preservation before color grade
   const renderTarget = new THREE.WebGLRenderTarget(width, height, {
-    type: THREE.HalfFloatType,
+    type: THREE.UnsignedByteType,
     format: THREE.RGBAFormat,
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
@@ -170,9 +227,11 @@ export function createPostProcessingPipeline(
   // 3. Cinematic RDR Color Grading, Vignette & 35mm Grain Pass
   const colorGradePass = new ShaderPass(RDRColorGradeShader);
   colorGradePass.renderToScreen = true;
+  colorGradePass.uniforms.uResolution.value.set(width, height);
   composer.addPass(colorGradePass);
 
   let totalTime = 0;
+  let currentGogglesLerp = 0.0;
 
   return {
     composer,
@@ -181,11 +240,17 @@ export function createPostProcessingPipeline(
     resize: (w: number, h: number) => {
       composer.setSize(w, h);
       bloomPass.resolution.set(w, h);
+      colorGradePass.uniforms.uResolution.value.set(w, h);
     },
-    update: (delta: number, timeOfDay: number, quality: GraphicsQuality) => {
+    update: (delta: number, timeOfDay: number, quality: GraphicsQuality, areGogglesActive?: boolean) => {
       totalTime += delta;
       colorGradePass.uniforms.uTime.value = totalTime;
       colorGradePass.uniforms.uTimeOfDay.value = timeOfDay;
+
+      // Smooth optical transition into the goggles
+      const targetGoggles = areGogglesActive ? 1.0 : 0.0;
+      currentGogglesLerp += (targetGoggles - currentGogglesLerp) * Math.min(1.0, delta * 9.0);
+      colorGradePass.uniforms.uGogglesActive.value = currentGogglesLerp;
 
       // Adjust bloom and grade dynamically per quality level
       if (quality === 'performance') {

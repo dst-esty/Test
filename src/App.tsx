@@ -270,6 +270,23 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  // Ensure music is turned off on load, and sound engine is primed on user interaction
+  useEffect(() => {
+    westernMusic.stop();
+    const resumeAudioOnGesture = () => {
+      soundEngine.startAmbiance();
+      window.removeEventListener('pointerdown', resumeAudioOnGesture);
+      window.removeEventListener('keydown', resumeAudioOnGesture);
+    };
+    window.addEventListener('pointerdown', resumeAudioOnGesture, { once: true });
+    window.addEventListener('keydown', resumeAudioOnGesture, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', resumeAudioOnGesture);
+      window.removeEventListener('keydown', resumeAudioOnGesture);
+    };
+  }, []);
+
   // Save active claim to local storage whenever it changes
   useEffect(() => {
     if (playerState.activeClaim?.isClaimed) {
@@ -946,6 +963,33 @@ export default function App() {
     );
   }, [playerState.ownedMount, playerState.isRidingMount, playerState.mountName, showBanner]);
 
+  // Handle drinking from canteen
+  const handleDrinkCanteen = useCallback(() => {
+    setPlayerState((prev) => {
+      const currentOz = prev.canteenOunces ?? 32;
+      if (currentOz <= 0) {
+        showBanner("⚠️ Canteen is bone dry! Refill at the Tortilla Flat artesian spring, mountain tinajas, or river.");
+        soundEngine.playThirstCue();
+        return prev;
+      }
+      if (prev.hydration >= 98) {
+        showBanner("💧 You are already well hydrated!");
+        return prev;
+      }
+      const ozToDrink = Math.min(8, currentOz);
+      const remainingOz = currentOz - ozToDrink;
+      const hydrationGain = ozToDrink * 4.5; // 8 oz = +36% hydration
+      soundEngine.playDrink();
+      const newHydration = Math.min(100, (prev.hydration || 0) + hydrationGain);
+      showBanner(`💧 Took a swig from canteen (+${Math.round(hydrationGain)}% Hydration). ${remainingOz} oz left.`);
+      return {
+        ...prev,
+        hydration: newHydration,
+        canteenOunces: remainingOz,
+      };
+    });
+  }, [showBanner]);
+
   // Calculate nearest landmark for Compass HUD
   const nearestLandmark = React.useMemo(() => {
     let nearest: Landmark | null = null;
@@ -1367,6 +1411,8 @@ export default function App() {
           scopeZoomHandlerRef.current = fn;
         }}
         onUpdateVigilance={setVigilanceStatus}
+        areGogglesActive={areGogglesActive}
+        onToggleGoggles={handleToggleGoggles}
       />
 
       {/* Compass & Diurnal Cycle HUD with Day/Night Illumination Toggle & Endless Coordinates */}
@@ -1515,20 +1561,8 @@ export default function App() {
         areGogglesActive={areGogglesActive}
         onToggleGoggles={handleToggleGoggles}
         onToggleMount={handleToggleMount}
+        onDrinkCanteen={handleDrinkCanteen}
       />
-
-      {/* Prospector's Goggles Optical Vignette Lens */}
-      {areGogglesActive && (
-        <div
-          id="prospector-goggles-lens-overlay"
-          className="pointer-events-none fixed inset-0 z-20 shadow-[inset_0_0_120px_rgba(180,83,9,0.38)] border-[6px] border-amber-900/40 rounded-3xl transition-all duration-300"
-        >
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-amber-950/90 backdrop-blur-md border border-amber-500/70 rounded-full px-4 py-1 text-[11px] font-mono font-bold text-amber-200 flex items-center gap-2 shadow-2xl animate-fade-in">
-            <span className="animate-pulse">🥽</span>
-            <span>PROSPECTOR'S INSPECTION GOGGLES ACTIVE [G]</span>
-          </div>
-        </div>
-      )}
 
       {/* Welcome & Expedition Briefing Modal */}
       {!hasShownWelcome && (
@@ -1580,7 +1614,6 @@ export default function App() {
               onClick={() => {
                 setHasShownWelcome(true);
                 soundEngine.startAmbiance();
-                westernMusic.play();
                 if (document.activeElement instanceof HTMLElement) {
                   document.activeElement.blur();
                 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { DebrisType } from '../types';
+import { analyzeSurfaceAtPosition } from './prospectingAnalysis';
 
 // Simplex-like 2D noise implementation for self-contained, high-performance procedural terrain
 function fract(x: number) {
@@ -833,21 +834,43 @@ export function digHoleInTerrain(
   else if (newLayer.index === 3) rocksAwarded = 4; // Granite blocks
   else if (newLayer.index === 4) rocksAwarded = 3; // Bonanza quartz
 
+  // Analyze surface geology and mineralization at (x, z)
+  const posVec = new THREE.Vector3(x, getBaseTerrainHeight(x, z), z);
+  const geoAnalysis = analyzeSurfaceAtPosition(posVec);
+  const isAuriferousSpot = geoAnalysis.mineralization >= 45;
+  const isTraceSpot = geoAnalysis.mineralization >= 20;
+
   // Procedural discovery generation tailored to depth & geological stratum
   let goldAwarded = 0;
   let itemFound: DigResult['itemFound'] = undefined;
   const roll = Math.random();
 
+  // Gold rarity calculation:
+  // Ground without signs of gold is barren (3% - 6% chance for tiny placer dust only)
+  // Ground with moderate mineralization has ~22% chance
+  // Ground with high-grade auriferous anomaly (found with goggles) has ~75% chance!
+  const goldThreshold = isAuriferousSpot ? 0.75 : isTraceSpot ? 0.22 : 0.05;
+
   if (newLayer.index === 0) {
     // Surface Dune Sand & Wash Alluvium: loose placer flakes & prospector debris
-    if (roll < 0.45) {
-      goldAwarded = parseFloat((0.3 + Math.random() * 0.8).toFixed(1));
-      itemFound = {
-        name: `${goldAwarded} oz Desert Sand Placer Flakes`,
-        type: 'gold',
-        value: goldAwarded,
-        description: 'Fine alluvial gold flakes sifted from loose desert dune sand and dry wash gravel.',
-      };
+    if (roll < goldThreshold) {
+      if (isAuriferousSpot) {
+        goldAwarded = parseFloat((0.8 + Math.random() * 1.5).toFixed(1));
+        itemFound = {
+          name: `${goldAwarded} oz High-Grade Placer Gold (Goggles Anomaly)`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'Rich alluvial placer gold discovered right at the auriferous contact identified by prospector goggles!',
+        };
+      } else {
+        goldAwarded = parseFloat((0.05 + Math.random() * 0.15).toFixed(2));
+        itemFound = {
+          name: `${goldAwarded} oz Fine Desert Placer Dust`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'Sparse microscopic gold flake sifted from loose desert dune sand.',
+        };
+      }
     } else if (roll < 0.62) {
       itemFound = {
         name: 'Pioneer Mule Horseshoe',
@@ -866,14 +889,25 @@ export function digHoleInTerrain(
     }
   } else if (newLayer.index === 1) {
     // Caliche Hardpan: Spanish colonial relics & cemented coarse nuggets
-    if (roll < 0.50) {
-      goldAwarded = parseFloat((0.8 + Math.random() * 1.5).toFixed(1));
-      itemFound = {
-        name: `${goldAwarded} oz Caliche-Coated Gold Nugget`,
-        type: 'gold',
-        value: goldAwarded,
-        description: 'Dense nugget trapped in ancient calcium carbonate cement.',
-      };
+    const calicheThreshold = isAuriferousSpot ? 0.72 : isTraceSpot ? 0.20 : 0.06;
+    if (roll < calicheThreshold) {
+      if (isAuriferousSpot) {
+        goldAwarded = parseFloat((1.2 + Math.random() * 1.8).toFixed(1));
+        itemFound = {
+          name: `${goldAwarded} oz Caliche-Coated Gold Nugget`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'Dense coarse nugget trapped in ancient calcium carbonate cement at the mineral contact.',
+        };
+      } else {
+        goldAwarded = parseFloat((0.10 + Math.random() * 0.20).toFixed(2));
+        itemFound = {
+          name: `${goldAwarded} oz Trace Caliche Gold Speck`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'Faint gold trace trapped in barren caliche hardpan.',
+        };
+      }
     } else if (roll < 0.70) {
       const relics = [
         { name: '1789 Spanish Silver 2-Reales Coin', value: 1.8, desc: 'Tarnished colonial silver minted under King Charles IV of Spain.' },
@@ -885,14 +919,25 @@ export function digHoleInTerrain(
     }
   } else if (newLayer.index === 2) {
     // Superstition Volcanic Tuff: Rhyolitic quartz stringers & volcanic geodes
-    if (roll < 0.58) {
-      goldAwarded = parseFloat((1.6 + Math.random() * 2.2).toFixed(1));
-      itemFound = {
-        name: `${goldAwarded} oz Volcanic Tuff Gold Stringer`,
-        type: 'gold',
-        value: goldAwarded,
-        description: 'Coarse wire gold embedded in welded rhyolitic ash-flow tuff.',
-      };
+    const tuffThreshold = isAuriferousSpot ? 0.78 : isTraceSpot ? 0.25 : 0.08;
+    if (roll < tuffThreshold) {
+      if (isAuriferousSpot) {
+        goldAwarded = parseFloat((1.8 + Math.random() * 2.4).toFixed(1));
+        itemFound = {
+          name: `${goldAwarded} oz Volcanic Tuff Gold Stringer`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'Coarse wire gold embedded in welded rhyolitic ash-flow tuff.',
+        };
+      } else {
+        goldAwarded = parseFloat((0.15 + Math.random() * 0.35).toFixed(2));
+        itemFound = {
+          name: `${goldAwarded} oz Micro-Gold Ribbon Specimen`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'Small gold speck in volcanic tuff matrix.',
+        };
+      }
     } else if (roll < 0.75) {
       itemFound = {
         name: 'Superstition Obsidian Geode',
@@ -910,14 +955,25 @@ export function digHoleInTerrain(
     }
   } else if (newLayer.index === 3) {
     // Banded Gneiss: Crystalline metamorphic electrum & silver veins
-    if (roll < 0.65) {
-      goldAwarded = parseFloat((2.4 + Math.random() * 2.8).toFixed(1));
-      itemFound = {
-        name: `${goldAwarded} oz Foliated Gneiss Electrum Ore`,
-        type: 'gold',
-        value: goldAwarded,
-        description: 'High-purity crystalline electrum interlaced along foliated quartz-gneiss bands.',
-      };
+    const gneissThreshold = isAuriferousSpot ? 0.82 : isTraceSpot ? 0.30 : 0.10;
+    if (roll < gneissThreshold) {
+      if (isAuriferousSpot) {
+        goldAwarded = parseFloat((2.5 + Math.random() * 3.0).toFixed(1));
+        itemFound = {
+          name: `${goldAwarded} oz Foliated Gneiss Electrum Ore`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'High-purity crystalline electrum interlaced along foliated quartz-gneiss bands.',
+        };
+      } else {
+        goldAwarded = parseFloat((0.25 + Math.random() * 0.5).toFixed(2));
+        itemFound = {
+          name: `${goldAwarded} oz Minor Electrum Veinlet`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'Thin electrum stringer cleaved from metamorphic fracture.',
+        };
+      }
     } else if (roll < 0.82) {
       itemFound = {
         name: 'Deep Almandine Garnet Cluster',
@@ -935,14 +991,25 @@ export function digHoleInTerrain(
     }
   } else if (newLayer.index === 4) {
     // Peralta Granite Bedrock: High-grade electrum ore & royal amethyst
-    if (roll < 0.72) {
-      goldAwarded = parseFloat((3.4 + Math.random() * 3.8).toFixed(1));
-      itemFound = {
-        name: `${goldAwarded} oz Peralta Granite Gold Lode Ore`,
-        type: 'gold',
-        value: goldAwarded,
-        description: 'Dense crystalline gold-silver alloy fractured from the massive igneous granite basement.',
-      };
+    const graniteThreshold = isAuriferousSpot ? 0.88 : isTraceSpot ? 0.35 : 0.12;
+    if (roll < graniteThreshold) {
+      if (isAuriferousSpot) {
+        goldAwarded = parseFloat((3.8 + Math.random() * 4.2).toFixed(1));
+        itemFound = {
+          name: `${goldAwarded} oz Peralta Granite Gold Lode Ore`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'Dense crystalline gold-silver alloy fractured from the massive igneous granite basement.',
+        };
+      } else {
+        goldAwarded = parseFloat((0.4 + Math.random() * 0.8).toFixed(2));
+        itemFound = {
+          name: `${goldAwarded} oz Granite Host Rock Gold Specimen`,
+          type: 'gold',
+          value: goldAwarded,
+          description: 'Modest gold nugget locked in dense granite rock.',
+        };
+      }
     } else if (roll < 0.88) {
       itemFound = {
         name: 'Sparkling Deep Amethyst Geode',
@@ -969,7 +1036,11 @@ export function digHoleInTerrain(
   } else if (layerChanged && hole.depth >= 1.0) {
     strataMessage = `⚡ PENETRATED NEW STRATA: [${newLayer.name.toUpperCase()}] at ${hole.depth.toFixed(1)}m deep!`;
   } else if (itemFound && itemFound.type === 'gold') {
-    strataMessage = `⛏️ Depth ${hole.depth.toFixed(1)}m (${newLayer.name}): Uncovered ${itemFound.name}!`;
+    if (isAuriferousSpot) {
+      strataMessage = `✨ [GOGGLES ANOMALY: ${geoAnalysis.primarySign}] Uncovered ${itemFound.name}!`;
+    } else {
+      strataMessage = `⛏️ Depth ${hole.depth.toFixed(1)}m (${newLayer.name}): Uncovered rare ${itemFound.name}!`;
+    }
   } else if (itemFound) {
     strataMessage = `⛏️ Depth ${hole.depth.toFixed(1)}m (${newLayer.name}): Excavated ${itemFound.name}!`;
   } else if (needsShoring) {

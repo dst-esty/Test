@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Compass,
   Flashlight,
@@ -49,6 +49,7 @@ import {
 import { MineStructureType, PlayerState, GraphicsQuality, ClaimInfo, TerritoryClaim } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
 import { westernMusic } from '../audio/westernMusic';
+import { soundEngine } from '../audio/soundEffects';
 import { InventoryModal } from './InventoryModal';
 import { territoryClaims } from '../services/territoryClaimService';
 import { VirtualJoystick } from './VirtualJoystick';
@@ -127,6 +128,7 @@ interface ControlsOverlayProps {
   onZoomOutScope?: () => void;
   onConsumeFood?: (type: 'venison' | 'bighorn' | 'rabbit' | 'provisions') => void;
   onPurchaseProvisions?: (amount: number, goldCost: number) => void;
+  onDrinkCanteen?: () => void;
   vigilanceStatus?: VigilanceStatus | null;
 }
 
@@ -142,6 +144,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onToggleCamera,
   viewMode,
   onToggleMount,
+  onDrinkCanteen,
   onDig,
   interactionPrompt,
   onInteract,
@@ -225,26 +228,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   });
 
   const [dismissRotatePrompt, setDismissRotatePrompt] = useState<boolean>(false);
-  const [isClaimPanelCollapsed, setIsClaimPanelCollapsed] = useState<boolean>(false);
   const [isVigilanceModalOpen, setIsVigilanceModalOpen] = useState<boolean>(false);
-
-  const localProspectorId = useMemo(() => territoryClaims.getOrCreateProspectorId(), []);
-
-  // Check if player is standing inside any registered territory boundary
-  const standingInsideClaim = useMemo(() => {
-    if (!registeredClaims || registeredClaims.length === 0) return null;
-    const px = playerState.position.x;
-    const pz = playerState.position.z;
-    return (
-      registeredClaims.find((c) => {
-        const half = (c.radius || 40) / 2;
-        return Math.abs(px - c.x) <= half && Math.abs(pz - c.z) <= half;
-      }) || null
-    );
-  }, [registeredClaims, playerState.position.x, playerState.position.z]);
-
-  // Display claim: either the territory the player is standing inside, or their held active claim
-  const displayClaim = standingInsideClaim || playerState.activeClaim;
 
   useEffect(() => {
     const handleOrientationCheck = () => {
@@ -266,6 +250,27 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       window.removeEventListener('orientationchange', handleOrientationCheck);
     };
   }, []);
+
+  // Thirst warning audio cue & periodic reminder when hydration < 20%
+  const lastThirstCueTimeRef = useRef<number>(0);
+  const wasDehydratedRef = useRef<boolean>(playerState.hydration < 20);
+
+  useEffect(() => {
+    const isDehydrated = playerState.hydration < 20 && playerState.hydration > 0 && (playerState.health || 0) > 0;
+    const now = Date.now();
+
+    if (isDehydrated) {
+      // Just crossed into dehydrated (< 20%), or periodic reminder every 16 seconds
+      if (!wasDehydratedRef.current || (now - lastThirstCueTimeRef.current > 16000)) {
+        if (soundEnabled) {
+          const intensity = playerState.hydration < 10 ? 1.3 : 1.0;
+          soundEngine.playThirstCue(intensity);
+        }
+        lastThirstCueTimeRef.current = now;
+      }
+    }
+    wasDehydratedRef.current = isDehydrated;
+  }, [playerState.hydration, playerState.health, soundEnabled]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -439,7 +444,41 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
     >
       {/* Damage Flash Red Vignette */}
       {damageFlash && (
-        <div className="absolute inset-0 bg-red-600/30 pointer-events-none transition-opacity duration-150 animate-pulse border-8 border-red-600" />
+        <div className="absolute inset-0 bg-red-600/30 pointer-events-none transition-opacity duration-150 animate-pulse border-8 border-red-600 z-20" />
+      )}
+
+      {/* Dehydration Critical Screen-Edge Vignette & Visual Pulse (< 20% Hydration) */}
+      {playerState.hydration < 20 && (playerState.health || 0) > 0 && (
+        <div
+          id="hud-hydration-vignette"
+          aria-label="Dehydration warning vignette"
+          className="fixed inset-0 pointer-events-none z-10 transition-opacity duration-700 overflow-hidden"
+          style={{
+            background:
+              playerState.hydration < 10
+                ? 'radial-gradient(ellipse at center, transparent 44%, rgba(180, 83, 9, 0.22) 72%, rgba(120, 53, 15, 0.55) 100%)'
+                : 'radial-gradient(ellipse at center, transparent 52%, rgba(180, 83, 9, 0.15) 78%, rgba(120, 53, 15, 0.38) 100%)',
+          }}
+        >
+          {/* Subtle pulsating inner heat-haze tunnel ring */}
+          <div
+            className="absolute inset-0 animate-thirst-vignette"
+            style={{
+              background:
+                playerState.hydration < 10
+                  ? 'radial-gradient(ellipse at center, transparent 44%, rgba(217, 119, 6, 0.18) 72%, rgba(180, 83, 9, 0.42) 100%)'
+                  : 'radial-gradient(ellipse at center, transparent 50%, rgba(217, 119, 6, 0.12) 76%, rgba(180, 83, 9, 0.26) 100%)',
+              boxShadow:
+                playerState.hydration < 10
+                  ? 'inset 0 0 80px 24px rgba(180, 83, 9, 0.45)'
+                  : 'inset 0 0 50px 16px rgba(180, 83, 9, 0.28)',
+            }}
+          />
+
+          {/* Parched horizon heat gradient (sun baked desert haze) */}
+          <div className="absolute inset-x-0 bottom-0 h-16 sm:h-24 bg-gradient-to-t from-amber-950/40 via-amber-900/15 to-transparent pointer-events-none animate-thirst-haze" />
+          <div className="absolute inset-x-0 top-0 h-14 sm:h-20 bg-gradient-to-b from-amber-950/30 via-amber-900/10 to-transparent pointer-events-none animate-thirst-haze" />
+        </div>
       )}
 
       {/* Turn Phone Sideways (Landscape) Tip for Mobile Viewers */}
@@ -550,23 +589,35 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           {isVitalsCollapsed ? (
             <button
               onClick={() => setIsVitalsCollapsed(false)}
-              className="group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-stone-900/90 hover:bg-stone-850 backdrop-blur-md rounded-full border border-red-500/40 hover:border-red-400 shadow-lg shadow-red-950/50 transition-all transform hover:scale-110 active:scale-95 cursor-pointer"
-              title={`Health: ${Math.round(playerState.health)}% | Hydration: ${Math.round(playerState.hydration)}% (Click to view full health & hydration)`}
+              className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-stone-900/90 hover:bg-stone-850 backdrop-blur-md rounded-full border shadow-lg transition-all transform hover:scale-110 active:scale-95 cursor-pointer ${
+                playerState.hydration < 20
+                  ? 'border-amber-500/90 shadow-amber-950/60 ring-2 ring-amber-500/60 animate-pulse'
+                  : 'border-red-500/40 hover:border-red-400 shadow-red-950/50'
+              }`}
+              title={`Health: ${Math.round(playerState.health)}% | Hydration: ${Math.round(playerState.hydration)}%${playerState.hydration < 20 ? ' (THIRST CRITICAL - Click to expand)' : ' (Click to view full vitals)'}`}
             >
-              <Heart
-                className={`w-4 h-4 sm:w-4.5 sm:h-4.5 fill-red-500 text-red-500 transition-transform group-hover:scale-110 ${
-                  playerState.health < 30
-                    ? 'animate-ping'
-                    : playerState.health < 50
-                    ? 'animate-pulse'
-                    : ''
-                }`}
-              />
+              {playerState.hydration < 20 && playerState.health >= 30 ? (
+                <Droplets className="w-4 h-4 text-amber-400 fill-amber-400 animate-bounce" />
+              ) : (
+                <Heart
+                  className={`w-4 h-4 sm:w-4.5 sm:h-4.5 fill-red-500 text-red-500 transition-transform group-hover:scale-110 ${
+                    playerState.health < 30
+                      ? 'animate-ping'
+                      : playerState.health < 50
+                      ? 'animate-pulse'
+                      : ''
+                  }`}
+                />
+              )}
             </button>
           ) : (
             <div className="flex items-center gap-2 animate-fade-in">
               {/* Streamlined Health & Hydration Pill */}
-              <div className="flex items-center gap-2.5 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-stone-700/60 shadow-lg text-[10px] font-mono">
+              <div className={`flex items-center gap-2.5 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border shadow-lg text-[10px] font-mono transition-all ${
+                playerState.hydration < 20
+                  ? 'border-amber-500/80 ring-2 ring-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.35)]'
+                  : 'border-stone-700/60'
+              }`}>
                 {/* Health - Clicking heart collapses back down */}
                 <button
                   onClick={() => setIsVitalsCollapsed(true)}
@@ -595,17 +646,37 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
 
                 <div className="w-px h-3 bg-stone-700/60" />
 
-                {/* Hydration */}
-                <div className="flex items-center gap-1.5" title={`Hydration: ${Math.round(playerState.hydration)}%`}>
+                {/* Hydration with visual pulse and click to drink */}
+                <div
+                  onClick={onDrinkCanteen}
+                  className={`flex items-center gap-1.5 cursor-pointer group transition-all ${
+                    onDrinkCanteen ? 'hover:opacity-90 active:scale-95' : ''
+                  }`}
+                  title={`Hydration: ${Math.round(playerState.hydration)}%${
+                    playerState.hydration < 20 ? ' (THIRST CRITICAL!)' : ''
+                  }${onDrinkCanteen ? ' • Click to drink canteen' : ''}`}
+                >
                   <Droplets
-                    className={`w-3.5 h-3.5 text-sky-400 fill-sky-400/40 ${
-                      playerState.hydration < 25 ? 'text-sky-400 animate-bounce' : 'text-sky-400'
+                    className={`w-3.5 h-3.5 transition-transform group-hover:scale-110 ${
+                      playerState.hydration < 20
+                        ? 'text-amber-400 fill-amber-400 animate-bounce'
+                        : playerState.hydration < 25
+                        ? 'text-sky-400 fill-sky-400/40 animate-bounce'
+                        : 'text-sky-400 fill-sky-400/40'
                     }`}
                   />
-                  <div className="w-12 bg-stone-800 h-2 rounded-full overflow-hidden border border-stone-700/50">
+                  <div
+                    className={`w-12 bg-stone-800 h-2 rounded-full overflow-hidden border transition-all ${
+                      playerState.hydration < 20
+                        ? 'border-amber-500/90 ring-1 ring-amber-500/60 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
+                        : 'border-stone-700/50'
+                    }`}
+                  >
                     <div
                       className={`h-full transition-all duration-300 ${
-                        playerState.hydration < 25
+                        playerState.hydration < 20
+                          ? 'bg-gradient-to-r from-red-600 to-amber-500 animate-pulse'
+                          : playerState.hydration < 25
                           ? 'bg-red-500'
                           : playerState.hydration < 50
                           ? 'bg-amber-400'
@@ -614,7 +685,15 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                       style={{ width: `${playerState.hydration}%` }}
                     />
                   </div>
-                  <span className="text-stone-300">{Math.round(playerState.hydration)}%</span>
+                  <span
+                    className={`font-mono transition-colors ${
+                      playerState.hydration < 20
+                        ? 'text-amber-300 font-bold animate-pulse'
+                        : 'text-stone-300'
+                    }`}
+                  >
+                    {Math.round(playerState.hydration)}%
+                  </span>
                 </div>
 
                 {/* Collapse Button */}
@@ -626,6 +705,22 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   <ChevronLeft className="w-3 h-3" />
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Critical Dehydration Warning Pill (Directly Under Vitals) */}
+          {playerState.hydration < 20 && (playerState.health || 0) > 0 && (
+            <div
+              id="hud-dehydration-alert"
+              onClick={onDrinkCanteen}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/90 border border-amber-500/80 shadow-[0_0_14px_rgba(245,158,11,0.5)] backdrop-blur-md text-[10px] font-mono text-amber-200 animate-pulse select-none ${
+                onDrinkCanteen ? 'cursor-pointer hover:bg-amber-900 active:scale-95' : ''
+              }`}
+              title="Hydration is critical (< 20%)! Drink from canteen or refill at mountain springs / base camp water trough."
+            >
+              <Droplets className="w-3.5 h-3.5 text-amber-400 fill-amber-400 animate-bounce shrink-0" />
+              <span className="font-bold tracking-wide">THIRST CRITICAL • {Math.round(playerState.hydration)}%</span>
+              {onDrinkCanteen && <span className="text-[9px] text-amber-300/80 underline ml-0.5">DRINK</span>}
             </div>
           )}
 
@@ -773,7 +868,10 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   return (
                     <button
                       key={t.id}
-                      onClick={() => onSelectTool(t.id)}
+                      onClick={() => {
+                        onSelectTool(t.id);
+                        setIsSupplyCollapsed(true);
+                      }}
                       className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl border text-[11px] transition-all cursor-pointer ${
                         isSelected
                           ? 'bg-amber-600/90 text-stone-950 font-bold border-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.5)] scale-[1.02]'
@@ -800,7 +898,10 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               {/* Prospector's Inspection Goggles Mode Toggle */}
               {onToggleGoggles && (
                 <button
-                  onClick={onToggleGoggles}
+                  onClick={() => {
+                    onToggleGoggles();
+                    setIsSupplyCollapsed(true);
+                  }}
                   className={`w-full mt-2 flex items-center justify-between px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold text-[11px] shadow-md ${
                     areGogglesActive
                       ? 'border-amber-400 bg-amber-600/90 text-stone-950 shadow-[0_0_12px_rgba(245,158,11,0.5)]'
@@ -825,7 +926,10 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               {/* Companion Mount (Burro / Pony) row */}
               {playerState.ownedMount && onToggleMount && (
                 <button
-                  onClick={onToggleMount}
+                  onClick={() => {
+                    onToggleMount();
+                    setIsSupplyCollapsed(true);
+                  }}
                   className={`w-full mt-2 flex items-center justify-between px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold text-[11px] shadow-md ${
                     playerState.isRidingMount
                       ? 'border-amber-400 bg-amber-600/90 text-stone-950 shadow-[0_0_12px_rgba(245,158,11,0.5)]'
@@ -1424,207 +1528,6 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             )}
           </div>
         )}
-
-        {/* Claim & Territory Status Badge (Human-Readable Details) */}
-        {(() => {
-          if (!displayClaim) return null;
-          const isRegistered = 'isClaimed' in displayClaim ? displayClaim.isClaimed : true;
-          if (!isRegistered && !standingInsideClaim) return null;
-
-          const isInside = Boolean(standingInsideClaim);
-          const isOwnClaim = Boolean(
-            (standingInsideClaim && standingInsideClaim.ownerId === localProspectorId) ||
-            (!standingInsideClaim && playerState.activeClaim?.isClaimed)
-          );
-
-          const claimName = displayClaim.name;
-          const ownerDisplayName = isOwnClaim
-            ? 'You (Patent Holder)'
-            : displayClaim.ownerName || 'Frontier Prospector';
-
-          const claimX = 'x' in displayClaim ? displayClaim.x : displayClaim.position.x;
-          const claimZ = 'z' in displayClaim ? displayClaim.z : displayClaim.position.z;
-          const claimGold = displayClaim.extractedGold || 0;
-          const claimBlocks = displayClaim.blocksDug || 0;
-          const isForSale = Boolean(displayClaim.forSale);
-          const salePriceDollars = displayClaim.priceDollars || 250;
-          const salePriceGold = displayClaim.priceGoldOunces || 12;
-
-          const dist = Math.hypot(playerState.position.x - claimX, playerState.position.z - claimZ);
-          const dx = claimX - playerState.position.x;
-          const dz = claimZ - playerState.position.z;
-          let dir = '';
-          if (Math.abs(dz) > Math.abs(dx)) {
-            dir = dz > 0 ? 'South' : 'North';
-          } else {
-            dir = dx > 0 ? 'East' : 'West';
-          }
-
-          return (
-            <div
-              id="hud-claim-territory-badge"
-              className={`w-72 sm:w-80 flex flex-col p-2.5 rounded-2xl border backdrop-blur-md shadow-2xl transition-all select-none ${
-                isInside
-                  ? isOwnClaim
-                    ? 'bg-stone-900/95 border-amber-500/80 shadow-[0_0_20px_rgba(245,158,11,0.25)]'
-                    : 'bg-stone-950/95 border-red-600/80 shadow-[0_0_20px_rgba(239,68,68,0.25)]'
-                  : 'bg-stone-900/90 border-amber-700/60 shadow-lg'
-              }`}
-            >
-              {/* Card Header */}
-              <div
-                onClick={() => setIsClaimPanelCollapsed((p) => !p)}
-                className="flex items-center justify-between cursor-pointer hover:opacity-95"
-                title="Click to expand/collapse claim particulars"
-              >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  {isOwnClaim ? (
-                    <Award className="w-4 h-4 text-amber-400 shrink-0" />
-                  ) : (
-                    <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 animate-pulse" />
-                  )}
-                  <span
-                    className={`text-[10.5px] font-bold uppercase tracking-wider truncate font-sans ${
-                      isOwnClaim ? 'text-amber-300' : 'text-red-300'
-                    }`}
-                  >
-                    {isInside
-                      ? isOwnClaim
-                        ? 'Your Mining Claim'
-                        : `Rival Claim: ${ownerDisplayName}`
-                      : 'Your Active Patent'}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {isInside ? (
-                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-950/90 border border-emerald-500/60 text-emerald-300 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      In Bounds
-                    </span>
-                  ) : (
-                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-mono text-stone-300 bg-stone-850 border border-stone-700">
-                      {dist.toFixed(0)}m {dir}
-                    </span>
-                  )}
-                  {isClaimPanelCollapsed ? (
-                    <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
-                  ) : (
-                    <ChevronUp className="w-3.5 h-3.5 text-stone-400" />
-                  )}
-                </div>
-              </div>
-
-              {/* Claim Title */}
-              <div className="mt-1 flex items-center justify-between gap-2">
-                <span className="font-serif font-bold text-sm text-stone-100 truncate tracking-tight">
-                  "{claimName}"
-                </span>
-                <span className="text-[9.5px] font-mono text-amber-400/90 font-bold shrink-0 bg-amber-950/50 px-1.5 py-0.5 rounded border border-amber-800/40">
-                  40 ACRES
-                </span>
-              </div>
-
-              {/* Detailed Particulars (Human-Readable) */}
-              {!isClaimPanelCollapsed && (
-                <div className="flex flex-col gap-1.5 mt-2 pt-2 border-t border-stone-800 text-[11px]">
-                  {/* Particulars Grid */}
-                  <div className="grid grid-cols-2 gap-1 text-[10px] text-stone-300 font-sans">
-                    <div className="flex items-center gap-1">
-                      <span className="text-stone-500">Locator:</span>
-                      <strong className={isOwnClaim ? 'text-amber-200' : 'text-orange-200'}>
-                        {ownerDisplayName}
-                      </strong>
-                    </div>
-                    <div className="flex items-center gap-1 justify-end font-mono">
-                      <span className="text-stone-500">Grid:</span>
-                      <span>{claimX.toFixed(0)}E, {claimZ.toFixed(0)}S</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-stone-500">Gold Yield:</span>
-                      <strong className="text-amber-300 font-mono">
-                        {claimGold.toFixed(1)} oz
-                      </strong>
-                      <span className="text-stone-500 text-[9px]">
-                        (${ (claimGold * 20.67).toFixed(0) })
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 justify-end">
-                      <span className="text-stone-500">Excavated:</span>
-                      <strong className="text-stone-200 font-mono">{claimBlocks} dug</strong>
-                    </div>
-                  </div>
-
-                  {/* Status / Legal Info */}
-                  {isInside && (
-                    <div
-                      className={`text-[9.5px] px-2 py-1 rounded font-sans leading-tight ${
-                        isOwnClaim
-                          ? 'bg-emerald-950/60 border border-emerald-700/40 text-emerald-200'
-                          : 'bg-red-950/70 border border-red-700/50 text-red-200'
-                      }`}
-                    >
-                      {isOwnClaim ? (
-                        <span>🛡️ <strong>Exclusive Rights:</strong> You hold legal mineral patent over this 40-acre territory.</span>
-                      ) : (
-                        <span>⚠️ <strong>Private Concession:</strong> Digging here without purchase is illegal under Mining Law.</span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Sale Tag Notice if listed */}
-                  {isForSale && (
-                    <div className="flex items-center justify-between px-2 py-1 rounded bg-amber-950/70 border border-amber-600/60 text-amber-200 text-[10px] font-sans">
-                      <span className="flex items-center gap-1">
-                        <Store className="w-3 h-3 text-amber-400" />
-                        <span>Listed on Exchange:</span>
-                      </span>
-                      <strong className="font-mono text-emerald-300">
-                        ${salePriceDollars} / {salePriceGold} oz
-                      </strong>
-                    </div>
-                  )}
-
-                  {/* Action Buttons */}
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    {onOpenClaimDeed && (
-                      <button
-                        onClick={() => onOpenClaimDeed(displayClaim)}
-                        className="flex-1 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-stone-950 font-sans font-bold text-[10.5px] rounded-lg shadow transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                        title="Inspect Official Mineral Deed Patent & Assay Records"
-                      >
-                        <Scroll className="w-3.5 h-3.5" />
-                        <span>Official Deed</span>
-                      </button>
-                    )}
-
-                    {isOwnClaim && onOpenBuilder && (
-                      <button
-                        onClick={onOpenBuilder}
-                        className="px-2.5 py-1.5 bg-stone-800 hover:bg-stone-700 text-amber-200 font-sans font-bold text-[10.5px] rounded-lg border border-amber-700/50 shadow transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                        title="Open Mine Construction Depot"
-                      >
-                        <Hammer className="w-3 h-3 text-amber-400" />
-                        <span>Build</span>
-                      </button>
-                    )}
-
-                    {!isOwnClaim && isForSale && onOpenClaimDeed && (
-                      <button
-                        onClick={() => onOpenClaimDeed(displayClaim)}
-                        className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-sans font-bold text-[10.5px] rounded-lg shadow transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                        title="Make Purchase Offer for this Claim"
-                      >
-                        <Coins className="w-3 h-3" />
-                        <span>Buy Claim</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
       </div>
       )}
 

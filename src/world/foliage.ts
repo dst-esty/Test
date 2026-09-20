@@ -2087,13 +2087,13 @@ export class DesertFoliageManager {
     this.outcroppingMesh = this.outcroppingMeshes[0];
 
     // ==========================================
-    // 5. Rich Gold Quartz Deposits for Mining
+    // 5. Rare High-Grade Gold Quartz Outcroppings for Prospecting
     // ==========================================
     const goldLocations = [
-      { x: -50, z: -40, ounces: 8, name: 'Peralta Arroyo Nugget' },
-      { x: 10, z: -20, ounces: 14, name: 'Needle Pass Quartz Pocket' },
-      { x: 110, z: 20, ounces: 22, name: 'East Gully Vein' },
-      { x: 145, z: 95, ounces: 35, name: 'Mine Approach Bonanza' },
+      { x: -50, z: -40, ounces: 2.5, name: 'Peralta Arroyo Placer Specimen' },
+      { x: 10, z: -20, ounces: 4.0, name: 'Needle Pass Quartz Pocket' },
+      { x: 110, z: 20, ounces: 6.0, name: 'East Gully Vein Outcrop' },
+      { x: 145, z: 95, ounces: 9.0, name: 'Mine Approach Bonanza Lode' },
     ];
 
     goldLocations.forEach((loc, idx) => {
@@ -2509,7 +2509,8 @@ export class DesertFoliageManager {
             color = col.getHex();
           }
 
-          const goldRoll = Math.random() < 0.35 ? 1 : 0;
+          // Rare gold fleck from mineralized boulder contact (5% chance)
+          const goldRoll = Math.random() < 0.05 ? 1 : 0;
           const hitPoint = boulderHits[0].point.clone();
           const normal = boulderHits[0].face ? boulderHits[0].face.normal.clone() : new THREE.Vector3(0, 1, 0);
           const chunkScale = Number((0.46 + Math.random() * 0.12).toFixed(2));

@@ -213,8 +213,8 @@ export class MiningSystem {
           const silver = Math.abs(Math.cos(wz * 0.4) * 2.0 + (wy - 46.5));
 
           let vType: VoxelType = 'sandstone';
-          if (vein < 0.65) vType = 'quartz_gold';
-          else if (silver < 0.5) vType = 'silver_ore';
+          if (vein < 0.32) vType = 'quartz_gold';
+          else if (silver < 0.35) vType = 'silver_ore';
           else if (gy < 3) vType = 'granite';
           else if (gy > 11) vType = 'dirt';
           else if (Math.random() < 0.08) vType = 'calcite';
@@ -224,7 +224,7 @@ export class MiningSystem {
       }
     }
 
-    // B. Peralta Camp Gold-Quartz Outcrop (Right beside starting camp for instant exploration)
+    // B. Peralta Camp Quartz Outcrop (Mostly sandstone & granite, with a rare narrow hydrothermal quartz stringer)
     const campX = -108;
     const campZ = -108;
     const campBaseY = this.getTerrainHeightFn ? this.getTerrainHeightFn(campX, campZ) - 0.6 : 15.2;
@@ -238,11 +238,11 @@ export class MiningSystem {
           const wz = campOrigin.z + gz * bs;
 
           let vType: VoxelType = 'sandstone';
-          if (gy >= 2 && gy <= 4 && (gx + gz) % 3 === 0) {
+          if (gy === 3 && gx === 4 && (gz === 3 || gz === 4)) {
             vType = 'quartz_gold';
-          } else if (Math.random() < 0.3) {
+          } else if (Math.random() < 0.04) {
             vType = 'quartz_gold';
-          } else if (Math.random() < 0.25) {
+          } else if (Math.random() < 0.35) {
             vType = 'granite';
           }
 

@@ -63,6 +63,8 @@ import { DialogueNPCInfo } from './TownfolkDialogueOverlay';
 import { createPostProcessingPipeline, PostProcessingPipeline } from '../world/postProcessing';
 import { apacheVigilance, VigilanceStatus } from '../services/apacheVigilanceService';
 import { ApacheSmokeSignalSystem } from '../world/apacheSmokeSignals';
+import { SurfaceAnalysisResult, analyzeSurfaceAtPosition } from '../world/prospectingAnalysis';
+import { ProspectorGogglesOverlay } from './ProspectorGogglesOverlay';
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -139,6 +141,8 @@ interface WorldCanvasProps {
   onRegisterScopeZoomHandler?: (fn: (delta: number) => void) => void;
   onRegisterTeleportHandler?: (fn: (pos: Vector3D) => void) => void;
   onUpdateVigilance?: (status: VigilanceStatus) => void;
+  areGogglesActive?: boolean;
+  onToggleGoggles?: () => void;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
@@ -214,12 +218,37 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onRegisterScopeZoomHandler,
   onRegisterTeleportHandler,
   onUpdateVigilance,
+  areGogglesActive = false,
+  onToggleGoggles,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
   const virtualJoystickInput = useRef<{ forward: number; right: number }>({ forward: 0, right: 0 });
   const isUIOpenRef = useRef(isUIOpen);
   const activeBuildingTypeRef = useRef<MineStructureType>(activeBuildingType);
+
+  const areGogglesActiveRef = useRef(areGogglesActive);
+  areGogglesActiveRef.current = areGogglesActive;
+
+  const [gogglesZoomLevel, setGogglesZoomLevel] = useState<number>(4); // 4 = Survey (34°), 10 = Field (16°), 24 = Macro (7°)
+  const gogglesZoomLevelRef = useRef<number>(4);
+  gogglesZoomLevelRef.current = gogglesZoomLevel;
+
+  const handleCycleGogglesZoom = useCallback(() => {
+    setGogglesZoomLevel((prev) => {
+      const next = prev === 4 ? 10 : prev === 10 ? 24 : 4;
+      gogglesZoomLevelRef.current = next;
+      soundEngine.playGogglesClick(true);
+      return next;
+    });
+  }, []);
+
+  const [surfaceAnalysis, setSurfaceAnalysis] = useState<SurfaceAnalysisResult | null>(null);
+  const surfaceAnalysisRef = useRef<SurfaceAnalysisResult | null>(null);
+  const lastGogglesRaycastTime = useRef(0);
+  const lastHighGradeChimeTime = useRef(0);
+  const gogglesReticleMeshRef = useRef<THREE.Mesh | null>(null);
+  const gogglesGlintGroupRef = useRef<THREE.Group | null>(null);
 
   const [isAimingRifle, setIsAimingRifle] = useState(false);
   const [scopeZoom, setScopeZoom] = useState(3.0);
@@ -481,6 +510,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const lastSentPitch = useRef<number>(playerState.rotation?.pitch || 0);
   const currentHydrationRef = useRef<number>(playerState.hydration ?? 100);
   const currentHealthRef = useRef<number>(playerState.health ?? 100);
+  const hasTriggeredLowHydrationWarningRef = useRef<boolean>(false);
   const lastMultiplayerSyncTime = useRef<number>(0);
   const interactionCheckTick = useRef<number>(0);
   const renderFrameCount = useRef<number>(0);
@@ -635,6 +665,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       : initQuality === 'high'
       ? THREE.PCFSoftShadowMap
       : THREE.PCFShadowMap;
+    renderer.setClearColor(0x1a1510, 1.0);
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
@@ -642,15 +673,20 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     rendererRef.current = renderer;
 
     // Initialize Cinematic Post-Processing Pipeline (RDR Atmospheric Bloom, Color Grading, 35mm Grain & Vignette)
-    const postProcessing = createPostProcessingPipeline(
-      renderer,
-      scene,
-      camera,
-      width,
-      height,
-      initQuality
-    );
-    postProcessingRef.current = postProcessing;
+    try {
+      const postProcessing = createPostProcessingPipeline(
+        renderer,
+        scene,
+        camera,
+        width,
+        height,
+        initQuality
+      );
+      postProcessingRef.current = postProcessing;
+    } catch (postErr) {
+      console.warn('[WorldCanvas] Could not initialize postProcessing pipeline, using direct render:', postErr);
+      postProcessingRef.current = null;
+    }
 
     const maxAnisotropy = renderer.capabilities?.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1;
 
@@ -734,6 +770,54 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     const movableRockManager = new MovableRockManager(scene);
     movableRockManagerRef.current = movableRockManager;
+
+    // 3D Prospector Goggles Ground Analysis Reticle Mesh
+    const reticleGeo = new THREE.RingGeometry(0.38, 0.48, 32);
+    const reticleMat = new THREE.MeshBasicMaterial({
+      color: 0xf59e0b,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.85,
+      depthTest: true,
+      depthWrite: false,
+    });
+    const gogglesReticleMesh = new THREE.Mesh(reticleGeo, reticleMat);
+    gogglesReticleMesh.rotation.x = -Math.PI / 2;
+    gogglesReticleMesh.visible = false;
+    gogglesReticleMesh.renderOrder = 999;
+    scene.add(gogglesReticleMesh);
+    gogglesReticleMeshRef.current = gogglesReticleMesh;
+
+    // Auriferous Geological Sign Glint Shimmer Particles (visible when inspecting with goggles)
+    const glintGroup = new THREE.Group();
+    glintGroup.visible = false;
+    const glintLocs = [
+      { x: -50, z: -40, count: 8 },
+      { x: 10, z: -20, count: 12 },
+      { x: 110, z: 20, count: 14 },
+      { x: 145, z: 95, count: 16 },
+      { x: -108, z: -108, count: 6 },
+    ];
+    const diamondGeo = new THREE.OctahedronGeometry(0.12, 0);
+    const glintMat = new THREE.MeshBasicMaterial({
+      color: 0xffe066,
+      transparent: true,
+      opacity: 0.9,
+    });
+    glintLocs.forEach((loc) => {
+      for (let i = 0; i < loc.count; i++) {
+        const mesh = new THREE.Mesh(diamondGeo, glintMat);
+        const ox = (Math.random() - 0.5) * 14;
+        const oz = (Math.random() - 0.5) * 14;
+        const oy = getTerrainHeight(loc.x + ox, loc.z + oz) + 0.15 + Math.random() * 0.4;
+        mesh.position.set(loc.x + ox, oy, loc.z + oz);
+        mesh.scale.setScalar(0.6 + Math.random() * 0.8);
+        mesh.userData = { phase: Math.random() * Math.PI * 2, baseScale: mesh.scale.x };
+        glintGroup.add(mesh);
+      }
+    });
+    scene.add(glintGroup);
+    gogglesGlintGroupRef.current = glintGroup;
 
     const mountManager = new MountManager(scene);
     if (playerStateRef.current.ownedMount) {
@@ -2673,6 +2757,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      if (e.code === 'KeyZ') {
+        if (areGogglesActiveRef.current) {
+          handleCycleGogglesZoom();
+        }
+      }
+
       if (e.code === 'KeyE') {
         checkInteractions(true);
       }
@@ -3065,6 +3155,26 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     }
 
     const handleWheel = (e: WheelEvent) => {
+      if (areGogglesActiveRef.current) {
+        e.preventDefault();
+        if (e.deltaY < 0) {
+          // Scroll up -> Zoom in (4X -> 10X -> 24X)
+          setGogglesZoomLevel((prev) => {
+            const next = prev === 4 ? 10 : 24;
+            gogglesZoomLevelRef.current = next;
+            return next;
+          });
+        } else if (e.deltaY > 0) {
+          // Scroll down -> Zoom out (24X -> 10X -> 4X)
+          setGogglesZoomLevel((prev) => {
+            const next = prev === 24 ? 10 : 4;
+            gogglesZoomLevelRef.current = next;
+            return next;
+          });
+        }
+        return;
+      }
+
       if (playerStateRef.current.equippedTool === 'rifle' && isAimingRifleRef.current) {
         e.preventDefault();
         const step = e.deltaY < 0 ? 0.5 : -0.5;
@@ -4611,6 +4721,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           const drainRate = (isSprinting ? 0.35 : 0.12) * delta * rainRelief * ridingRelief;
           currentHydrationRef.current = Math.max(0, currentHydrationRef.current - drainRate);
 
+          // Low hydration warning (< 20%)
+          if (currentHydrationRef.current < 20) {
+            if (!hasTriggeredLowHydrationWarningRef.current) {
+              hasTriggeredLowHydrationWarningRef.current = true;
+              if (onShowBanner) {
+                onShowBanner('⚠️ Parched with thirst! Hydration below 20%. Drink from your canteen or find spring water!');
+              }
+            }
+          } else if (currentHydrationRef.current >= 30) {
+            hasTriggeredLowHydrationWarningRef.current = false;
+          }
+
           // Gradual sunstroke damage if completely out of water
           if (currentHydrationRef.current <= 0) {
             currentHealthRef.current = Math.max(0, currentHealthRef.current - delta * 2.5);
@@ -5287,9 +5409,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
 
       const isAiming = isAimingRifleRef.current && tool === 'rifle' && !carried;
-      // Smooth camera FOV adjustment when aiming through vintage scope with dynamic zoom
+      // Smooth camera FOV adjustment when aiming through vintage scope or inspecting with prospector goggles
       const currentZoom = Math.max(1.0, targetZoomRef.current);
-      const targetFov = tool === 'binoculars' ? 22 : isAiming ? (65 / currentZoom) : 65;
+      const gogglesFov = gogglesZoomLevelRef.current === 24 ? 7 : gogglesZoomLevelRef.current === 10 ? 16 : 34;
+      const targetFov = tool === 'binoculars' ? 22 : areGogglesActiveRef.current ? gogglesFov : isAiming ? (65 / currentZoom) : 65;
       if (Math.abs(camera.fov - targetFov) > 0.05) {
         camera.fov += (targetFov - camera.fov) * Math.min(1, delta * 14);
         camera.updateProjectionMatrix();
@@ -5779,6 +5902,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         );
       }
 
+      // 5a-3. Tortilla Flat Ambient Settlement Noise (Chatter, Horses Chuffing, Tack Jingle, Porch Creaks)
+      const isPlayerInsideMine = (playerStateRef.current.currentMineLevel || 0) > 0;
+      soundEngine.updateTownAmbiance(playerPos.current.x, playerPos.current.z, delta, isPlayerInsideMine);
+
       // 5b. Atmospheric sky, clouds, and weather updates
       if (atmosphereManagerRef.current) {
         atmosphereManagerRef.current.update(
@@ -5943,6 +6070,136 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         tortillaFlatLightingRef.current(timeOfDayRef.current, delta);
       }
 
+      // Update Prospector Goggles Glint Particles and Surface Scanning
+      if (gogglesGlintGroupRef.current) {
+        gogglesGlintGroupRef.current.visible = areGogglesActiveRef.current;
+        if (areGogglesActiveRef.current) {
+          const t = now * 0.003;
+          gogglesGlintGroupRef.current.children.forEach((child) => {
+            const phase = (child.userData as { phase?: number })?.phase || 0;
+            const baseScale = (child.userData as { baseScale?: number })?.baseScale || 1;
+            const pulse = 0.5 + 0.5 * Math.sin(t * 3.5 + phase);
+            child.scale.setScalar(baseScale * (0.6 + 0.7 * pulse));
+            child.rotation.y += delta * 1.8;
+          });
+        }
+      }
+
+      // Live surface analysis when prospector goggles are equipped
+      if (areGogglesActiveRef.current) {
+        if (nowMs - lastGogglesRaycastTime.current > 65) {
+          lastGogglesRaycastTime.current = nowMs;
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+          raycaster.far = 70;
+
+          let hitPoint: THREE.Vector3 | null = null;
+          let hitNormal = new THREE.Vector3(0, 1, 0);
+          let hitDist = 0;
+          let hitObj: THREE.Object3D | null = null;
+
+          // Raycast endless terrain chunks
+          if (endlessTerrainRef.current) {
+            const tHits = endlessTerrainRef.current.raycast(raycaster);
+            if (tHits.length > 0) {
+              hitPoint = tHits[0].point;
+              if (tHits[0].face) hitNormal.copy(tHits[0].face.normal);
+              hitDist = tHits[0].distance;
+              hitObj = tHits[0].object;
+            }
+          }
+
+          // Raycast boulders & outcroppings
+          if (foliageManagerRef.current?.boulderMeshes) {
+            const bHits = raycaster.intersectObjects(foliageManagerRef.current.boulderMeshes, false);
+            if (bHits.length > 0 && (!hitDist || bHits[0].distance < hitDist)) {
+              hitPoint = bHits[0].point;
+              if (bHits[0].face) hitNormal.copy(bHits[0].face.normal);
+              hitDist = bHits[0].distance;
+              hitObj = bHits[0].object;
+            }
+          }
+
+          // Raycast mine voxels
+          if (miningSystemRef.current) {
+            const voxelMeshes = Array.from(miningSystemRef.current.getInstancedMeshes().values());
+            if (voxelMeshes.length > 0) {
+              const vHits = raycaster.intersectObjects(voxelMeshes, false);
+              if (vHits.length > 0 && (!hitDist || vHits[0].distance < hitDist)) {
+                hitPoint = vHits[0].point;
+                if (vHits[0].face) hitNormal.copy(vHits[0].face.normal);
+                hitDist = vHits[0].distance;
+                hitObj = vHits[0].object;
+              }
+            }
+          }
+
+          if (!hitPoint) {
+            const camDir = new THREE.Vector3();
+            camera.getWorldDirection(camDir);
+            // Only perform a ground projection if genuinely aiming down toward the earth (camDir.y < -0.05)
+            // If aiming horizontally or up into the sky/mountains, no surface is hit
+            if (camDir.y < -0.05) {
+              const groundDist = Math.min(35.0, Math.max(1.5, 1.8 / Math.sin(Math.abs(camDir.y))));
+              const px = playerPos.current.x + camDir.x * groundDist;
+              const pz = playerPos.current.z + camDir.z * groundDist;
+              const py = getTerrainHeight(px, pz);
+              if (Math.abs(camera.position.y + camDir.y * groundDist - py) < 5.0) {
+                hitPoint = new THREE.Vector3(px, py, pz);
+                hitDist = groundDist;
+              }
+            }
+          }
+
+          if (hitPoint) {
+            const analysis = analyzeSurfaceAtPosition(hitPoint, hitNormal, hitDist, hitObj);
+            surfaceAnalysisRef.current = analysis;
+            setSurfaceAnalysis(analysis);
+
+            // Update 3D reticle on ground
+            if (gogglesReticleMeshRef.current) {
+              gogglesReticleMeshRef.current.visible = true;
+              gogglesReticleMeshRef.current.position.copy(hitPoint).addScaledVector(hitNormal, 0.05);
+              gogglesReticleMeshRef.current.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), hitNormal);
+
+              const mat = gogglesReticleMeshRef.current.material as THREE.MeshBasicMaterial;
+              if (mat) {
+                if (analysis.mineralization >= 55) {
+                  mat.color.setHex(0xffd700);
+                  gogglesReticleMeshRef.current.scale.setScalar(1.25 + 0.15 * Math.sin(now * 0.009));
+                } else if (analysis.mineralization >= 25) {
+                  mat.color.setHex(0xf59e0b);
+                  gogglesReticleMeshRef.current.scale.setScalar(1.0);
+                } else {
+                  mat.color.setHex(0x78716c);
+                  gogglesReticleMeshRef.current.scale.setScalar(0.85);
+                }
+              }
+            }
+
+            // Audio cues:
+            if (analysis.hasHighGradeAnomaly && nowMs - lastHighGradeChimeTime.current > 4500) {
+              lastHighGradeChimeTime.current = nowMs;
+              soundEngine.playGoldDetectedChime();
+            }
+          } else {
+            surfaceAnalysisRef.current = null;
+            setSurfaceAnalysis(null);
+            if (gogglesReticleMeshRef.current && gogglesReticleMeshRef.current.visible) {
+              gogglesReticleMeshRef.current.visible = false;
+            }
+          }
+        }
+      } else {
+        if (gogglesReticleMeshRef.current && gogglesReticleMeshRef.current.visible) {
+          gogglesReticleMeshRef.current.visible = false;
+        }
+        if (surfaceAnalysisRef.current) {
+          surfaceAnalysisRef.current = null;
+          setSurfaceAnalysis(null);
+        }
+      }
+
       // Adaptive Shadow Map Scheduling (maintains 60 FPS frame pacing under complex terrain/weather conditions)
       if (renderer.shadowMap.enabled) {
         renderFrameCount.current++;
@@ -5959,8 +6216,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // Render scene via cinematic post-processing pipeline or fallback to standard renderer
       if (postProcessingRef.current) {
-        postProcessingRef.current.update(delta, timeOfDayRef.current, qualityRef.current);
-        postProcessingRef.current.composer.render();
+        try {
+          postProcessingRef.current.update(
+            delta,
+            timeOfDayRef.current,
+            qualityRef.current,
+            Boolean(areGogglesActiveRef.current)
+          );
+          postProcessingRef.current.composer.render();
+        } catch (compErr) {
+          renderer.render(scene, camera);
+        }
       } else {
         renderer.render(scene, camera);
       }
@@ -5999,6 +6265,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       });
       remoteProspectorsRef.current.clear();
       fpArmsRigRef.current?.dispose();
+      if (gogglesReticleMeshRef.current) {
+        scene.remove(gogglesReticleMeshRef.current);
+        gogglesReticleMeshRef.current.geometry.dispose();
+        (gogglesReticleMeshRef.current.material as THREE.Material).dispose();
+      }
+      if (gogglesGlintGroupRef.current) {
+        scene.remove(gogglesGlintGroupRef.current);
+      }
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousemove', handleMouseMove);
@@ -6343,6 +6617,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           </div>
         </div>
       )}
+
+      {/* Authentic Dual-Lens Prospector Goggles Analysis Overlay */}
+      <ProspectorGogglesOverlay
+        isActive={Boolean(areGogglesActive)}
+        onToggle={onToggleGoggles || (() => {})}
+        analysis={surfaceAnalysis}
+        opticalZoom={gogglesZoomLevel}
+        onCycleZoom={handleCycleGogglesZoom}
+      />
     </div>
   );
 };

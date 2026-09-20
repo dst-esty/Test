@@ -1,1 +1,29 @@
 @import "tailwindcss";
+
+@keyframes thirstVignettePulse {
+  0%, 100% {
+    opacity: 0.50;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.90;
+    transform: scale(1.018);
+  }
+}
+
+@keyframes thirstHazeFlicker {
+  0%, 100% {
+    opacity: 0.40;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.animate-thirst-vignette {
+  animation: thirstVignettePulse 3.0s ease-in-out infinite;
+}
+
+.animate-thirst-haze {
+  animation: thirstHazeFlicker 2.2s ease-in-out infinite;
+}

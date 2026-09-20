@@ -12,6 +12,14 @@ class SoundEngine {
   private ambientGain: GainNode | null = null;
   private isMuted: boolean = false;
 
+  // Tortilla Flat Ambient Town Noise & Life
+  private townAmbianceGain: GainNode | null = null;
+  private townChatterFilter: BiquadFilterNode | null = null;
+  private townPresence: number = 0;
+  private townAmbianceTimer: number = 0;
+  private nextHorseEventDelay: number = 0.6; // Trigger quickly on spawn so player hears horses immediately
+  private nextTownEventDelay: number = 2.5;
+
   private init() {
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -27,11 +35,14 @@ class SoundEngine {
     if (this.windGain) {
       this.windGain.gain.setValueAtTime(muted ? 0 : 0.08, this.ctx?.currentTime || 0);
     }
+    if (this.townAmbianceGain) {
+      this.townAmbianceGain.gain.setValueAtTime(muted ? 0 : this.townPresence * 0.16, this.ctx?.currentTime || 0);
+    }
   }
 
   public startAmbiance() {
-    if (this.windGain || this.isMuted) return;
     this.init();
+    if (this.windGain || this.isMuted) return;
     if (!this.ctx) return;
 
     try {
@@ -74,9 +85,414 @@ class SoundEngine {
 
       whiteNoise.start();
       lfo.start();
+
+      // Initialize Tortilla Flat town ambiance immediately
+      this.initTownAmbiance();
     } catch (e) {
       console.warn('Audio ambiance init warning:', e);
     }
+  }
+
+  /**
+   * Initializes natural background acoustic murmur & room ambiance for Tortilla Flat.
+   * Completely noise-based (NO pure sine waves or synthesizer drones) mimicking distant saloon/porch voices.
+   */
+  private initTownAmbiance() {
+    if (this.townAmbianceGain || !this.ctx) return;
+    try {
+      this.townAmbianceGain = this.ctx.createGain();
+      this.townAmbianceGain.gain.setValueAtTime(0, this.ctx.currentTime);
+      this.townAmbianceGain.connect(this.ctx.destination);
+
+      // Procedural 6-second organic conversational murmur buffer (pink noise shaped by human vocal tract cadence)
+      const sampleRate = this.ctx.sampleRate;
+      const bufferLength = sampleRate * 6;
+      const buffer = this.ctx.createBuffer(1, bufferLength, sampleRate);
+      const data = buffer.getChannelData(0);
+
+      let b0 = 0, b1 = 0, b2 = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        const tSec = i / sampleRate;
+
+        // Human conversational speech rhythm envelopes (syllabic rise and fall without pure musical tones)
+        const syl1 = Math.max(0, Math.sin(2 * Math.PI * 3.1 * tSec));
+        const syl2 = Math.max(0, Math.sin(2 * Math.PI * 4.7 * tSec + 1.8));
+        const syl3 = Math.max(0, Math.sin(2 * Math.PI * 1.9 * tSec + 3.1));
+        const phraseEnv = (syl1 * 0.45 + syl2 * 0.35 + syl3 * 0.2);
+
+        // Pink noise filtering
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520;
+        const pink = (b0 + b1 + b2) * 0.2;
+
+        data[i] = pink * phraseEnv * 0.35;
+      }
+
+      const chatterSource = this.ctx.createBufferSource();
+      chatterSource.buffer = buffer;
+      chatterSource.loop = true;
+
+      // Human speech vowel formant filter (F1 ~540Hz)
+      const formantF1 = this.ctx.createBiquadFilter();
+      formantF1.type = 'bandpass';
+      formantF1.frequency.setValueAtTime(540, this.ctx.currentTime);
+      formantF1.Q.setValueAtTime(2.2, this.ctx.currentTime);
+
+      // Saloon porch wooden wall dampening (soft lowpass)
+      const wallDampening = this.ctx.createBiquadFilter();
+      wallDampening.type = 'lowpass';
+      wallDampening.frequency.setValueAtTime(1100, this.ctx.currentTime);
+
+      this.townChatterFilter = formantF1;
+
+      chatterSource.connect(formantF1);
+      formantF1.connect(wallDampening);
+      wallDampening.connect(this.townAmbianceGain);
+
+      chatterSource.start();
+    } catch (e) {
+      console.warn('Town ambiance setup error:', e);
+    }
+  }
+
+  /**
+   * Updates Tortilla Flat town presence & triggers organic horse and settlement sounds.
+   */
+  public updateTownAmbiance(playerX: number, playerZ: number, delta: number, isUnderground: boolean = false) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    // Tortilla Flat center: (0, -246)
+    const distToTown = Math.hypot(playerX - 0, playerZ - (-246));
+
+    // Full presence within 40m of town, tapering out smoothly to 0 at 95m
+    let targetPresence = 0;
+    if (!isUnderground) {
+      if (distToTown <= 40) {
+        targetPresence = 1.0;
+      } else if (distToTown < 95) {
+        targetPresence = (95 - distToTown) / 55;
+      }
+    }
+
+    // Fast responsiveness so presence is ready immediately on spawn
+    this.townPresence += (targetPresence - this.townPresence) * Math.min(delta * 3.5, 1.0);
+
+    if (this.townPresence > 0.02 && !this.townAmbianceGain) {
+      this.initTownAmbiance();
+    }
+
+    if (this.townAmbianceGain) {
+      const targetGain = this.isMuted ? 0 : this.townPresence * 0.18;
+      this.townAmbianceGain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.3);
+    }
+
+    // Trigger audible horse chuffs/nickers & town activity sounds when at Tortilla Flat
+    if (this.townPresence > 0.12 && !this.isMuted) {
+      this.townAmbianceTimer += delta;
+
+      // 1. Realistic horse events (chuff, soft nicker, snort, hoof shuffle)
+      if (this.townAmbianceTimer > this.nextHorseEventDelay) {
+        this.nextHorseEventDelay = this.townAmbianceTimer + 4.5 + Math.random() * 5.5;
+        const roll = Math.random();
+        if (roll < 0.5) {
+          this.playHorseChuff(this.townPresence);
+        } else if (roll < 0.78) {
+          this.playHorseSnort(this.townPresence);
+        } else {
+          this.playHorseNicker(this.townPresence);
+        }
+      }
+
+      // 2. Town boardwalk and outpost events (wood creak, saloon porch life)
+      if (this.townAmbianceTimer > this.nextTownEventDelay) {
+        this.nextTownEventDelay = this.townAmbianceTimer + 6.0 + Math.random() * 7.0;
+        const roll = Math.random();
+        if (roll < 0.55) {
+          this.playTownPorchCreak(this.townPresence);
+        } else if (roll < 0.82) {
+          this.playHorseHoofShift(this.townPresence);
+        } else {
+          this.playSaloonGlassClink(this.townPresence);
+        }
+      }
+    }
+  }
+
+  /**
+   * Authentic, realistic horse nostril flutter & lip chuff ("prrr-ffffhhhh").
+   * 100% organic noise-based breath and lip vibration with zero electronic tones.
+   */
+  public playHorseChuff(volumeScale = 1.0) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const gainVal = Math.min(0.42, 0.32 * volumeScale);
+    if (gainVal <= 0.005) return;
+
+    // 0.85s breath + lip flutter buffer
+    const duration = 0.85;
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+
+    let b0 = 0, b1 = 0, b2 = 0;
+    for (let i = 0; i < bufferSize; i++) {
+      const tSec = i / this.ctx.sampleRate;
+      const white = Math.random() * 2 - 1;
+      // Pink noise filtering for warm organic air
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      const pink = (b0 + b1 + b2) * 0.35;
+
+      // 14.5 Hz realistic equine lip vibration modulation
+      const flutter = Math.sin(2 * Math.PI * 14.5 * tSec + Math.sin(tSec * 45) * 0.4) * 0.5 + 0.5;
+
+      // Amplitude envelope: strong initial lip buzz, tapering into a smooth warm nose exhale
+      let env = 0;
+      if (tSec < 0.55) {
+        env = (0.2 + flutter * 0.8) * Math.sin((tSec / 0.55) * Math.PI);
+      } else {
+        env = 0.45 * Math.exp(-(tSec - 0.55) * 5.0);
+      }
+
+      data[i] = pink * env;
+    }
+
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+
+    // Lowpass filter modeling deep horse nasal cavity (warm 360Hz -> 180Hz downward roll)
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(380, t);
+    filter.frequency.exponentialRampToValueAtTime(190, t + duration);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(gainVal * 0.3, t);
+    gain.gain.linearRampToValueAtTime(gainVal, t + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+    noiseSource.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    noiseSource.start(t);
+    noiseSource.stop(t + duration);
+  }
+
+  /**
+   * Crisp horse nasal snort / blow through flared nostrils.
+   */
+  public playHorseSnort(volumeScale = 1.0) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const gainVal = Math.min(0.38, 0.28 * volumeScale);
+    if (gainVal <= 0.005) return;
+
+    // Two rapid turbulent air puffs (0.35s total)
+    const duration = 0.35;
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+
+    for (let i = 0; i < bufferSize; i++) {
+      const tSec = i / this.ctx.sampleRate;
+      const white = Math.random() * 2 - 1;
+      const puff1 = Math.exp(-Math.pow((tSec - 0.08) / 0.05, 2));
+      const puff2 = Math.exp(-Math.pow((tSec - 0.22) / 0.06, 2)) * 0.75;
+      data[i] = white * (puff1 + puff2) * 0.4;
+    }
+
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(460, t);
+    filter.Q.setValueAtTime(1.4, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(gainVal, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+    noiseSource.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    noiseSource.start(t);
+    noiseSource.stop(t + duration);
+  }
+
+  /**
+   * Soft, warm, low-frequency horse greeting nicker at the hitching post.
+   */
+  public playHorseNicker(volumeScale = 1.0) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const gainVal = Math.min(0.32, 0.22 * volumeScale);
+    if (gainVal <= 0.005) return;
+
+    // Warm guttural throat rumble (140-190 Hz) heavily lowpassed
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(145, t);
+    osc.frequency.linearRampToValueAtTime(195, t + 0.14);
+    osc.frequency.linearRampToValueAtTime(130, t + 0.48);
+
+    // 10 Hz throat vibrato
+    const lfo = this.ctx.createOscillator();
+    lfo.frequency.setValueAtTime(10.5, t);
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.setValueAtTime(22, t);
+    lfo.connect(osc.frequency);
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(340, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(gainVal, t + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.52);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    lfo.start(t);
+    osc.start(t);
+    lfo.stop(t + 0.55);
+    osc.stop(t + 0.55);
+  }
+
+  /**
+   * Horse shifting weight in dry desert dirt with muffled leather harness tension.
+   */
+  public playHorseHoofShift(volumeScale = 1.0) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const gainVal = Math.min(0.24, 0.16 * volumeScale);
+    if (gainVal <= 0.005) return;
+
+    // Low dirt scuff (filtered noise, NO high-pitched sine pings)
+    const duration = 0.28;
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      const tSec = i / this.ctx.sampleRate;
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-tSec * 10);
+    }
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(180, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(gainVal, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    source.start(t);
+    source.stop(t + duration);
+  }
+
+  /**
+   * Weathered pine timber porch boardwalk creaking under desert heat.
+   * Granular noise friction bursts (no synthesizer sawtooth buzz).
+   */
+  public playTownPorchCreak(volumeScale = 1.0) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const gainVal = Math.min(0.22, 0.15 * volumeScale);
+    if (gainVal <= 0.005) return;
+
+    const duration = 0.38;
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < bufferSize; i++) {
+      const tSec = i / this.ctx.sampleRate;
+      // Irregular wood grain friction bursts
+      const grainFriction = Math.sin(2 * Math.PI * 45 * tSec) * Math.sin(2 * Math.PI * 115 * tSec);
+      data[i] = (Math.random() * 2 - 1) * Math.abs(grainFriction) * Math.exp(-tSec * 4.5);
+    }
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(460, t);
+    filter.Q.setValueAtTime(3.2, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(gainVal, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    source.start(t);
+    source.stop(t + duration);
+  }
+
+  /**
+   * Muffled clink of thick saloon glassware or tin camp cup.
+   */
+  public playSaloonGlassClink(volumeScale = 1.0) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const gainVal = Math.min(0.16, 0.10 * volumeScale);
+    if (gainVal <= 0.005) return;
+
+    const duration = 0.08;
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < bufferSize; i++) {
+      const tSec = i / this.ctx.sampleRate;
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-tSec * 35);
+    }
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1600, t);
+    filter.Q.setValueAtTime(8, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(gainVal, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    source.start(t);
+    source.stop(t + duration);
   }
 
   public updateWeatherAmbiance(weather: WeatherType, isUnderground: boolean = false) {
@@ -139,6 +555,98 @@ class SoundEngine {
 
     osc.start(t);
     osc.stop(t + 0.1);
+  }
+
+  /**
+   * Thirsty audio cue played when player hydration levels drop below 20%.
+   * Organic dry throat gasp, tight parched swallow, and dry breath exhalation.
+   */
+  public playThirstCue(intensity: number = 1.0) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const gainVal = Math.min(0.28, 0.20 * intensity);
+
+    // 1. Dry raspy throat gasp (0.45s pink noise shaped by dry vocal tract filter)
+    const breathDuration = 0.45;
+    const bufferSize = Math.floor(this.ctx.sampleRate * breathDuration);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+
+    let b0 = 0, b1 = 0, b2 = 0;
+    for (let i = 0; i < bufferSize; i++) {
+      const tSec = i / this.ctx.sampleRate;
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      const pink = (b0 + b1 + b2) * 0.25;
+
+      // Inhalation gasp envelope with slight raspy flutter
+      const gaspEnv = Math.sin((tSec / breathDuration) * Math.PI);
+      const raspy = 1.0 + Math.sin(tSec * 120) * 0.15;
+      data[i] = pink * gaspEnv * raspy;
+    }
+
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+
+    const throatFilter = this.ctx.createBiquadFilter();
+    throatFilter.type = 'bandpass';
+    throatFilter.frequency.setValueAtTime(750, t);
+    throatFilter.frequency.exponentialRampToValueAtTime(1150, t + breathDuration);
+    throatFilter.Q.setValueAtTime(2.2, t);
+
+    const breathGain = this.ctx.createGain();
+    breathGain.gain.setValueAtTime(0.001, t);
+    breathGain.gain.linearRampToValueAtTime(gainVal, t + 0.12);
+    breathGain.gain.exponentialRampToValueAtTime(0.001, t + breathDuration);
+
+    noiseSource.connect(throatFilter);
+    throatFilter.connect(breathGain);
+    breathGain.connect(this.ctx.destination);
+    noiseSource.start(t);
+    noiseSource.stop(t + breathDuration);
+
+    // 2. Parched, tight dry swallow click at t + 0.38s
+    const swallowTime = t + 0.38;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(190, swallowTime);
+    osc.frequency.exponentialRampToValueAtTime(75, swallowTime + 0.09);
+
+    const swallowGain = this.ctx.createGain();
+    swallowGain.gain.setValueAtTime(gainVal * 0.75, swallowTime);
+    swallowGain.gain.exponentialRampToValueAtTime(0.001, swallowTime + 0.1);
+
+    osc.connect(swallowGain);
+    swallowGain.connect(this.ctx.destination);
+    osc.start(swallowTime);
+    osc.stop(swallowTime + 0.11);
+
+    // 3. Faint hollow dry canteen metallic tap at t + 0.52s
+    const tapTime = t + 0.52;
+    const tapOsc = this.ctx.createOscillator();
+    tapOsc.type = 'sine';
+    tapOsc.frequency.setValueAtTime(680, tapTime);
+    tapOsc.frequency.exponentialRampToValueAtTime(320, tapTime + 0.14);
+
+    const tapFilter = this.ctx.createBiquadFilter();
+    tapFilter.type = 'bandpass';
+    tapFilter.frequency.setValueAtTime(520, tapTime);
+    tapFilter.Q.setValueAtTime(4.0, tapTime);
+
+    const tapGain = this.ctx.createGain();
+    tapGain.gain.setValueAtTime(gainVal * 0.28, tapTime);
+    tapGain.gain.exponentialRampToValueAtTime(0.001, tapTime + 0.14);
+
+    tapOsc.connect(tapFilter);
+    tapFilter.connect(tapGain);
+    tapGain.connect(this.ctx.destination);
+    tapOsc.start(tapTime);
+    tapOsc.stop(tapTime + 0.15);
   }
 
   public playDrink() {
@@ -2044,6 +2552,59 @@ class SoundEngine {
     gain2.connect(this.ctx.destination);
     osc2.start(t + 0.05);
     osc2.stop(t + 0.14);
+  }
+
+  /**
+   * Prospector Goggles surface scan optical ratchet click.
+   */
+  public playGogglesScan() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(2400, t);
+    osc.frequency.exponentialRampToValueAtTime(1200, t + 0.04);
+
+    gain.gain.setValueAtTime(0.08, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.045);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.05);
+  }
+
+  /**
+   * Prospector Goggles gold signature detection resonance chime.
+   * High pure crystal harmonic resonance signaling auriferous minerals.
+   */
+  public playGoldDetectedChime() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Dual bell chime (E6 + B6 harmonic)
+    const freqs = [1318.5, 1975.5, 2637.0];
+    freqs.forEach((f, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, t + idx * 0.04);
+
+      gain.gain.setValueAtTime(0.12 / (idx + 1), t + idx * 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0005, t + idx * 0.04 + 0.7);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(t + idx * 0.04);
+      osc.stop(t + idx * 0.04 + 0.75);
+    });
   }
 
   // Mine Shaft Ladder Climbing Audio: Rhythmic metal rung clanking & boot thuds
