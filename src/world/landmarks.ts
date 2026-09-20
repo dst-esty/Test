@@ -3,6 +3,7 @@ import { getTerrainHeight } from './terrain';
 import { Landmark } from '../types';
 import { buildTortillaFlatSettlement } from './tortillaFlat';
 import { buildMalapaisMountainSummit, buildPistolCanyonGorge } from './malapaisPistol';
+import { buildSuperstitionPeaksAndSprings } from './superstitionPeaks';
 
 export interface LandmarkMeshes {
   weaversNeedle: THREE.Group;
@@ -16,6 +17,10 @@ export interface LandmarkMeshes {
   tortillaFlat: THREE.Group;
   malapaisMountain?: THREE.Group;
   pistolCanyon?: THREE.Group;
+  blackTopMesa?: THREE.Group;
+  battleshipMountain?: THREE.Group;
+  minersNeedle?: THREE.Group;
+  charleboisSpring?: THREE.Group;
   waterRefillPoints: THREE.Vector3[];
 }
 
@@ -974,6 +979,13 @@ export function createLandmarkStructures(
   // ==========================================
   const pistolGroup = buildPistolCanyonGorge(scene, waterRefillPoints);
 
+  // ==========================================
+  // 12. Real-World Superstition Peaks & Oasis Springs
+  // Black Top Mesa (arrastra & basalt rim), Battleship Mountain (knife prow),
+  // Miners Needle (eyelet crags), Charlebois Spring (cottonwood tinaja)
+  // ==========================================
+  const peakMeshes = buildSuperstitionPeaksAndSprings(scene, waterRefillPoints);
+
   return {
     weaversNeedle: needleGroup,
     trailhead: trailheadGroup,
@@ -986,6 +998,10 @@ export function createLandmarkStructures(
     tortillaFlat: tortillaGroup,
     malapaisMountain: malapaisGroup,
     pistolCanyon: pistolGroup,
+    blackTopMesa: peakMeshes.blackTopMesa,
+    battleshipMountain: peakMeshes.battleshipMountain,
+    minersNeedle: peakMeshes.minersNeedle,
+    charleboisSpring: peakMeshes.charleboisSpring,
     waterRefillPoints,
   };
 }

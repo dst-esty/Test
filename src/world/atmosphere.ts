@@ -228,7 +228,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0x142035),
     hemiGroundColor: new THREE.Color(0x080c14),
     fogColor: new THREE.Color(0x070b16),
-    fogDensity: 0.0034,
+    fogDensity: 0.00085,
     cloudTopColor: new THREE.Color(0x283448),
     cloudBaseColor: new THREE.Color(0x121824),
     cloudOpacity: 0.40,
@@ -248,7 +248,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0x162238),
     hemiGroundColor: new THREE.Color(0x090e18),
     fogColor: new THREE.Color(0x080e1a),
-    fogDensity: 0.0033,
+    fogDensity: 0.00080,
     cloudTopColor: new THREE.Color(0x2a364c),
     cloudBaseColor: new THREE.Color(0x141b28),
     cloudOpacity: 0.45,
@@ -268,7 +268,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0x2a2c4e),
     hemiGroundColor: new THREE.Color(0x121222),
     fogColor: new THREE.Color(0x18172c),
-    fogDensity: 0.0030,
+    fogDensity: 0.00075,
     cloudTopColor: new THREE.Color(0x4d4668),
     cloudBaseColor: new THREE.Color(0x221e35),
     cloudOpacity: 0.60,
@@ -288,7 +288,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0xffc48e),
     hemiGroundColor: new THREE.Color(0x6a3018),
     fogColor: new THREE.Color(0xc87448),
-    fogDensity: 0.0028,
+    fogDensity: 0.00070,
     cloudTopColor: new THREE.Color(0xffd8aa),
     cloudBaseColor: new THREE.Color(0x7884a6),
     cloudOpacity: 0.82,
@@ -308,7 +308,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0xffdfb2),
     hemiGroundColor: new THREE.Color(0x8c4424),
     fogColor: new THREE.Color(0xda9460),
-    fogDensity: 0.0025,
+    fogDensity: 0.00062,
     cloudTopColor: new THREE.Color(0xfff0cc),
     cloudBaseColor: new THREE.Color(0xa4b6d4),
     cloudOpacity: 0.86,
@@ -328,7 +328,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0xe6f4fe),
     hemiGroundColor: new THREE.Color(0x94653d),
     fogColor: new THREE.Color(0xc6dff8),
-    fogDensity: 0.0021,
+    fogDensity: 0.00052,
     cloudTopColor: new THREE.Color(0xffffff),
     cloudBaseColor: new THREE.Color(0xd4e4f8),
     cloudOpacity: 0.84,
@@ -348,7 +348,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0xe0f2fe),
     hemiGroundColor: new THREE.Color(0x94653d),
     fogColor: new THREE.Color(0xc2ddf8),
-    fogDensity: 0.0020,
+    fogDensity: 0.00050,
     cloudTopColor: new THREE.Color(0xffffff),
     cloudBaseColor: new THREE.Color(0xdbeafe),
     cloudOpacity: 0.82,
@@ -368,7 +368,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0xe8f2fe),
     hemiGroundColor: new THREE.Color(0x99643a),
     fogColor: new THREE.Color(0xcae0f8),
-    fogDensity: 0.0021,
+    fogDensity: 0.00052,
     cloudTopColor: new THREE.Color(0xffffff),
     cloudBaseColor: new THREE.Color(0xd6e5f8),
     cloudOpacity: 0.84,
@@ -388,7 +388,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0xffdfba),
     hemiGroundColor: new THREE.Color(0xa0552b),
     fogColor: new THREE.Color(0xdda06d),
-    fogDensity: 0.0025,
+    fogDensity: 0.00062,
     cloudTopColor: new THREE.Color(0xfef3c7),
     cloudBaseColor: new THREE.Color(0xb0c0d6),
     cloudOpacity: 0.88,
@@ -408,7 +408,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0xf48c5a),
     hemiGroundColor: new THREE.Color(0x6e2814),
     fogColor: new THREE.Color(0xd26838),
-    fogDensity: 0.0028,
+    fogDensity: 0.00070,
     cloudTopColor: new THREE.Color(0xffc08a),
     cloudBaseColor: new THREE.Color(0x7e6a8e),
     cloudOpacity: 0.86,
@@ -428,7 +428,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0x50325c),
     hemiGroundColor: new THREE.Color(0x221324),
     fogColor: new THREE.Color(0x34203a),
-    fogDensity: 0.0030,
+    fogDensity: 0.00075,
     cloudTopColor: new THREE.Color(0x6a4864),
     cloudBaseColor: new THREE.Color(0x2a1c32),
     cloudOpacity: 0.65,
@@ -448,7 +448,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0x222644),
     hemiGroundColor: new THREE.Color(0x0c0f1e),
     fogColor: new THREE.Color(0x121426),
-    fogDensity: 0.0033,
+    fogDensity: 0.00080,
     cloudTopColor: new THREE.Color(0x3a3c56),
     cloudBaseColor: new THREE.Color(0x181a2e),
     cloudOpacity: 0.48,
@@ -468,7 +468,7 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
     hemiSkyColor: new THREE.Color(0x142035),
     hemiGroundColor: new THREE.Color(0x080c14),
     fogColor: new THREE.Color(0x070b16),
-    fogDensity: 0.0034,
+    fogDensity: 0.00085,
     cloudTopColor: new THREE.Color(0x283448),
     cloudBaseColor: new THREE.Color(0x121824),
     cloudOpacity: 0.40,
@@ -682,7 +682,7 @@ export class AtmosphereManager {
 
     // 1. Physically Accurate Atmospheric Scattering Sky Dome
     // Uses camera-relative ray directions so the sky dome is 100% immune to camera position distortion
-    const skyGeo = new THREE.SphereGeometry(550, 48, 32);
+    const skyGeo = new THREE.SphereGeometry(2800, 48, 32);
     this.skyMaterial = new THREE.ShaderMaterial({
       vertexShader: `
         varying vec3 vDirection;
@@ -780,7 +780,7 @@ export class AtmosphereManager {
     this.scene.add(this.skyDome);
 
     // 2. Optical Sun System (Spherical Core + Circular Camera-Facing Sprites)
-    const sunDiscGeo = new THREE.SphereGeometry(3.5, 32, 32);
+    const sunDiscGeo = new THREE.SphereGeometry(18.0, 32, 32);
     const sunDiscMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       fog: false,
@@ -800,7 +800,7 @@ export class AtmosphereManager {
       depthWrite: false,
     });
     this.sunCoronaSprite = new THREE.Sprite(coronaMat);
-    this.sunCoronaSprite.scale.set(22, 22, 1);
+    this.sunCoronaSprite.scale.set(115, 115, 1);
     this.sunGroup.add(this.sunCoronaSprite);
 
     // Atmospheric wide bloom sprite (subtle ambient optical bleed)
@@ -813,13 +813,13 @@ export class AtmosphereManager {
       depthWrite: false,
     });
     this.sunOuterGlowSprite = new THREE.Sprite(outerGlowMat);
-    this.sunOuterGlowSprite.scale.set(44, 44, 1);
+    this.sunOuterGlowSprite.scale.set(230, 230, 1);
     this.sunGroup.add(this.sunOuterGlowSprite);
 
     this.scene.add(this.sunGroup);
 
     // 3. Optical Moon System
-    const moonDiscGeo = new THREE.SphereGeometry(4.2, 32, 32);
+    const moonDiscGeo = new THREE.SphereGeometry(22.0, 32, 32);
     const moonDiscMat = new THREE.MeshBasicMaterial({
       color: 0xe2e8f0,
       fog: false,
@@ -838,7 +838,7 @@ export class AtmosphereManager {
       depthWrite: false,
     });
     this.moonGlowSprite = new THREE.Sprite(moonGlowMat);
-    this.moonGlowSprite.scale.set(24, 24, 1);
+    this.moonGlowSprite.scale.set(125, 125, 1);
     this.moonGroup.add(this.moonGlowSprite);
 
     this.scene.add(this.moonGroup);
@@ -963,24 +963,23 @@ export class AtmosphereManager {
       const mistSprites: THREE.Sprite[] = [];
       const initialScales: { sprite: THREE.Sprite; scaleX: number; scaleY: number }[] = [];
 
-      // Alternate between inner ridge-clinging cloud banks (radius ~240-285m)
-      // and outer massive frontier cloud banks (radius ~290-390m)
+      // Alternate between inner ridge-clinging cloud banks and massive outer boundary cumulus banks
+      // along the distant 2500m Superstition Wilderness boundary
       const isInnerRidgeCloud = i % 2 === 0;
       const angle = (i / clusterCount) * Math.PI * 2 + (Math.random() - 0.5) * (Math.PI / clusterCount);
       const radius = isInnerRidgeCloud
-        ? 240 + Math.random() * 45
-        : 290 + Math.random() * 95;
+        ? 2300 + Math.random() * 200
+        : 2550 + Math.random() * 350;
 
-      // Inner ridge clouds sit lower along the perimeter mountain crests (elevations 28-62m)
-      // Outer boundary clouds billow higher into towering thunderheads/cumulus banks (55-125m)
+      // Distant boundary thunderheads and cumulus banks rising above the mountain horizons
       const altitude = isInnerRidgeCloud
-        ? 28 + Math.random() * 30
-        : 55 + Math.random() * 65;
+        ? 120 + Math.random() * 80
+        : 160 + Math.random() * 140;
 
-      // Voluminous cluster composition: 8 to 11 expansive billow puffs
+      // Voluminous cluster composition: expansive billow puffs
       const puffCount = 8 + Math.floor(Math.random() * 4);
-      const clusterWidth = isInnerRidgeCloud ? 110 + Math.random() * 50 : 150 + Math.random() * 65;
-      const clusterDepth = isInnerRidgeCloud ? 70 + Math.random() * 40 : 95 + Math.random() * 50;
+      const clusterWidth = isInnerRidgeCloud ? 380 + Math.random() * 180 : 520 + Math.random() * 240;
+      const clusterDepth = isInnerRidgeCloud ? 220 + Math.random() * 120 : 340 + Math.random() * 180;
 
       for (let p = 0; p < puffCount; p++) {
         // Classify puffs: mist (low base wisp), base (dense mid-body), top (sunlit dome)
@@ -989,10 +988,10 @@ export class AtmosphereManager {
         const isBase = !isMist && !isTop;
 
         const puffSize = isMist
-          ? (65 + Math.random() * 40)
+          ? (220 + Math.random() * 120)
           : isTop
-          ? (55 + Math.random() * 38)
-          : (62 + Math.random() * 45);
+          ? (190 + Math.random() * 110)
+          : (210 + Math.random() * 130);
 
         const puffMat = new THREE.SpriteMaterial({
           map: this.cloudTexture,
@@ -1460,10 +1459,10 @@ export class AtmosphereManager {
     // Compute celestial orbit vectors
     const { sunDir, moonDir } = getCelestialDirections(this.currentTimeOfDay);
 
-    // Place Sun and Moon at optical infinity (450 units) relative to player position
-    // This aligns the optical solar disc, corona sprites, and sky shader flawlessly
-    this.sunGroup.position.copy(playerPos).addScaledVector(sunDir, 450);
-    this.moonGroup.position.copy(playerPos).addScaledVector(moonDir, 450);
+    // Place Sun and Moon at optical infinity (2400 units) relative to player position
+    // This aligns the optical solar disc, corona sprites, and sky shader flawlessly across the vast wilderness
+    this.sunGroup.position.copy(playerPos).addScaledVector(sunDir, 2400);
+    this.moonGroup.position.copy(playerPos).addScaledVector(moonDir, 2400);
 
     // Keep shader uniform aligned with true celestial vector
     this.skyMaterial.uniforms.uSunPosition.value.copy(sunDir);

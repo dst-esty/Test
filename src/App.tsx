@@ -1426,7 +1426,7 @@ export default function App() {
           goldFound={playerState.goldFound}
           isInsideMine={false}
           onToggleDayNight={handleToggleDayNight}
-          playerCoords={{ x: playerState.position.x, z: playerState.position.z }}
+          playerCoords={{ x: playerState.position.x, y: playerState.position.y, z: playerState.position.z }}
         />
       )}
 

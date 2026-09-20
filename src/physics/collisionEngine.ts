@@ -47,7 +47,7 @@ export const LANDMARK_OBSTACLES: LandmarkObstacle[] = [
 export const PLAYER_COLLISION_RADIUS = 0.42;
 export const MAX_STEP_HEIGHT = 0.65; // Meters: allows stepping onto rocks, curbs, and trail steps
 export const MAX_WALKABLE_SLOPE = 1.25; // Slope ratio: ~51 degrees, allows scrambling up mountain ridges and trails while blocking sheer vertical cliffs
-export const WORLD_BOUNDARY_RADIUS = 340.0; // Perimeter mountain frontier enveloped in rolling cloud shroud
+export const WORLD_BOUNDARY_RADIUS = 2500.0; // Expansive Superstition Mountains Wilderness frontier (~5 km across)
 
 /**
  * Checks whether a candidate (x, z) location is passable or obstructed by:
@@ -130,7 +130,7 @@ export function testPositionCollision(
     isMalapaisRidge;
 
   const distFromCenter = Math.hypot(candX, candZ);
-  const isHardWorldBoundary = distFromCenter > WORLD_BOUNDARY_RADIUS || Math.abs(candX) > 342 || Math.abs(candZ) > 342;
+  const isHardWorldBoundary = distFromCenter > WORLD_BOUNDARY_RADIUS || Math.abs(candX) > 2550 || Math.abs(candZ) > 2550;
 
   // The perimeter mountains and valleys are explorable up to the dense out-of-bounds cloud bank
   if (isHardWorldBoundary && !isNavigatingTunnel) {

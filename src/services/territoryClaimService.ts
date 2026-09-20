@@ -12,6 +12,7 @@ import {
 import { db, OperationType, handleFirestoreError } from '../firebase';
 import { TerritoryClaim, ClaimInfringement, ClaimTradeOffer, Vector3D } from '../types';
 import { safeLocalStorage } from '../utils/storage';
+import { isTortillaFlatTownLimits } from '../world/townBoundaries';
 
 export type { TerritoryClaim, ClaimInfringement, ClaimTradeOffer };
 
@@ -585,6 +586,14 @@ export class TerritoryClaimService {
     const ownerId = params.ownerId || this.getOrCreateProspectorId();
     const ownerName = params.ownerName || this.getProspectorName();
     const radius = params.radius || 40;
+
+    // Check Tortilla Flat settlement limits
+    if (isTortillaFlatTownLimits(params.position.x, params.position.z, 20)) {
+      return {
+        success: false,
+        message: 'Cannot stake mining claim within Tortilla Flat settlement limits! Frontier municipal law prohibits mining claims in town territory.',
+      };
+    }
 
     // Check overlap with existing claims
     const existingConflict = this.checkOverlap({ x: params.position.x, z: params.position.z }, radius);

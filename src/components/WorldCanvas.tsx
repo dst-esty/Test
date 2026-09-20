@@ -58,6 +58,7 @@ import { friendshipService } from '../services/friendshipService';
 import { safeLocalStorage } from '../utils/storage';
 import { MountManager } from '../world/mountManager';
 import { TownfolkManager } from '../world/townfolk';
+import { isTortillaFlatTownLimits } from '../world/townBoundaries';
 import { townfolkVoice } from '../services/townfolkVoiceService';
 import { DialogueNPCInfo } from './TownfolkDialogueOverlay';
 import { createPostProcessingPipeline, PostProcessingPipeline } from '../world/postProcessing';
@@ -621,7 +622,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     // 2. Camera Setup
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
-    const camera = new THREE.PerspectiveCamera(65, width / height, 0.05, 800);
+    const camera = new THREE.PerspectiveCamera(65, width / height, 0.1, 3500);
     cameraRef.current = camera;
 
     // 3. Renderer Setup (Hardware Accelerated WebGL2 Pipeline with Adaptive Mobile Performance)
@@ -1409,6 +1410,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // C. Standard Bedrock / Ground Excavation
       if (!miningSystemRef.current) return;
+      if (isTortillaFlatTownLimits(playerPos.current.x, playerPos.current.z, 2.0)) {
+        soundEngine.playPickaxe();
+        if (onShowBanner) {
+          onShowBanner('⚠️ Mining prohibited within Tortilla Flat settlement limits! Frontier municipal law protects town ground.');
+        }
+        return;
+      }
       const raycaster = new THREE.Raycaster(origin, dir, 0.1, 7.5);
       const res = miningSystemRef.current.digVoxelAtRay(raycaster, playerPos.current, dir);
 
@@ -1585,6 +1593,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const digZ = playerPos.current.z + (forwardXZ.y || 0) * 1.8;
       const digY = getTerrainHeight(digX, digZ);
       const digPos = new THREE.Vector3(digX, digY, digZ);
+
+      // Check Tortilla Flat settlement limits
+      if (isTortillaFlatTownLimits(digX, digZ, 2.0)) {
+        soundEngine.playPickaxe();
+        if (onShowBanner) {
+          onShowBanner('⚠️ Excavation prohibited within Tortilla Flat settlement limits! Frontier municipal law prohibits digging pits in town.');
+        }
+        return;
+      }
 
       // Physically deform terrain vertices and penetrate progressive geological rock strata!
       const result = digHoleInTerrain(digX, digZ, 0.48, 1.85, 'shovel');
@@ -2542,11 +2559,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const targetPos = groundHitPoint.current;
 
       // 1. Cannot stake within Tortilla Flat settlement limits
-      const distToTown = Math.hypot(targetPos.x - 0, targetPos.z - (-246));
-      if (distToTown < 50) {
+      if (isTortillaFlatTownLimits(targetPos.x, targetPos.z, 20)) {
         soundEngine.playGogglesClick(false);
         if (onShowBanner) {
-          onShowBanner('Cannot stake mining claim within Tortilla Flat town limits! Seek open wilderness.');
+          onShowBanner('⚠️ Cannot stake mining claim within Tortilla Flat town limits! Frontier municipal law prohibits mining claims in settlement territory. Seek open wilderness.');
         }
         return;
       }
@@ -2591,6 +2607,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const targetPos = groundHitPoint.current;
       const type = activeBuildingTypeRef.current || 'timber_portal';
       const blueprint = STRUCTURE_BLUEPRINTS[type];
+
+      // Municipal constraint: no mine structures in Tortilla Flat
+      if (isTortillaFlatTownLimits(targetPos.x, targetPos.z, 0)) {
+        soundEngine.playPickaxe();
+        if (onShowBanner) {
+          onShowBanner('⚠️ Mine construction prohibited within Tortilla Flat settlement limits! Frontier municipal law prohibits mining operations and shaft excavation in town.');
+        }
+        return;
+      }
 
       // Physical Terrain & Geological Placement Validation
       const isUndergroundNow = Boolean(
@@ -4447,6 +4472,25 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      // 4b. Survey Claim Staking Prompt
+      if (playerStateRef.current.equippedTool === 'stake') {
+        const inTown = isTortillaFlatTownLimits(groundHitPoint.current.x, groundHitPoint.current.z, 20);
+        const localOwnerId = territoryClaims.getOrCreateProspectorId();
+        const conflict = territoryClaims.checkOverlap({ x: groundHitPoint.current.x, z: groundHitPoint.current.z }, 40);
+        if (executeAction) {
+          executeStakeClaim();
+        } else {
+          if (inTown) {
+            onPromptInteract('⚠️ Staking prohibited within Tortilla Flat town limits! Seek open wilderness', () => executeStakeClaim());
+          } else if (conflict && conflict.ownerId !== localOwnerId) {
+            onPromptInteract(`⚠️ Overlaps claim "${conflict.name}" (${conflict.ownerName})`, () => executeStakeClaim());
+          } else {
+            onPromptInteract('📍 Drive Boundary Claim Stake [Left-Click / E]', () => executeStakeClaim());
+          }
+        }
+        return;
+      }
+
       // 5. Holographic Construction Placement Prompt
       if (playerStateRef.current.equippedTool === 'builder') {
         const type = activeBuildingTypeRef.current || 'timber_portal';
@@ -5506,10 +5550,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (mineBuildingRef.current) {
         const tool = playerStateRef.current.equippedTool;
         if (tool === 'stake') {
-          const distToTown = Math.hypot(groundHitPoint.current.x - 0, groundHitPoint.current.z - (-246));
+          const inTown = isTortillaFlatTownLimits(groundHitPoint.current.x, groundHitPoint.current.z, 20);
           const localOwnerId = territoryClaims.getOrCreateProspectorId();
           const conflict = territoryClaims.checkOverlap({ x: groundHitPoint.current.x, z: groundHitPoint.current.z }, 40);
-          const isStakeValid = distToTown >= 50 && (!conflict || conflict.ownerId === localOwnerId);
+          const isStakeValid = !inTown && (!conflict || conflict.ownerId === localOwnerId);
           mineBuildingRef.current.setGhost('stake');
           mineBuildingRef.current.updateGhostPosition(groundHitPoint.current, ghostRotationY.current, isStakeValid);
         } else if (tool === 'builder') {

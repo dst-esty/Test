@@ -157,12 +157,15 @@ export interface DynamiteEntity {
 export interface Landmark {
   id: string;
   name: string;
+  gnisName?: string;
   shortDesc: string;
   position: Vector3D;
   radius: number;
   clueId?: string;
   discovered: boolean;
-  type: 'camp' | 'needle' | 'ruins' | 'spring' | 'petroglyph' | 'massacre' | 'mine' | 'town' | 'mountain' | 'canyon';
+  type: 'camp' | 'needle' | 'ruins' | 'spring' | 'petroglyph' | 'massacre' | 'mine' | 'town' | 'mountain' | 'canyon' | 'mesa' | 'spire';
+  elevationFt?: number;
+  geology?: string;
 }
 
 export interface ClueItem {

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Compass, Sun, Moon, MapPin, Flame } from 'lucide-react';
+import { Compass, Sun, Moon, MapPin, Flame, Mountain } from 'lucide-react';
+import { getUsgsElevation } from '../world/superstitionTopography';
 
 interface CompassHUDProps {
   yaw: number; // in radians
@@ -10,7 +11,7 @@ interface CompassHUDProps {
   goldFound: number;
   isInsideMine: boolean;
   onToggleDayNight?: () => void;
-  playerCoords?: { x: number; z: number };
+  playerCoords?: { x: number; y?: number; z: number };
 }
 
 export const CompassHUD: React.FC<CompassHUDProps> = ({
@@ -100,9 +101,22 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
 
         {/* Global Coordinates & Endless Territory Indicator */}
         {playerCoords && (
-          <div className="hidden sm:flex items-center gap-1.5 border-l border-amber-800/60 pl-3 text-xs font-mono text-amber-300/80">
+          <div className="hidden sm:flex items-center gap-2 border-l border-amber-800/60 pl-3 text-xs font-mono text-amber-300/80">
             <span>
               {Math.round(playerCoords.x)}X, {Math.round(playerCoords.z)}Z
+            </span>
+            {/* Real-world USGS Calibrated Elevation Altimeter */}
+            <span
+              className="flex items-center gap-1 text-amber-200/90 font-mono bg-stone-800/70 px-1.5 py-0.5 rounded border border-amber-700/40"
+              title="USGS Topographic Elevation Benchmark"
+            >
+              <Mountain className="w-3 h-3 text-amber-400" />
+              <span className="font-semibold text-amber-300">
+                {getUsgsElevation(playerCoords.y ?? 0).feet.toLocaleString()} ft
+              </span>
+              <span className="text-[10px] text-amber-500/70 hidden md:inline">
+                ({getUsgsElevation(playerCoords.y ?? 0).meters}m)
+              </span>
             </span>
             {Math.hypot(playerCoords.x, playerCoords.z) > 340 && (
               <span className="px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 text-[9px] border border-amber-600/50 uppercase tracking-wider font-sans font-semibold">

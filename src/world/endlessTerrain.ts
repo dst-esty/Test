@@ -23,7 +23,7 @@ import {
 
 export const CHUNK_SIZE = 140;
 export const CHUNK_SEGMENTS = 28; // 29 x 29 vertices per chunk = 841 vertices (crisp fidelity, peak 60+ FPS)
-export const CHUNK_RADIUS = 3;   // 7x7 grid = 49 chunks = 980m wide field, blankets fog horizon
+export const CHUNK_RADIUS = 4;   // 9x9 grid = 81 chunks = 1260m wide field, blankets expansive mountain horizons
 
 // Deterministic pseudo-random number generator for chunk scatter
 function pseudoRandom(seed: number): number {

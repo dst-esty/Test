@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { DebrisType } from '../types';
 import { analyzeSurfaceAtPosition } from './prospectingAnalysis';
+import { isTortillaFlatTownLimits } from './townBoundaries';
 
 // Simplex-like 2D noise implementation for self-contained, high-performance procedural terrain
 function fract(x: number) {
@@ -444,12 +445,62 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     malapaisElevation = baseDome + caprock + ridgeRamp;
   }
 
+  // 8. Black Top Mesa (USGS Elev. 3,650 ft / 1,113m - Spanish Arrastra & Basalt Tableland)
+  // Flat basalt caprock tableland situated between Boulder Canyon and Needle Canyon
+  const distToBlackTop = Math.hypot(x - 35, z - 75);
+  let blackTopMesaElev = 0;
+  if (distToBlackTop < 36) {
+    const bFrac = 1.0 - distToBlackTop / 36;
+    // Stepped tableland profile with flat top
+    const capTransition = Math.min(1.0, Math.max(0, (bFrac - 0.28) / 0.72));
+    const flatTop = Math.pow(capTransition, 0.35) * 38.5;
+    const basaltLedge = fbm(x * 0.03 + 80, z * 0.03 + 80, 2) * 2.5;
+    blackTopMesaElev = flatTop + basaltLedge * capTransition;
+  }
+
+  // 9. Battleship Mountain (USGS Elev. 3,240 ft / 988m - Knife-Edge Dacite Keel)
+  // Elongated NW-SE keel-ridge between Boulder Canyon and Willow Springs
+  const distToBattleshipCenter = Math.hypot(x - (-85), z - (-80));
+  let battleshipMtnElev = 0;
+  if (distToBattleshipCenter < 42) {
+    // Project along the 45-degree prow axis
+    const axisU = (-(x - (-85)) + (z - (-80))) * 0.7071; // along spine
+    const axisV = ((x - (-85)) + (z - (-80))) * 0.7071;  // across keel
+    if (Math.abs(axisU) < 32 && Math.abs(axisV) < 14) {
+      const uFactor = 1.0 - Math.abs(axisU) / 32;
+      const vFactor = Math.pow(1.0 - Math.abs(axisV) / 14, 1.6);
+      // Sharp knife-edge arête prow
+      battleshipMtnElev = vFactor * uFactor * 32.0;
+    }
+  }
+
+  // 10. Miners Needle (USGS Elev. 3,680 ft / 1,122m - Pinnacled Dacite Crags)
+  const distToMinersNeedle = Math.hypot(x - 135, z - 180);
+  let minersNeedleElev = 0;
+  if (distToMinersNeedle < 32) {
+    const mFactor = 1.0 - distToMinersNeedle / 32;
+    const spireNoise = Math.sin(Math.atan2(z - 180, x - 135) * 3) * 4.5;
+    minersNeedleElev = Math.pow(mFactor, 1.8) * (36.0 + spireNoise);
+  }
+
+  // 11. Superstition Peak Caldera Summit (USGS Elev. 5,057 ft / 1,541m - Highest Point)
+  const distToSuperstitionPeak = Math.hypot(x - (-180), z - 65);
+  let superstitionPeakElev = 0;
+  if (distToSuperstitionPeak < 55) {
+    const pFactor = 1.0 - distToSuperstitionPeak / 55;
+    superstitionPeakElev = Math.pow(pFactor, 1.3) * 48.0;
+  }
+
   let rawHeight =
     (rawElev + totalCanyonCarve + arroyo + needleBase + springDepression + mineRidge + saltRiverCarve) *
       trailheadFlatten +
     perimeterMountains * (totalCanyonCarve < -1 ? Math.max(0.08, 1.0 + totalCanyonCarve / 18.0) : 1.0) +
     northCanyonWall +
-    malapaisElevation;
+    malapaisElevation +
+    blackTopMesaElev +
+    battleshipMtnElev +
+    minersNeedleElev +
+    superstitionPeakElev;
 
   // Level out the Tortilla Flat town terrace smoothly to an elevated, dry 7.5m (or sloping river trail)
   if (tortillaFlatBlend > 0) {
@@ -691,6 +742,36 @@ export function digHoleInTerrain(
   radius: number = 1.85,
   tool: 'shovel' | 'pickaxe' | 'dynamite' = 'shovel'
 ): DigResult {
+  // Excavation and mining strictly prohibited within Tortilla Flat settlement limits
+  if (isTortillaFlatTownLimits(x, z, 1.0)) {
+    return {
+      hole: {
+        id: 'tortilla_flat_protected',
+        x,
+        z,
+        depth: 0,
+        radius: 0,
+        excavationCount: 0,
+        createdAt: Date.now(),
+        maxLayerReached: 0,
+        stability: 100,
+        isShored: true,
+      },
+      isNew: false,
+      totalDepth: 0,
+      layer: getGeologicalLayerAtDepth(0),
+      strataMessage: '⚠️ Municipal ground: Excavation prohibited in Tortilla Flat town limits.',
+      rocksAwarded: 0,
+      goldAwarded: 0,
+      slumpOccurred: false,
+      slumpAmount: 0,
+      stability: 100,
+      needsShoring: false,
+      slumpDamage: 0,
+      slumpFatal: false,
+    };
+  }
+
   // Generous proximity matching so digging within an excavation zone expands the same trench (and preserves shoring)
   let hole = activeDugHoles.find((h) => Math.hypot(h.x - x, h.z - z) <= Math.max(2.8, (h.radius || 2) * 1.15));
   let isNew = false;

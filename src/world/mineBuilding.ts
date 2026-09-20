@@ -3,6 +3,7 @@ import { BuiltStructure, ClaimInfo, MineStructureType, PortalExcavationState, St
 import { soundEngine } from '../audio/soundEffects';
 import { MountainDustParticleSystem } from './mountainDustParticles';
 import { createClaimNoticePlateTexture, createClaimBillboardSprite } from './claimMarkerTextures';
+import { isTortillaFlatTownLimits } from './townBoundaries';
 
 export interface StructurePlacementValidationContext {
   getTerrainHeight: (x: number, z: number) => number;
@@ -66,7 +67,21 @@ export function validateStructurePlacement(
   ctx: StructurePlacementValidationContext
 ): StructurePlacementValidationResult {
   if (type === 'stake') {
+    if (isTortillaFlatTownLimits(pos.x, pos.z, 20)) {
+      return {
+        valid: false,
+        reason: '⚠️ Cannot stake a mining claim within Tortilla Flat settlement limits! Frontier municipal law prohibits mining claims in settlement territory.',
+      };
+    }
     return { valid: true };
+  }
+
+  // Tortilla Flat Settlement Sanctuary & Municipality Constraint: Mine construction prohibited
+  if (isTortillaFlatTownLimits(pos.x, pos.z, 0)) {
+    return {
+      valid: false,
+      reason: '⚠️ Cannot build mine structures within Tortilla Flat settlement limits! Frontier municipal law prohibits mining operations and shaft excavation in town. Venture into the Superstition wilderness to build your mine.',
+    };
   }
 
   const bp = STRUCTURE_BLUEPRINTS[type];
@@ -438,6 +453,19 @@ export class MineBuildingSystem {
   // ==========================================
 
   public stakeClaim(name: string, pos: Vector3D, size = 42, id?: string): ClaimInfo {
+    if (isTortillaFlatTownLimits(pos.x, pos.z, 20)) {
+      console.warn('[MineBuildingSystem] Cannot stake claim within Tortilla Flat settlement limits');
+      return {
+        id: id || '',
+        isClaimed: false,
+        name: 'Invalid Claim (Tortilla Flat Limits)',
+        position: { x: pos.x, y: this.getTerrainHeight(pos.x, pos.z), z: pos.z },
+        size,
+        extractedGold: 0,
+        blocksDug: 0,
+      };
+    }
+
     this.claimGroup.clear();
 
     const claim: ClaimInfo = {
@@ -768,6 +796,21 @@ export class MineBuildingSystem {
   // ==========================================
 
   public initPortalExcavation(pos: Vector3D, rotationY = 0): PortalExcavationState {
+    if (isTortillaFlatTownLimits(pos.x, pos.z, 0)) {
+      console.warn('[MineBuildingSystem] Cannot excavate portal inside Tortilla Flat settlement limits');
+      return {
+        active: false,
+        position: { x: pos.x, y: this.getTerrainHeight(pos.x, pos.z), z: pos.z },
+        rotationY,
+        progress: 0,
+        stability: 100,
+        rocksNeeded: 10,
+        goldNeeded: 4,
+        isReinforced: false,
+        lastGroanTime: 0,
+      };
+    }
+
     const excavation: PortalExcavationState = {
       active: true,
       position: { x: pos.x, y: this.getTerrainHeight(pos.x, pos.z), z: pos.z },
@@ -1213,6 +1256,20 @@ export class MineBuildingSystem {
 
   public buildStructure(type: MineStructureType, pos: Vector3D, rotationY = 0): BuiltStructure {
     const blueprint = STRUCTURE_BLUEPRINTS[type];
+
+    if (isTortillaFlatTownLimits(pos.x, pos.z, 0)) {
+      console.warn(`[MineBuildingSystem] Cannot build ${type} within Tortilla Flat settlement limits`);
+      return {
+        id: `mine_${type}_rejected`,
+        type,
+        name: blueprint?.name || type,
+        position: { x: pos.x, y: this.getTerrainHeight(pos.x, pos.z), z: pos.z },
+        rotationY,
+        level: 1,
+        createdAt: Date.now(),
+      };
+    }
+
     const initialFuel = type === 'campfire' ? 12.0 : type === 'prospector_camp' ? 16.0 : undefined;
     const structure: BuiltStructure = {
       id: `mine_${type}_${Date.now()}`,
