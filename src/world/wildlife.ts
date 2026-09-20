@@ -7,12 +7,31 @@ export interface AnimalHarvestResult {
   animal?: DesertAnimal;
   killed?: boolean;
   message?: string;
+  carcassCreated?: boolean;
+  carcassId?: string;
   harvest?: {
     foodType: 'rabbit_meat' | 'venison' | 'bighorn_mutton';
     quantity: number;
     name: string;
     healthRestored: number;
   };
+}
+
+export interface AnimalCarcass {
+  id: string;
+  type: 'rabbit' | 'mule_deer' | 'whitetail_deer' | 'bighorn';
+  animalName: string;
+  position: THREE.Vector3;
+  mesh: THREE.Group;
+  beaconMesh?: THREE.Group;
+  harvest: {
+    foodType: 'rabbit_meat' | 'venison' | 'bighorn_mutton';
+    quantity: number;
+    name: string;
+    healthRestored: number;
+  };
+  promptText: string;
+  createdAt: number;
 }
 
 interface AnimalEntity {
@@ -39,6 +58,7 @@ interface AnimalEntity {
 
 export class WildlifeManager {
   private animals: AnimalEntity[] = [];
+  private carcasses: AnimalCarcass[] = [];
   private scene: THREE.Scene;
   private wildlifeGroup: THREE.Group = new THREE.Group();
   private rattleGlobalCooldown: number = 0;
@@ -1028,64 +1048,11 @@ export class WildlifeManager {
         a.data.stateTimer = 10;
 
         if (a.health <= 0) {
-          soundEngine.playWildlifeDefeated();
-          soundEngine.playHarvestGame();
           const type = a.data.type;
-          this.removeAnimalAtIndex(i);
 
-          if (type === 'rabbit') {
-            return {
-              hit: true,
-              animal: a.data,
-              killed: true,
-              message: '🏹 Hunted Desert Jackrabbit! Harvested +1 Fresh Rabbit Meat for food.',
-              harvest: {
-                foodType: 'rabbit_meat',
-                quantity: 1,
-                name: 'Fresh Desert Rabbit Meat',
-                healthRestored: 25,
-              },
-            };
-          } else if (type === 'mule_deer') {
-            return {
-              hit: true,
-              animal: a.data,
-              killed: true,
-              message: '🦌 Harvested Sonoran Mule Deer! Field-dressed +3 Prime Venison Steaks for food.',
-              harvest: {
-                foodType: 'venison',
-                quantity: 3,
-                name: 'Prime Mule Deer Venison',
-                healthRestored: 35,
-              },
-            };
-          } else if (type === 'whitetail_deer') {
-            return {
-              hit: true,
-              animal: a.data,
-              killed: true,
-              message: '🦌 Harvested Arizona Coues Whitetail Deer! Field-dressed +2 Coues Venison for food.',
-              harvest: {
-                foodType: 'venison',
-                quantity: 2,
-                name: 'Coues Whitetail Venison',
-                healthRestored: 35,
-              },
-            };
-          } else if (type === 'bighorn') {
-            return {
-              hit: true,
-              animal: a.data,
-              killed: true,
-              message: '🐏 Hunted Desert Bighorn Sheep! Harvested +3 Mountain Bighorn Mutton for food.',
-              harvest: {
-                foodType: 'bighorn_mutton',
-                quantity: 3,
-                name: 'Desert Bighorn Mountain Mutton',
-                healthRestored: 45,
-              },
-            };
-          } else if (type === 'snake') {
+          if (type === 'snake') {
+            soundEngine.playWildlifeDefeated();
+            this.removeAnimalAtIndex(i);
             return {
               hit: true,
               animal: a.data,
@@ -1093,6 +1060,8 @@ export class WildlifeManager {
               message: 'Crushed Western Diamondback Rattlesnake! Area safe from venom strikes.',
             };
           } else if (type === 'scorpion') {
+            soundEngine.playWildlifeDefeated();
+            this.removeAnimalAtIndex(i);
             return {
               hit: true,
               animal: a.data,
@@ -1101,7 +1070,20 @@ export class WildlifeManager {
             };
           }
 
-          return { hit: true, animal: a.data, killed: true, message: 'Hunted desert game!' };
+          // Huntable desert game (rabbit, mule deer, whitetail deer, bighorn sheep)
+          soundEngine.playWildlifeDefeated();
+          // Remove from active moving animal simulation (mesh stays in world as carcass)
+          this.animals.splice(i, 1);
+          const carcass = this.createCarcassFromAnimal(a, type);
+
+          return {
+            hit: true,
+            animal: a.data,
+            killed: true,
+            carcassCreated: true,
+            carcassId: carcass.id,
+            message: `🎯 Downed ${carcass.animalName}! Walk to the fallen game to field-dress and claim your harvest.`,
+          };
         } else {
           soundEngine.playPickaxe();
           const typeName =
@@ -1125,6 +1107,181 @@ export class WildlifeManager {
       }
     }
     return { hit: false };
+  }
+
+  // --- CARCASS CREATION & FIELD-DRESSING ---
+  private createCarcassFromAnimal(a: AnimalEntity, type: DesertAnimal['type']): AnimalCarcass {
+    const mesh = a.mesh;
+
+    // Lay the animal naturally on its side on the terrain
+    mesh.rotation.z = Math.PI * 0.48;
+    mesh.rotation.x = 0.15;
+
+    if (type === 'rabbit') {
+      mesh.position.y -= 0.12;
+    } else {
+      mesh.position.y -= 0.62;
+    }
+
+    if (a.legs) {
+      a.legs.forEach((leg, idx) => {
+        leg.rotation.x = idx % 2 === 0 ? 0.35 : -0.35;
+        leg.rotation.z = 0.2;
+      });
+    }
+    if (a.neck) {
+      a.neck.rotation.x = -0.05;
+    }
+
+    // Visual harvest beacon marker above the carcass
+    const beacon = new THREE.Group();
+    beacon.position.set(0, type === 'rabbit' ? 0.45 : 0.85, 0);
+
+    // Glowing diamond/star indicator
+    const diamondGeo = new THREE.OctahedronGeometry(type === 'rabbit' ? 0.12 : 0.18);
+    const diamondMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      emissive: 0xd97706,
+      emissiveIntensity: 0.85,
+      roughness: 0.25,
+    });
+    const diamondMesh = new THREE.Mesh(diamondGeo, diamondMat);
+    beacon.add(diamondMesh);
+
+    // Ground survey claim pulse ring
+    const ringGeo = new THREE.RingGeometry(
+      type === 'rabbit' ? 0.35 : 0.65,
+      type === 'rabbit' ? 0.45 : 0.8,
+      24
+    );
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xfbbf24,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.55,
+    });
+    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+    ringMesh.rotation.x = -Math.PI / 2;
+    ringMesh.position.y = type === 'rabbit' ? -0.4 : -0.8;
+    beacon.add(ringMesh);
+
+    mesh.add(beacon);
+
+    let animalName = 'Desert Game';
+    let harvest: AnimalCarcass['harvest'] = {
+      foodType: 'rabbit_meat',
+      quantity: 1,
+      name: 'Fresh Desert Rabbit Meat',
+      healthRestored: 25,
+    };
+
+    if (type === 'rabbit') {
+      animalName = 'Desert Jackrabbit';
+      harvest = {
+        foodType: 'rabbit_meat',
+        quantity: 1,
+        name: 'Fresh Desert Rabbit Meat',
+        healthRestored: 25,
+      };
+    } else if (type === 'mule_deer') {
+      animalName = 'Sonoran Mule Deer';
+      harvest = {
+        foodType: 'venison',
+        quantity: 3,
+        name: 'Prime Mule Deer Venison',
+        healthRestored: 35,
+      };
+    } else if (type === 'whitetail_deer') {
+      animalName = 'Coues Whitetail Deer';
+      harvest = {
+        foodType: 'venison',
+        quantity: 2,
+        name: 'Coues Whitetail Venison',
+        healthRestored: 35,
+      };
+    } else if (type === 'bighorn') {
+      animalName = 'Desert Bighorn Sheep';
+      harvest = {
+        foodType: 'bighorn_mutton',
+        quantity: 3,
+        name: 'Desert Bighorn Mountain Mutton',
+        healthRestored: 45,
+      };
+    }
+
+    const carcass: AnimalCarcass = {
+      id: `carcass_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      type: type as AnimalCarcass['type'],
+      animalName,
+      position: mesh.position.clone(),
+      mesh,
+      beaconMesh: beacon,
+      harvest,
+      promptText: `🥩 Claim & Field-Dress ${animalName} [E]`,
+      createdAt: Date.now(),
+    };
+
+    this.carcasses.push(carcass);
+    return carcass;
+  }
+
+  public getNearbyCarcass(playerPos: THREE.Vector3, maxDistance: number = 3.5): AnimalCarcass | null {
+    let closest: AnimalCarcass | null = null;
+    let minDist = maxDistance;
+    for (const c of this.carcasses) {
+      const dist = Math.hypot(c.position.x - playerPos.x, c.position.z - playerPos.z);
+      const dy = Math.abs(c.position.y - playerPos.y);
+      if (dist < minDist && dy < 3.2) {
+        minDist = dist;
+        closest = c;
+      }
+    }
+    return closest;
+  }
+
+  public raycastCarcass(ray: THREE.Raycaster, maxDistance: number = 4.5): AnimalCarcass | null {
+    let closest: AnimalCarcass | null = null;
+    let minDist = maxDistance;
+    for (const c of this.carcasses) {
+      const intersects = ray.intersectObject(c.mesh, true);
+      if (intersects.length > 0 && intersects[0].distance < minDist) {
+        minDist = intersects[0].distance;
+        closest = c;
+      }
+    }
+    return closest;
+  }
+
+  public claimCarcass(carcassId: string): {
+    success: boolean;
+    carcass?: AnimalCarcass;
+    message?: string;
+  } {
+    const index = this.carcasses.findIndex((c) => c.id === carcassId);
+    if (index === -1) return { success: false };
+    const carcass = this.carcasses[index];
+
+    soundEngine.playHarvestGame();
+
+    // Clean up mesh and materials
+    this.wildlifeGroup.remove(carcass.mesh);
+    carcass.mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry?.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m.dispose());
+        } else {
+          child.material?.dispose();
+        }
+      }
+    });
+
+    this.carcasses.splice(index, 1);
+    return {
+      success: true,
+      carcass,
+      message: `Field-dressed ${carcass.animalName} (+${carcass.harvest.quantity} ${carcass.harvest.name})`,
+    };
   }
 
   private removeAnimalAtIndex(index: number) {
@@ -1177,6 +1334,32 @@ export class WildlifeManager {
         if (this.envenomTicksRemaining === 0 && onShowBanner) {
           onShowBanner('Venom effects have metabolized and subsided.');
         }
+      }
+    }
+
+    // Animate active carcasses and claim beacons
+    const now = Date.now();
+    for (let ci = this.carcasses.length - 1; ci >= 0; ci--) {
+      const c = this.carcasses[ci];
+      // Carcass timeout: 10 minutes (600,000 ms)
+      if (now - c.createdAt > 600000) {
+        this.wildlifeGroup.remove(c.mesh);
+        c.mesh.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry?.dispose();
+            if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+            else child.material?.dispose();
+          }
+        });
+        this.carcasses.splice(ci, 1);
+        continue;
+      }
+
+      // Animate beacon rotation and subtle floating bob
+      if (c.beaconMesh) {
+        c.beaconMesh.rotation.y += delta * 1.6;
+        const bob = Math.sin((now - c.createdAt) * 0.003) * 0.06;
+        c.beaconMesh.position.y = (c.type === 'rabbit' ? 0.45 : 0.85) + bob;
       }
     }
 
@@ -1546,5 +1729,18 @@ export class WildlifeManager {
       });
     });
     this.animals = [];
+    this.carcasses.forEach((c) => {
+      c.mesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry?.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach((m) => m.dispose());
+          } else {
+            child.material?.dispose();
+          }
+        }
+      });
+    });
+    this.carcasses = [];
   }
 }

@@ -27,7 +27,7 @@ import { soundEngine } from '../audio/soundEffects';
 interface ClaimDeedModalProps {
   isOpen: boolean;
   onClose: () => void;
-  claim: ClaimInfo | null;
+  claim: ClaimInfo | TerritoryClaim | null;
   playerState?: PlayerState;
   builtStructures?: BuiltStructure[];
   goldCount?: number;
@@ -81,6 +81,18 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
   const localProspectorId = territoryClaims.getOrCreateProspectorId();
   const localProspectorName = territoryClaims.getProspectorName();
 
+  const claimCoords = claim
+    ? 'position' in claim && claim.position
+      ? claim.position
+      : { x: (claim as any).x || 0, y: (claim as any).y || 0, z: (claim as any).z || 0 }
+    : { x: 0, y: 0, z: 0 };
+  const claimSize = claim
+    ? 'size' in claim
+      ? claim.size
+      : ((claim as any).radius || 40)
+    : 40;
+  const isClaimWildcat = Boolean(claim?.isWildcatOrigin);
+
   useEffect(() => {
     if (claim?.name) {
       setClaimNameInput(claim.name);
@@ -123,7 +135,7 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
     (c) =>
       c.id === (claim as any)?.id ||
       c.name === claim?.name ||
-      (Math.abs(c.x - (claim?.position?.x || 0)) < 2.0 && Math.abs(c.z - (claim?.position?.z || 0)) < 2.0)
+      (Math.abs(c.x - claimCoords.x) < 2.0 && Math.abs(c.z - claimCoords.z) < 2.0)
   );
 
   const isClaimListed = matchingTerritoryClaim?.forSale || false;
@@ -141,8 +153,8 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
   const appraisal = territoryClaims.calculateAppraisedValue({
     extractedGold: currentGold,
     blocksDug: currentBlocksDug,
-    radius: claim?.size || 40,
-    isWildcatOrigin: claim?.isWildcatOrigin,
+    radius: claimSize,
+    isWildcatOrigin: isClaimWildcat,
   });
 
   const handleSellToSyndicate = async () => {
@@ -150,10 +162,10 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
     if (!targetClaimId && claim) {
       const reg = await territoryClaims.stakeClaim({
         name: claim.name,
-        position: claim.position,
+        position: claimCoords,
         ownerId: localProspectorId,
         ownerName: localProspectorName,
-        isWildcatOrigin: claim.isWildcatOrigin,
+        isWildcatOrigin: isClaimWildcat,
       });
       targetClaimId = reg.claim?.id;
     }
@@ -176,10 +188,10 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
     if (!targetClaimId && claim) {
       const reg = await territoryClaims.stakeClaim({
         name: claim.name,
-        position: claim.position,
+        position: claimCoords,
         ownerId: localProspectorId,
         ownerName: localProspectorName,
-        isWildcatOrigin: claim.isWildcatOrigin,
+        isWildcatOrigin: isClaimWildcat,
       });
       targetClaimId = reg.claim?.id;
     }
@@ -246,10 +258,10 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
     if (includeBarterClaim && claim && !barterClaimId) {
       const reg = await territoryClaims.stakeClaim({
         name: claim.name,
-        position: claim.position,
+        position: claimCoords,
         ownerId: localProspectorId,
         ownerName: localProspectorName,
-        isWildcatOrigin: claim.isWildcatOrigin,
+        isWildcatOrigin: isClaimWildcat,
       });
       barterClaimId = reg.claim?.id;
       barterClaimName = claim.name;
@@ -435,9 +447,9 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
                       Coordinates
                     </div>
                     <p className="font-semibold text-[#3b2310] text-xs">
-                      {claim.position.x.toFixed(1)}° E, {claim.position.z.toFixed(1)}° S
+                      {claimCoords.x.toFixed(1)}° E, {claimCoords.z.toFixed(1)}° S
                     </p>
-                    <span className="text-[10px] text-[#6d4b29]/80">Elev. {claim.position.y.toFixed(1)}m</span>
+                    <span className="text-[10px] text-[#6d4b29]/80">Elev. {claimCoords.y.toFixed(1)}m</span>
                   </div>
 
                   <div className="p-2.5 bg-[#ede1c2]/70 rounded border border-[#caa880]">
@@ -445,7 +457,7 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
                       <Award className="w-3.5 h-3.5" />
                       Acreage
                     </div>
-                    <p className="font-semibold text-[#3b2310] text-xs">{claim.size} Yards Perimeter</p>
+                    <p className="font-semibold text-[#3b2310] text-xs">{claimSize} Yards Perimeter</p>
                     <span className="text-[10px] text-[#6d4b29]/80">4 Corner Posts</span>
                   </div>
 

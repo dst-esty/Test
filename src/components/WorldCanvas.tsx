@@ -39,6 +39,7 @@ import {
   GraphicsQuality,
 } from '../types';
 import { territoryClaims } from '../services/territoryClaimService';
+import { generateContextualClaimName } from '../utils/claimNaming';
 import { generateNoiseTexture, createGoldVeinVoxelMaterials, VoxelShaderUniforms } from '../world/voxelGoldShader';
 import { UndergroundLayersManager } from '../world/undergroundLayers';
 import { MovableRockManager } from '../world/movableRocks';
@@ -53,6 +54,7 @@ import { resolveKinematicMovement } from '../physics/collisionEngine';
 import { RapierPhysicsManager } from '../physics/rapierEngine';
 import { MountainDustParticleSystem } from '../world/mountainDustParticles';
 import { friendshipService } from '../services/friendshipService';
+import { safeLocalStorage } from '../utils/storage';
 import { MountManager } from '../world/mountManager';
 import { TownfolkManager } from '../world/townfolk';
 import { townfolkVoice } from '../services/townfolkVoiceService';
@@ -743,10 +745,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         playerStateRef.current.activeClaim.position,
         playerStateRef.current.activeClaim.size
       );
+      if (Math.hypot(playerStateRef.current.activeClaim.position.x - 155, playerStateRef.current.activeClaim.position.z - 105) < 30) {
+        miningSystem.claim.isClaimed = true;
+        miningSystem.setClaimGroupVisible(false);
+      }
     }
     const localOwnerId = territoryClaims.getOrCreateProspectorId();
     const existingClaims = territoryClaims.getAllClaims();
     mineBuilding.syncTerritoryClaims(existingClaims, localOwnerId);
+    if (existingClaims.some((c) => Math.hypot(c.x - 155, c.z - 105) < 30)) {
+      miningSystem.claim.isClaimed = true;
+      miningSystem.setClaimGroupVisible(false);
+    }
 
     if (playerStateRef.current.builtStructures?.length) {
       playerStateRef.current.builtStructures.forEach((s) => {
@@ -1090,6 +1100,25 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     });
 
     // 9. Universal Action Executors (Digging, Shooting, Dynamite)
+    const recordExcavationYield = (gold: number = 0, rocks: number = 1) => {
+      const activeClaim = playerStateRef.current.activeClaim;
+      if (!activeClaim?.isClaimed) return;
+      const targetId = activeClaim.id;
+      if (targetId) {
+        territoryClaims.updateClaimYield(targetId, gold, rocks);
+      }
+      setPlayerState((prev) => {
+        if (!prev.activeClaim) return prev;
+        const updated = {
+          ...prev.activeClaim,
+          extractedGold: (prev.activeClaim.extractedGold || 0) + gold,
+          blocksDug: (prev.activeClaim.blocksDug || 0) + rocks,
+        };
+        safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(updated));
+        return { ...prev, activeClaim: updated };
+      });
+    };
+
     const executeDig = () => {
       const cam = cameraRef.current;
       // Calculate true player forward direction vector
@@ -1168,6 +1197,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                 portalExcavation: { ...pe },
               };
             });
+            recordExcavationYield(goldAwarded, res.rocksDug);
             if (res.message && onShowBanner) {
               onShowBanner(
                 cashEarned > 0
@@ -1258,6 +1288,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               hydration: Math.min(100, currentHydration + (fRes.hydrationAwarded || 0)),
             };
           });
+          recordExcavationYield(goldAwarded, fRes.blocksDug || 0);
           if (fRes.message && onShowBanner) {
             onShowBanner(
               cashEarned > 0
@@ -1325,6 +1356,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             cashDollars: currentCash + cashEarned,
           };
         });
+        recordExcavationYield(goldAwarded, 1);
         if (res.message && onShowBanner) {
           onShowBanner(
             cashEarned > 0
@@ -1427,6 +1459,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             cashDollars: (prev.cashDollars || 0) + cashEarned,
             hydration: Math.min(100, (prev.hydration || 100) + (fRes.hydrationAwarded || 0)),
           }));
+          recordExcavationYield(goldAwarded, fRes.blocksDug || 0);
           if (fRes.message && onShowBanner) {
             onShowBanner(
               cashEarned > 0
@@ -1556,6 +1589,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           goldFound: (prev.goldFound || 0) + goldVal,
           cashDollars: (prev.cashDollars || 0) + cashEarned,
         }));
+        recordExcavationYield(goldVal, result.rocksAwarded);
 
         if (cashEarned > 0) {
           bannerText += ` ➔ 🪙 Auto-Redeemed +$${cashEarned.toFixed(2)} ($20.67/oz)!`;
@@ -1645,6 +1679,32 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           : playerPos.current.clone().add(new THREE.Vector3(0, 1.6, 0));
 
       const raycaster = new THREE.Raycaster(origin, lookDir, 0.1, 4.0);
+
+      // 0. Check fallen wildlife game carcass field-dressing with hands
+      if (wildlifeManagerRef.current) {
+        const targetedCarcass =
+          wildlifeManagerRef.current.raycastCarcass(raycaster, 3.8) ||
+          wildlifeManagerRef.current.getNearbyCarcass(playerPos.current, 2.8);
+        if (targetedCarcass) {
+          const claimRes = wildlifeManagerRef.current.claimCarcass(targetedCarcass.id);
+          if (claimRes.success && claimRes.carcass) {
+            const h = claimRes.carcass.harvest;
+            setPlayerState((prev) => ({
+              ...prev,
+              venisonMeat: h.foodType === 'venison' ? (prev.venisonMeat || 0) + h.quantity : (prev.venisonMeat || 0),
+              rabbitMeat: h.foodType === 'rabbit_meat' ? (prev.rabbitMeat || 0) + h.quantity : (prev.rabbitMeat || 0),
+              bighornMutton: h.foodType === 'bighorn_mutton' ? (prev.bighornMutton || 0) + h.quantity : (prev.bighornMutton || 0),
+            }));
+            if (onShowBanner) {
+              onShowBanner(
+                `🥩 Claimed & Field-Dressed ${claimRes.carcass.animalName}! Harvested +${h.quantity} ${h.name} for food.`
+              );
+            }
+            onPromptInteract('', () => {});
+            return true;
+          }
+        }
+      }
 
       // 1. Check existing movable rocks
       if (movableRockManagerRef.current) {
@@ -1932,11 +1992,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             goldFound: (prev.goldFound || 0) + goldGain,
             blocksDug: (prev.blocksDug || 0) + 1,
           }));
+          recordExcavationYield(goldGain, 1);
         } else if (res.destroyed) {
           setPlayerState((prev) => ({
             ...prev,
             blocksDug: (prev.blocksDug || 0) + 1,
           }));
+          recordExcavationYield(0, 1);
         }
         if (res.message && onShowBanner) {
           onShowBanner(res.message);
@@ -1996,6 +2058,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             goldFound: (prev.goldFound || 0) + oreYield,
             cashDollars: (prev.cashDollars || 0) + cashEarned,
           }));
+          recordExcavationYield(oreYield, 1);
 
           // Spawn physical chipped rocks identical to surface mountain excavation
           if (movableRockManagerRef.current && typeof movableRockManagerRef.current.spawnLooseRock === 'function' && cavernHit.point) {
@@ -2314,7 +2377,35 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const executeStakeClaim = () => {
       if (!mineBuildingRef.current) return;
       const targetPos = groundHitPoint.current;
-      const claimName = playerStateRef.current.activeClaim?.name || "Lost Dutchman Discovery Mine";
+
+      // 1. Cannot stake within Tortilla Flat settlement limits
+      const distToTown = Math.hypot(targetPos.x - 0, targetPos.z - (-246));
+      if (distToTown < 50) {
+        soundEngine.playGogglesClick(false);
+        if (onShowBanner) {
+          onShowBanner('Cannot stake mining claim within Tortilla Flat town limits! Seek open wilderness.');
+        }
+        return;
+      }
+
+      // 2. Cannot overlap another prospector's registered claim
+      const localOwnerId = territoryClaims.getOrCreateProspectorId();
+      const conflict = territoryClaims.checkOverlap({ x: targetPos.x, z: targetPos.z }, 40);
+      if (conflict && conflict.ownerId !== localOwnerId) {
+        soundEngine.playGogglesClick(false);
+        if (onShowBanner) {
+          onShowBanner(`Ground overlaps registered claim "${conflict.name}" owned by ${conflict.ownerName}! Staking blocked.`);
+        }
+        return;
+      }
+
+      // Always generate an authentic, location-specific claim name for this newly staked plot
+      const existingClaims = territoryClaims.getAllClaims();
+      const claimName = generateContextualClaimName(
+        { x: targetPos.x, y: targetPos.y, z: targetPos.z },
+        existingClaims
+      );
+
       const claim = mineBuildingRef.current.stakeClaim(claimName, {
         x: targetPos.x,
         y: targetPos.y,
@@ -2329,10 +2420,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       if (onStakeClaim) {
         onStakeClaim(claimName, { x: targetPos.x, y: targetPos.y, z: targetPos.z });
-      }
-
-      if (onShowBanner) {
-        onShowBanner(`Claim Staked! 40-Acre Perimeter marked with yellow survey cord.`);
       }
     };
 
@@ -3016,6 +3103,66 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const pz = playerPos.current.z;
       const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
 
+      // -0. Fallen Wildlife Game Carcass Claim & Field-Dress Check
+      if (wildlifeManagerRef.current) {
+        const cam = cameraRef.current;
+        const lookDir = new THREE.Vector3();
+        if (cam) cam.getWorldDirection(lookDir);
+        else {
+          lookDir.set(Math.sin(playerYaw.current), 0, Math.cos(playerYaw.current));
+        }
+        const origin = cam
+          ? cam.position.clone()
+          : playerPos.current.clone().add(new THREE.Vector3(0, 1.4, 0));
+        const carcassRay = new THREE.Raycaster(origin, lookDir, 0.1, 4.5);
+
+        const targetedCarcass =
+          wildlifeManagerRef.current.raycastCarcass(carcassRay, 4.2) ||
+          wildlifeManagerRef.current.getNearbyCarcass(playerPos.current, 3.2);
+
+        if (targetedCarcass) {
+          if (executeAction) {
+            const claimRes = wildlifeManagerRef.current.claimCarcass(targetedCarcass.id);
+            if (claimRes.success && claimRes.carcass) {
+              const h = claimRes.carcass.harvest;
+              setPlayerState((prev) => ({
+                ...prev,
+                venisonMeat:
+                  h.foodType === 'venison'
+                    ? (prev.venisonMeat || 0) + h.quantity
+                    : prev.venisonMeat || 0,
+                rabbitMeat:
+                  h.foodType === 'rabbit_meat'
+                    ? (prev.rabbitMeat || 0) + h.quantity
+                    : prev.rabbitMeat || 0,
+                bighornMutton:
+                  h.foodType === 'bighorn_mutton'
+                    ? (prev.bighornMutton || 0) + h.quantity
+                    : prev.bighornMutton || 0,
+              }));
+              if (onShowBanner) {
+                onShowBanner(
+                  `🥩 Claimed & Field-Dressed ${claimRes.carcass.animalName}! Harvested +${h.quantity} ${h.name} for food.`
+                );
+              }
+              onPromptInteract('', () => {});
+            }
+          } else {
+            const foodLabel =
+              targetedCarcass.harvest.foodType === 'venison'
+                ? 'Prime Venison'
+                : targetedCarcass.harvest.foodType === 'bighorn_mutton'
+                ? 'Mountain Mutton'
+                : 'Rabbit Meat';
+            onPromptInteract(
+              `🥩 Claim & Field-Dress ${targetedCarcass.animalName} [E] (+${targetedCarcass.harvest.quantity} ${foodLabel})`,
+              () => checkInteractions(true)
+            );
+          }
+          return;
+        }
+      }
+
       // -1. Carried Object (Rock) Placement & Stowing
       if (playerStateRef.current.carriedObject) {
         const carried = playerStateRef.current.carriedObject;
@@ -3320,18 +3467,32 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       // 2. Mining Claim Monument (Dutchman Ridge Mine)
       const distToClaim = Math.hypot(px - 155, pz - 105);
       if (distToClaim < 8.0) {
-        const isClaimed = miningSystemRef.current?.claim.isClaimed;
+        const existingClaimAtSite = territoryClaims.findClaimAt({ x: 155, z: 105 });
+        const localOwnerId = territoryClaims.getOrCreateProspectorId();
+        const isClaimed = Boolean(
+          miningSystemRef.current?.claim.isClaimed ||
+          existingClaimAtSite ||
+          (playerStateRef.current.activeClaim?.isClaimed && Math.hypot(playerStateRef.current.activeClaim.position.x - 155, playerStateRef.current.activeClaim.position.z - 105) < 30)
+        );
         if (!isClaimed) {
           const handleClaimDutchman = () => {
             const ok = miningSystemRef.current?.claimMine();
             if (ok) {
-              if (onShowBanner) onShowBanner("Claim Staked! Dutchman's Mine is yours to excavate.");
+              const claimPos = miningSystemRef.current?.claim.position || { x: 155, y: 50.8, z: 105 };
+              const claimName = "Dutchman's Gold Ridge Claim";
               setPlayerState((prev) => ({
                 ...prev,
-                activeClaim: { ...miningSystemRef.current!.claim },
+                activeClaim: {
+                  isClaimed: true,
+                  name: claimName,
+                  position: claimPos,
+                  size: 40,
+                  extractedGold: 0,
+                  blocksDug: 0,
+                },
               }));
               if (onStakeClaim) {
-                onStakeClaim(miningSystemRef.current!.claim.name, miningSystemRef.current!.claim.position);
+                onStakeClaim(claimName, claimPos);
               }
             }
           };
@@ -3344,13 +3505,53 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           return;
         } else {
           if (!executeAction) {
-            onPromptInteract('Mine Claimed: Dig with Rock Pickaxe [4], Spade Shovel [3], or Nitro Dynamite [6]', () => {});
+            const owner = existingClaimAtSite?.ownerName || (existingClaimAtSite?.ownerId === localOwnerId ? 'You' : 'Registered Claim');
+            const title = existingClaimAtSite?.name || "Dutchman's Gold Ridge Claim";
+            onPromptInteract(`Mine Claimed: ${title} (${owner}) • Dig with Pickaxe [4], Shovel [3], or Nitro [6]`, () => {});
           }
           return;
         }
       }
 
-      // 2b. Nearby Built Mine Structures
+      // 2b. Nearby Registered Claim Monuments (Inspect Location Notice)
+      const allTerritoryClaims = territoryClaims.getAllClaims();
+      for (const tClaim of allTerritoryClaims) {
+        const dMonument = Math.hypot(px - tClaim.x, pz - tClaim.z);
+        if (dMonument < 5.5) {
+          const isOwner = tClaim.ownerId === territoryClaims.getOrCreateProspectorId();
+          const ownerLabel = isOwner ? 'Your Claim' : `Locator: ${tClaim.ownerName}`;
+          const promptText = `📜 Inspect Notice of Location: "${tClaim.name}" (${ownerLabel}) [E]`;
+          const handleInspect = () => {
+            if (onOpenDeedModal) {
+              onOpenDeedModal({
+                id: tClaim.id,
+                name: tClaim.name,
+                position: { x: tClaim.x, y: getTerrainHeight(tClaim.x, tClaim.z), z: tClaim.z },
+                size: tClaim.radius || 40,
+                isClaimed: true,
+                extractedGold: tClaim.extractedGold || 0,
+                blocksDug: tClaim.blocksDug || 0,
+                ownerId: tClaim.ownerId,
+                ownerName: tClaim.ownerName,
+                stakedAt: tClaim.stakedAt,
+                forSale: tClaim.forSale,
+                priceDollars: tClaim.priceDollars,
+                priceGoldOunces: tClaim.priceGoldOunces,
+                description: tClaim.description,
+              });
+            }
+          };
+
+          if (executeAction) {
+            handleInspect();
+          } else {
+            onPromptInteract(promptText, handleInspect);
+          }
+          return;
+        }
+      }
+
+      // 2c. Nearby Built Mine Structures
       if (mineBuildingRef.current) {
         const nearby = mineBuildingRef.current.getNearbyStructure(playerPos.current, 4.5);
         if (nearby) {
@@ -4945,8 +5146,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (mineBuildingRef.current) {
         const tool = playerStateRef.current.equippedTool;
         if (tool === 'stake') {
+          const distToTown = Math.hypot(groundHitPoint.current.x - 0, groundHitPoint.current.z - (-246));
+          const localOwnerId = territoryClaims.getOrCreateProspectorId();
+          const conflict = territoryClaims.checkOverlap({ x: groundHitPoint.current.x, z: groundHitPoint.current.z }, 40);
+          const isStakeValid = distToTown >= 50 && (!conflict || conflict.ownerId === localOwnerId);
           mineBuildingRef.current.setGhost('stake');
-          mineBuildingRef.current.updateGhostPosition(groundHitPoint.current, ghostRotationY.current, true);
+          mineBuildingRef.current.updateGhostPosition(groundHitPoint.current, ghostRotationY.current, isStakeValid);
         } else if (tool === 'builder') {
           const type = activeBuildingTypeRef.current || 'timber_portal';
           const isUndergroundNow = Boolean(
@@ -5233,6 +5438,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                 woodPlanks: (prev.woodPlanks || 0) + extraWood,
                 hydration: Math.min(100, (prev.hydration || 100) + extraHydration),
               }));
+              recordExcavationYield(goldBlasted, extraRocks);
               if (onShowBanner) {
                 const autoMsg = cashEarned > 0 ? ` ➔ 🪙 Auto-Redeemed +$${cashEarned.toFixed(2)}!` : '';
                 onShowBanner(`💥 Blast Shattered Deposits! (+${goldBlasted} oz Gold${autoMsg}, +${extraRocks} Stones${extraWood > 0 ? `, +${extraWood} Timber Planks` : ''})`);
@@ -5588,6 +5794,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         }
         mineBuildingRef.current.syncTerritoryClaims(merged, localOwnerId);
+        if (miningSystemRef.current && merged.some((c) => Math.hypot(c.x - 155, c.z - 105) < 30)) {
+          miningSystemRef.current.claim.isClaimed = true;
+          miningSystemRef.current.setClaimGroupVisible(false);
+        }
       }
     });
     return () => unsub();
@@ -5601,7 +5811,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const merged = [...allClaims];
       const act = playerState.activeClaim;
       const idx = merged.findIndex(
-        (c) => c.ownerId === localOwnerId || (Math.abs(c.x - act.position.x) < 2 && Math.abs(c.z - act.position.z) < 2)
+        (c) => (act.id && c.id === act.id) || (Math.abs(c.x - act.position.x) < 2 && Math.abs(c.z - act.position.z) < 2)
       );
       if (idx >= 0) {
         merged[idx] = {

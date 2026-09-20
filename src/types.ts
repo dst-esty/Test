@@ -16,6 +16,7 @@ export interface VoxelCell {
 }
 
 export interface ClaimInfo {
+  id?: string;
   isClaimed: boolean;
   name: string;
   position: Vector3D;

@@ -313,8 +313,13 @@ export class MiningSystem {
   public claimMine(): boolean {
     if (this.claim.isClaimed) return false;
     this.claim.isClaimed = true;
+    this.claimGroup.visible = false;
     soundEngine.playClaimStake();
     return true;
+  }
+
+  public setClaimGroupVisible(visible: boolean) {
+    this.claimGroup.visible = visible;
   }
 
   // 4. Universal Digging Engine: Hits voxels or carves terrain mesh dynamically

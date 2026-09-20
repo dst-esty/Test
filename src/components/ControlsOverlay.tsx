@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Compass,
   Flashlight,
@@ -19,6 +19,7 @@ import {
   Award,
   Box,
   ShieldAlert,
+  ShieldCheck,
   Shovel,
   Music,
   DollarSign,
@@ -38,11 +39,14 @@ import {
   Maximize,
   Minimize,
   Gauge,
+  MapPin,
+  Store,
 } from 'lucide-react';
-import { MineStructureType, PlayerState, GraphicsQuality } from '../types';
+import { MineStructureType, PlayerState, GraphicsQuality, ClaimInfo, TerritoryClaim } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
 import { westernMusic } from '../audio/westernMusic';
 import { InventoryModal } from './InventoryModal';
+import { territoryClaims } from '../services/territoryClaimService';
 import { VirtualJoystick } from './VirtualJoystick';
 import { isMobileDevice } from '../utils/device';
 
@@ -66,7 +70,8 @@ interface ControlsOverlayProps {
   bannerMessage?: string | null;
   onOpenBuilder?: () => void;
   onOpenCamp?: () => void;
-  onOpenClaimDeed?: () => void;
+  onOpenClaimDeed?: (claim?: ClaimInfo | TerritoryClaim) => void;
+  registeredClaims?: TerritoryClaim[];
   activeBuildingType?: MineStructureType;
   onRotateBlueprint?: () => void;
   onOpenRockDepot?: () => void;
@@ -141,6 +146,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onOpenBuilder,
   onOpenCamp,
   onOpenClaimDeed,
+  registeredClaims,
   activeBuildingType = 'timber_portal',
   onRotateBlueprint,
   onOpenRockDepot,
@@ -212,6 +218,25 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   });
 
   const [dismissRotatePrompt, setDismissRotatePrompt] = useState<boolean>(false);
+  const [isClaimPanelCollapsed, setIsClaimPanelCollapsed] = useState<boolean>(false);
+
+  const localProspectorId = useMemo(() => territoryClaims.getOrCreateProspectorId(), []);
+
+  // Check if player is standing inside any registered territory boundary
+  const standingInsideClaim = useMemo(() => {
+    if (!registeredClaims || registeredClaims.length === 0) return null;
+    const px = playerState.position.x;
+    const pz = playerState.position.z;
+    return (
+      registeredClaims.find((c) => {
+        const half = (c.radius || 40) / 2;
+        return Math.abs(px - c.x) <= half && Math.abs(pz - c.z) <= half;
+      }) || null
+    );
+  }, [registeredClaims, playerState.position.x, playerState.position.z]);
+
+  // Display claim: either the territory the player is standing inside, or their held active claim
+  const displayClaim = standingInsideClaim || playerState.activeClaim;
 
   useEffect(() => {
     const handleOrientationCheck = () => {
@@ -903,7 +928,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               {/* Claims & Deeds District Exchange Entry Button */}
               {onOpenClaimDeed && (
                 <button
-                  onClick={onOpenClaimDeed}
+                  onClick={() => onOpenClaimDeed()}
                   className="w-full mt-0.5 flex items-center justify-between px-2.5 py-1.5 rounded-xl border border-amber-600/60 bg-gradient-to-r from-amber-950/60 via-stone-850 to-stone-900 hover:border-amber-400 text-amber-200 hover:text-amber-100 transition-all cursor-pointer font-bold text-[11px] shadow-md group"
                   title="Open Mineral Claims, Deeds & District Claims Exchange [K]"
                 >
@@ -1315,25 +1340,206 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           </div>
         )}
 
-        {/* Claim Status Badge (Shown only when an active claim is held) */}
-        {playerState.activeClaim?.isClaimed && (
-          <div className="flex items-center gap-2 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-amber-700/50 text-amber-200 text-xs font-mono shadow-md w-fit">
-            <Flag className="w-3.5 h-3.5 text-amber-400" />
-            <span className="font-bold text-amber-300">
-              Claim: {playerState.activeClaim.name}
-            </span>
-            {onOpenClaimDeed && (
-              <button
-                onClick={onOpenClaimDeed}
-                className="ml-1 px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-stone-950 font-sans font-bold text-[10px] rounded shadow transition-colors flex items-center gap-1 cursor-pointer"
-                title="View Claim Deed"
+        {/* Claim & Territory Status Badge (Human-Readable Details) */}
+        {(() => {
+          if (!displayClaim) return null;
+          const isRegistered = 'isClaimed' in displayClaim ? displayClaim.isClaimed : true;
+          if (!isRegistered && !standingInsideClaim) return null;
+
+          const isInside = Boolean(standingInsideClaim);
+          const isOwnClaim = Boolean(
+            (standingInsideClaim && standingInsideClaim.ownerId === localProspectorId) ||
+            (!standingInsideClaim && playerState.activeClaim?.isClaimed)
+          );
+
+          const claimName = displayClaim.name;
+          const ownerDisplayName = isOwnClaim
+            ? 'You (Patent Holder)'
+            : displayClaim.ownerName || 'Frontier Prospector';
+
+          const claimX = 'x' in displayClaim ? displayClaim.x : displayClaim.position.x;
+          const claimZ = 'z' in displayClaim ? displayClaim.z : displayClaim.position.z;
+          const claimGold = displayClaim.extractedGold || 0;
+          const claimBlocks = displayClaim.blocksDug || 0;
+          const isForSale = Boolean(displayClaim.forSale);
+          const salePriceDollars = displayClaim.priceDollars || 250;
+          const salePriceGold = displayClaim.priceGoldOunces || 12;
+
+          const dist = Math.hypot(playerState.position.x - claimX, playerState.position.z - claimZ);
+          const dx = claimX - playerState.position.x;
+          const dz = claimZ - playerState.position.z;
+          let dir = '';
+          if (Math.abs(dz) > Math.abs(dx)) {
+            dir = dz > 0 ? 'South' : 'North';
+          } else {
+            dir = dx > 0 ? 'East' : 'West';
+          }
+
+          return (
+            <div
+              id="hud-claim-territory-badge"
+              className={`w-72 sm:w-80 flex flex-col p-2.5 rounded-2xl border backdrop-blur-md shadow-2xl transition-all select-none ${
+                isInside
+                  ? isOwnClaim
+                    ? 'bg-stone-900/95 border-amber-500/80 shadow-[0_0_20px_rgba(245,158,11,0.25)]'
+                    : 'bg-stone-950/95 border-red-600/80 shadow-[0_0_20px_rgba(239,68,68,0.25)]'
+                  : 'bg-stone-900/90 border-amber-700/60 shadow-lg'
+              }`}
+            >
+              {/* Card Header */}
+              <div
+                onClick={() => setIsClaimPanelCollapsed((p) => !p)}
+                className="flex items-center justify-between cursor-pointer hover:opacity-95"
+                title="Click to expand/collapse claim particulars"
               >
-                <Award className="w-3 h-3" />
-                Deed
-              </button>
-            )}
-          </div>
-        )}
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {isOwnClaim ? (
+                    <Award className="w-4 h-4 text-amber-400 shrink-0" />
+                  ) : (
+                    <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 animate-pulse" />
+                  )}
+                  <span
+                    className={`text-[10.5px] font-bold uppercase tracking-wider truncate font-sans ${
+                      isOwnClaim ? 'text-amber-300' : 'text-red-300'
+                    }`}
+                  >
+                    {isInside
+                      ? isOwnClaim
+                        ? 'Your Mining Claim'
+                        : `Rival Claim: ${ownerDisplayName}`
+                      : 'Your Active Patent'}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {isInside ? (
+                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-950/90 border border-emerald-500/60 text-emerald-300 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      In Bounds
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-mono text-stone-300 bg-stone-850 border border-stone-700">
+                      {dist.toFixed(0)}m {dir}
+                    </span>
+                  )}
+                  {isClaimPanelCollapsed ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
+                  ) : (
+                    <ChevronUp className="w-3.5 h-3.5 text-stone-400" />
+                  )}
+                </div>
+              </div>
+
+              {/* Claim Title */}
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <span className="font-serif font-bold text-sm text-stone-100 truncate tracking-tight">
+                  "{claimName}"
+                </span>
+                <span className="text-[9.5px] font-mono text-amber-400/90 font-bold shrink-0 bg-amber-950/50 px-1.5 py-0.5 rounded border border-amber-800/40">
+                  40 ACRES
+                </span>
+              </div>
+
+              {/* Detailed Particulars (Human-Readable) */}
+              {!isClaimPanelCollapsed && (
+                <div className="flex flex-col gap-1.5 mt-2 pt-2 border-t border-stone-800 text-[11px]">
+                  {/* Particulars Grid */}
+                  <div className="grid grid-cols-2 gap-1 text-[10px] text-stone-300 font-sans">
+                    <div className="flex items-center gap-1">
+                      <span className="text-stone-500">Locator:</span>
+                      <strong className={isOwnClaim ? 'text-amber-200' : 'text-orange-200'}>
+                        {ownerDisplayName}
+                      </strong>
+                    </div>
+                    <div className="flex items-center gap-1 justify-end font-mono">
+                      <span className="text-stone-500">Grid:</span>
+                      <span>{claimX.toFixed(0)}E, {claimZ.toFixed(0)}S</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-stone-500">Gold Yield:</span>
+                      <strong className="text-amber-300 font-mono">
+                        {claimGold.toFixed(1)} oz
+                      </strong>
+                      <span className="text-stone-500 text-[9px]">
+                        (${ (claimGold * 20.67).toFixed(0) })
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 justify-end">
+                      <span className="text-stone-500">Excavated:</span>
+                      <strong className="text-stone-200 font-mono">{claimBlocks} dug</strong>
+                    </div>
+                  </div>
+
+                  {/* Status / Legal Info */}
+                  {isInside && (
+                    <div
+                      className={`text-[9.5px] px-2 py-1 rounded font-sans leading-tight ${
+                        isOwnClaim
+                          ? 'bg-emerald-950/60 border border-emerald-700/40 text-emerald-200'
+                          : 'bg-red-950/70 border border-red-700/50 text-red-200'
+                      }`}
+                    >
+                      {isOwnClaim ? (
+                        <span>🛡️ <strong>Exclusive Rights:</strong> You hold legal mineral patent over this 40-acre territory.</span>
+                      ) : (
+                        <span>⚠️ <strong>Private Concession:</strong> Digging here without purchase is illegal under Mining Law.</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Sale Tag Notice if listed */}
+                  {isForSale && (
+                    <div className="flex items-center justify-between px-2 py-1 rounded bg-amber-950/70 border border-amber-600/60 text-amber-200 text-[10px] font-sans">
+                      <span className="flex items-center gap-1">
+                        <Store className="w-3 h-3 text-amber-400" />
+                        <span>Listed on Exchange:</span>
+                      </span>
+                      <strong className="font-mono text-emerald-300">
+                        ${salePriceDollars} / {salePriceGold} oz
+                      </strong>
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    {onOpenClaimDeed && (
+                      <button
+                        onClick={() => onOpenClaimDeed(displayClaim)}
+                        className="flex-1 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-stone-950 font-sans font-bold text-[10.5px] rounded-lg shadow transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                        title="Inspect Official Mineral Deed Patent & Assay Records"
+                      >
+                        <Scroll className="w-3.5 h-3.5" />
+                        <span>Official Deed</span>
+                      </button>
+                    )}
+
+                    {isOwnClaim && onOpenBuilder && (
+                      <button
+                        onClick={onOpenBuilder}
+                        className="px-2.5 py-1.5 bg-stone-800 hover:bg-stone-700 text-amber-200 font-sans font-bold text-[10.5px] rounded-lg border border-amber-700/50 shadow transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                        title="Open Mine Construction Depot"
+                      >
+                        <Hammer className="w-3 h-3 text-amber-400" />
+                        <span>Build</span>
+                      </button>
+                    )}
+
+                    {!isOwnClaim && isForSale && onOpenClaimDeed && (
+                      <button
+                        onClick={() => onOpenClaimDeed(displayClaim)}
+                        className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-sans font-bold text-[10.5px] rounded-lg shadow transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                        title="Make Purchase Offer for this Claim"
+                      >
+                        <Coins className="w-3 h-3" />
+                        <span>Buy Claim</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
       )}
 

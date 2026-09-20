@@ -57,6 +57,7 @@ export default function App() {
       const pClaim = territoryClaims.getPlayerClaim();
       if (pClaim) {
         initialClaim = {
+          id: pClaim.id,
           name: pClaim.name,
           position: { x: pClaim.x, y: getTerrainHeight(pClaim.x, pClaim.z), z: pClaim.z },
           size: pClaim.radius || 40,
@@ -186,13 +187,14 @@ export default function App() {
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [isCampModalOpen, setIsCampModalOpen] = useState(false);
   const [isClaimDeedOpen, setIsClaimDeedOpen] = useState(false);
+  const [selectedDeedClaim, setSelectedDeedClaim] = useState<ClaimInfo | TerritoryClaim | null>(null);
   const [isDepotOpen, setIsDepotOpen] = useState(false);
   const [isTortillaFlatOpen, setIsTortillaFlatOpen] = useState(false);
   const [tortillaFlatTab, setTortillaFlatTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery'>('mercantile');
   const [activeDialogueNPC, setActiveDialogueNPC] = useState<DialogueNPCInfo | null>(null);
   const [activeBuildingType, setActiveBuildingType] = useState<MineStructureType>('timber_portal');
   const [gameOverDetails, setGameOverDetails] = useState<GameOverDetails | null>(null);
-  const [claimPrompt, setClaimPrompt] = useState<{ name: string; position: Vector3D } | null>(null);
+  const [claimPrompt, setClaimPrompt] = useState<{ id?: string; name: string; position: Vector3D } | null>(null);
   const [payDirtAlert, setPayDirtAlert] = useState<{ ounces: number } | null>(null);
   const payDirtTimerRef = useRef<NodeJS.Timeout | null>(null);
   const restartHandlerRef = useRef<(() => void) | null>(null);
@@ -213,33 +215,52 @@ export default function App() {
     const myProspectorId = territoryClaims.getOrCreateProspectorId();
     const unsub = territoryClaims.subscribe((claims) => {
       setRegisteredClaims(claims);
-      const myClaim = claims.find((c) => c.ownerId === myProspectorId);
-      if (myClaim) {
+      const myClaims = claims.filter((c) => c.ownerId === myProspectorId);
+      if (myClaims.length > 0) {
         setPlayerState((prev) => {
-          if (
-            !prev.activeClaim ||
-            prev.activeClaim.name !== myClaim.name ||
-            prev.activeClaim.extractedGold !== myClaim.extractedGold ||
-            prev.activeClaim.blocksDug !== myClaim.blocksDug ||
-            prev.activeClaim.forSale !== myClaim.forSale
-          ) {
-            const updatedClaim: ClaimInfo = {
-              name: myClaim.name,
-              position: { x: myClaim.x, y: getTerrainHeight(myClaim.x, myClaim.z), z: myClaim.z },
-              size: myClaim.radius || 40,
-              isClaimed: true,
-              extractedGold: myClaim.extractedGold || 0,
-              blocksDug: myClaim.blocksDug || 0,
-              ownerId: myClaim.ownerId,
-              ownerName: myClaim.ownerName,
-              stakedAt: myClaim.stakedAt,
-              forSale: myClaim.forSale,
-            };
-            safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(updatedClaim));
-            return {
-              ...prev,
-              activeClaim: updatedClaim,
-            };
+          let myClaim: TerritoryClaim | undefined;
+          if (prev.activeClaim?.id) {
+            myClaim = myClaims.find((c) => c.id === prev.activeClaim?.id);
+          }
+          if (!myClaim && prev.activeClaim?.position) {
+            myClaim = myClaims.find(
+              (c) => Math.hypot(c.x - prev.activeClaim!.position.x, c.z - prev.activeClaim!.position.z) < 5
+            );
+          }
+          if (!myClaim) {
+            // Pick most recent by stakedAt
+            myClaim = myClaims.slice().sort((a, b) => (b.stakedAt || 0) - (a.stakedAt || 0))[0];
+          }
+
+          if (myClaim) {
+            const hasChanged =
+              !prev.activeClaim ||
+              prev.activeClaim.id !== myClaim.id ||
+              prev.activeClaim.name !== myClaim.name ||
+              prev.activeClaim.extractedGold !== myClaim.extractedGold ||
+              prev.activeClaim.blocksDug !== myClaim.blocksDug ||
+              prev.activeClaim.forSale !== myClaim.forSale;
+
+            if (hasChanged) {
+              const updatedClaim: ClaimInfo = {
+                id: myClaim.id,
+                name: myClaim.name,
+                position: { x: myClaim.x, y: getTerrainHeight(myClaim.x, myClaim.z), z: myClaim.z },
+                size: myClaim.radius || 40,
+                isClaimed: true,
+                extractedGold: myClaim.extractedGold || 0,
+                blocksDug: myClaim.blocksDug || 0,
+                ownerId: myClaim.ownerId,
+                ownerName: myClaim.ownerName,
+                stakedAt: myClaim.stakedAt,
+                forSale: myClaim.forSale,
+              };
+              safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(updatedClaim));
+              return {
+                ...prev,
+                activeClaim: updatedClaim,
+              };
+            }
           }
           return prev;
         });
@@ -1200,41 +1221,50 @@ export default function App() {
           }
         }}
         onStakeClaim={async (name, pos) => {
-          soundEngine.playHammerStake();
           setPayDirtAlert(null);
           const ownerId = territoryClaims.getOrCreateProspectorId();
           const ownerName = territoryClaims.getProspectorName();
-          const claimObj: ClaimInfo = {
+          const res = await territoryClaims.stakeClaim({
             name,
             position: pos,
-            size: 40,
-            isClaimed: true,
-            extractedGold: playerStateRef.current.activeClaim?.extractedGold || 0,
-            blocksDug: playerStateRef.current.activeClaim?.blocksDug || 0,
             ownerId,
             ownerName,
-            stakedAt: Date.now(),
+          });
+          if (!res.success) {
+            soundEngine.playGogglesClick(false);
+            showBanner(res.message || 'Cannot stake claim: Ground overlaps registered territory!');
+            return;
+          }
+          soundEngine.playHammerStake();
+          const actualClaim = res.claim;
+          const assignedName = actualClaim?.name || name;
+          const claimObj: ClaimInfo = {
+            id: actualClaim?.id,
+            name: assignedName,
+            position: pos,
+            size: actualClaim?.radius || 40,
+            isClaimed: true,
+            extractedGold: actualClaim?.extractedGold || 0,
+            blocksDug: actualClaim?.blocksDug || 0,
+            ownerId,
+            ownerName,
+            stakedAt: actualClaim?.stakedAt || Date.now(),
           };
           safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(claimObj));
           setPlayerState((prev) => ({
             ...prev,
             activeClaim: claimObj,
           }));
-          await territoryClaims.stakeClaim({
-            name,
-            position: pos,
-            ownerId,
-            ownerName,
-          });
-          showBanner(`Claim "${name}" Legally Staked and Registered!`);
-          setClaimPrompt({ name, position: pos });
+          showBanner(`Claim "${assignedName}" Legally Staked and Registered!`);
+          setClaimPrompt({ id: actualClaim?.id, name: assignedName, position: pos });
         }}
         onBuildStructure={(_type, _pos, _rot) => {
           soundEngine.playConstruct();
           setIsCampModalOpen(false);
           setIsBuilderOpen(false);
         }}
-        onOpenDeedModal={(_claim) => {
+        onOpenDeedModal={(claim) => {
+          if (claim) setSelectedDeedClaim(claim as any);
           setIsClaimDeedOpen(true);
         }}
         onOpenBuilder={() => setIsBuilderOpen(true)}
@@ -1397,7 +1427,11 @@ export default function App() {
         onOpenGuidebook={() => setIsGuidebookOpen(true)}
         onOpenBuilder={() => setIsBuilderOpen(true)}
         onOpenCamp={() => setIsCampModalOpen(true)}
-        onOpenClaimDeed={() => setIsClaimDeedOpen(true)}
+        onOpenClaimDeed={(claim) => {
+          if (claim) setSelectedDeedClaim(claim as any);
+          setIsClaimDeedOpen(true);
+        }}
+        registeredClaims={registeredClaims}
         activeBuildingType={activeBuildingType}
         onRotateBlueprint={() => {
           window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
@@ -1696,23 +1730,38 @@ export default function App() {
       {/* Mining Claim Deed & Certificate Modal */}
       <ClaimDeedModal
         isOpen={isClaimDeedOpen}
-        onClose={() => setIsClaimDeedOpen(false)}
-        claim={playerState.activeClaim}
+        onClose={() => {
+          setIsClaimDeedOpen(false);
+          setSelectedDeedClaim(null);
+        }}
+        claim={selectedDeedClaim || playerState.activeClaim}
         playerState={playerState}
         builtStructures={playerState.builtStructures || []}
         goldCount={playerState.goldFound}
         blocksDug={playerState.blocksDug}
-        onRenameClaim={(newName) => {
+        onRenameClaim={async (newName) => {
+          const trimmed = newName.trim().substring(0, 64);
+          if (!trimmed) return;
+          const activeId = playerState.activeClaim?.id;
+          if (activeId) {
+            await territoryClaims.renameClaim(activeId, trimmed);
+          } else {
+            const myProspectorId = territoryClaims.getOrCreateProspectorId();
+            const myClaim = territoryClaims.getPlayerClaim(myProspectorId);
+            if (myClaim) {
+              await territoryClaims.renameClaim(myClaim.id, trimmed);
+            }
+          }
           setPlayerState((prev) => {
             if (!prev.activeClaim) return prev;
-            const updated = { ...prev.activeClaim, name: newName };
+            const updated = { ...prev.activeClaim, name: trimmed };
             safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(updated));
             return {
               ...prev,
               activeClaim: updated,
             };
           });
-          showBanner(`Claim title recorded as: "${newName}"`);
+          showBanner(`Claim title recorded as: "${trimmed}"`);
         }}
         onOpenBuilder={() => {
           setIsClaimDeedOpen(false);
@@ -1725,13 +1774,30 @@ export default function App() {
         onTradeOfferResponse={handleTradeOfferResponse}
       />
 
-      {/* Pop-up Dialog when a Claim is Staked: Prompt to build a mine */}
+      {/* Pop-up Dialog when a Claim is Staked: Prompt to build a mine & customize title */}
       {claimPrompt && (
         <ClaimStakedModal
           isOpen={Boolean(claimPrompt)}
+          claimId={claimPrompt.id}
           claimName={claimPrompt.name}
           position={claimPrompt.position}
           onClose={() => setClaimPrompt(null)}
+          onRenameClaim={async (newName) => {
+            const trimmed = newName.trim().substring(0, 64);
+            if (!trimmed) return;
+            const targetId = claimPrompt.id || playerState.activeClaim?.id;
+            if (targetId) {
+              await territoryClaims.renameClaim(targetId, trimmed);
+            }
+            setPlayerState((prev) => {
+              if (!prev.activeClaim) return prev;
+              const updated = { ...prev.activeClaim, name: trimmed };
+              safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(updated));
+              return { ...prev, activeClaim: updated };
+            });
+            setClaimPrompt((prev) => (prev ? { ...prev, name: trimmed } : null));
+            showBanner(`Claim deed title registered as: "${trimmed}"`);
+          }}
           onOpenBuilder={() => {
             setClaimPrompt(null);
             setIsBuilderOpen(true);

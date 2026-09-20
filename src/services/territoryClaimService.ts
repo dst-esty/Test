@@ -657,6 +657,26 @@ export class TerritoryClaimService {
     }
   }
 
+  // Rename a registered claim and persist to memory, localStorage, and Firestore
+  public async renameClaim(claimId: string, newName: string): Promise<boolean> {
+    const claim = this.claimsCache.get(claimId);
+    if (!claim) return false;
+    const sanitized = newName.trim().substring(0, 64) || 'Prospector Claim';
+    claim.name = sanitized;
+    this.claimsCache.set(claimId, claim);
+    this.saveToLocalStorage(Array.from(this.claimsCache.values()));
+    this.notifyClaimsSubscribers();
+
+    try {
+      await updateDoc(doc(db, 'territory_claims', claimId), {
+        name: sanitized,
+      });
+    } catch (err) {
+      console.warn('[TerritoryClaimService] Non-fatal rename notice:', err);
+    }
+    return true;
+  }
+
   // Record an infringement (wildcatting on someone else's land or mining their ore)
   public async reportInfringement(params: {
     claim: TerritoryClaim;

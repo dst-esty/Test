@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BuiltStructure, ClaimInfo, MineStructureType, PortalExcavationState, StructureBlueprint, TerritoryClaim, Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
 import { MountainDustParticleSystem } from './mountainDustParticles';
+import { createClaimNoticePlateTexture, createClaimBillboardSprite } from './claimMarkerTextures';
 
 export interface StructurePlacementValidationContext {
   getTerrainHeight: (x: number, z: number) => number;
@@ -432,10 +433,11 @@ export class MineBuildingSystem {
   // CLAIM STAKING ENGINE
   // ==========================================
 
-  public stakeClaim(name: string, pos: Vector3D, size = 42): ClaimInfo {
+  public stakeClaim(name: string, pos: Vector3D, size = 42, id?: string): ClaimInfo {
     this.claimGroup.clear();
 
     const claim: ClaimInfo = {
+      id: id || `claim_${Math.round(pos.x)}_${Math.round(pos.z)}_${Date.now().toString(36)}`,
       isClaimed: true,
       name: name || "Prospector's Lucky Strike",
       position: { x: pos.x, y: this.getTerrainHeight(pos.x, pos.z), z: pos.z },
@@ -493,10 +495,40 @@ export class MineBuildingSystem {
     centerPost.castShadow = true;
     monument.add(centerPost);
 
-    // Engraved Brass Legal Notice Plate
-    const noticePlate = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.8, 0.06), brassMat);
-    noticePlate.position.set(0, 2.1, 0.2);
-    monument.add(noticePlate);
+    // Engraved Brass Legal Notice Plate with procedural high-contrast text
+    const plateTexture = createClaimNoticePlateTexture({
+      name: claim.name,
+      ownerName: claim.ownerName || 'You',
+      isOwner: true,
+      stakedAt: claim.stakedAt || Date.now(),
+      x: cx,
+      z: cz,
+      elevation: cy,
+    });
+    const customPlateMat = new THREE.MeshStandardMaterial({
+      map: plateTexture,
+      metalness: 0.65,
+      roughness: 0.32,
+    });
+
+    // Front plate
+    const noticePlateFront = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.72, 0.05), customPlateMat);
+    noticePlateFront.position.set(0, 2.05, 0.2);
+    monument.add(noticePlateFront);
+
+    // Back plate for 360-degree readability
+    const noticePlateBack = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.72, 0.05), customPlateMat);
+    noticePlateBack.position.set(0, 2.05, -0.2);
+    noticePlateBack.rotation.y = Math.PI;
+    monument.add(noticePlateBack);
+
+    // Floating 3D billboard sprite above post
+    const billboard = createClaimBillboardSprite({
+      name: claim.name,
+      ownerName: claim.ownerName || 'You',
+      isOwner: true,
+    });
+    monument.add(billboard);
 
     // Fluttering Gold/Yellow Survey Pennant
     const flagGeo = new THREE.BufferGeometry();
@@ -586,16 +618,25 @@ export class MineBuildingSystem {
     });
 
     claims.forEach((claim) => {
-      const isOwner = localProspectorId && claim.ownerId === localProspectorId;
+      const isOwner = Boolean(localProspectorId && claim.ownerId === localProspectorId);
       if (isOwner) {
-        this.currentClaim = {
-          isClaimed: true,
-          name: claim.name,
-          position: { x: claim.x, y: this.getTerrainHeight(claim.x, claim.z), z: claim.z },
-          size: claim.radius || 40,
-          extractedGold: claim.extractedGold || 0,
-          blocksDug: claim.blocksDug || 0,
-        };
+        // If we already have an active claim, prefer keeping the active one unless this claim matches its ID or this is the first one found
+        const shouldSet =
+          !this.currentClaim ||
+          this.currentClaim.id === claim.id ||
+          (!this.currentClaim.id && this.currentClaim.name === claim.name);
+
+        if (shouldSet) {
+          this.currentClaim = {
+            id: claim.id,
+            isClaimed: true,
+            name: claim.name,
+            position: { x: claim.x, y: this.getTerrainHeight(claim.x, claim.z), z: claim.z },
+            size: claim.radius || 40,
+            extractedGold: claim.extractedGold || 0,
+            blocksDug: claim.blocksDug || 0,
+          };
+        }
       }
       const ribbonColor = isOwner ? 0xffd23f : 0xef4444; // Yellow for player, red warning for rival prospector
       const ribbonMat = new THREE.MeshStandardMaterial({
@@ -626,9 +667,45 @@ export class MineBuildingSystem {
       centerPost.position.y = 1.4;
       monument.add(centerPost);
 
-      const noticePlate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.05), brassMat);
-      noticePlate.position.set(0, 1.8, 0.18);
-      monument.add(noticePlate);
+      // Engraved Brass Legal Notice Plate with procedural high-contrast text
+      const plateTexture = createClaimNoticePlateTexture({
+        name: claim.name,
+        ownerName: claim.ownerName,
+        isOwner,
+        stakedAt: claim.stakedAt,
+        x: cx,
+        z: cz,
+        elevation: cy,
+        forSale: claim.forSale,
+        priceDollars: claim.priceDollars,
+        priceGoldOunces: claim.priceGoldOunces,
+      });
+      const customPlateMat = new THREE.MeshStandardMaterial({
+        map: plateTexture,
+        metalness: 0.65,
+        roughness: 0.32,
+      });
+
+      // Front plate
+      const noticePlateFront = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7, 0.05), customPlateMat);
+      noticePlateFront.position.set(0, 1.85, 0.18);
+      monument.add(noticePlateFront);
+
+      // Back plate
+      const noticePlateBack = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7, 0.05), customPlateMat);
+      noticePlateBack.position.set(0, 1.85, -0.18);
+      noticePlateBack.rotation.y = Math.PI;
+      monument.add(noticePlateBack);
+
+      // Floating 3D billboard sprite above post
+      const billboard = createClaimBillboardSprite({
+        name: claim.name,
+        ownerName: claim.ownerName,
+        isOwner,
+        forSale: claim.forSale,
+        priceDollars: claim.priceDollars,
+      });
+      monument.add(billboard);
 
       // Pennant flag
       const flagGeo = new THREE.BufferGeometry();
