@@ -16,7 +16,7 @@ import {
   ZoomIn,
 } from 'lucide-react';
 import { Landmark, Vector3D, ClaimInfo } from '../types';
-import { TerritoryClaim } from '../services/territoryClaimService';
+import { TerritoryClaim, territoryClaims as territoryClaimsService } from '../services/territoryClaimService';
 
 interface MapModalProps {
   isOpen: boolean;
@@ -24,7 +24,7 @@ interface MapModalProps {
   playerPosition: Vector3D;
   playerYaw: number;
   landmarks: Landmark[];
-  onFastTravel?: (target: Vector3D) => void;
+  onFastTravel?: (target: Vector3D, label?: string) => void;
   activeClaim?: ClaimInfo | null;
   territoryClaims?: TerritoryClaim[];
 }
@@ -43,6 +43,57 @@ export const MapModal: React.FC<MapModalProps> = ({
 }) => {
   const [surveyMode, setSurveyMode] = useState<MapSurveyMode>('wilderness');
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
+
+  const localProspectorId = territoryClaimsService.getOrCreateProspectorId();
+
+  const displayList = React.useMemo(() => {
+    const list: {
+      id: string;
+      name: string;
+      x: number;
+      z: number;
+      radius: number;
+      ownerName: string;
+      extractedGold?: number;
+      isPlayer: boolean;
+    }[] = [];
+
+    if (activeClaim?.isClaimed && activeClaim.position) {
+      list.push({
+        id: activeClaim.id || 'player_active_claim',
+        name: activeClaim.name,
+        x: activeClaim.position.x,
+        z: activeClaim.position.z,
+        radius: activeClaim.size || 40,
+        ownerName: activeClaim.ownerName || 'You',
+        extractedGold: activeClaim.extractedGold || 0,
+        isPlayer: true,
+      });
+    }
+
+    territoryClaims.forEach((tc) => {
+      const isAlreadyAdded = list.some(
+        (d) => Math.abs(d.x - tc.x) < 2 && Math.abs(d.z - tc.z) < 2
+      );
+      if (!isAlreadyAdded) {
+        const isOwnedByPlayer = tc.ownerId === localProspectorId || tc.ownerName === 'You';
+        list.push({
+          id: tc.id,
+          name: tc.name,
+          x: tc.x,
+          z: tc.z,
+          radius: tc.radius || 40,
+          ownerName: tc.ownerName,
+          extractedGold: tc.extractedGold || 0,
+          isPlayer: isOwnedByPlayer,
+        });
+      }
+    });
+
+    return list;
+  }, [activeClaim, territoryClaims, localProspectorId]);
+
+  const playerOwnedClaims = displayList.filter((c) => c.isPlayer);
 
   if (!isOpen) return null;
 
@@ -535,116 +586,74 @@ export const MapModal: React.FC<MapModalProps> = ({
             })}
 
             {/* Territory Claims Boundary Circles & Staked Markers */}
-            {(() => {
-              const displayList: {
-                id: string;
-                name: string;
-                x: number;
-                z: number;
-                radius: number;
-                ownerName: string;
-                extractedGold?: number;
-                isPlayer: boolean;
-              }[] = [];
+            {displayList.map((claim) => {
+              const { px, py, isInside } = toMapCoords(claim.x, claim.z);
+              if (!isInside && surveyMode === 'local') return null;
 
-              if (activeClaim?.isClaimed && activeClaim.position) {
-                displayList.push({
-                  id: 'player_active_claim',
-                  name: activeClaim.name,
-                  x: activeClaim.position.x,
-                  z: activeClaim.position.z,
-                  radius: activeClaim.size || 40,
-                  ownerName: activeClaim.ownerName || 'You',
-                  extractedGold: activeClaim.extractedGold || 0,
-                  isPlayer: true,
-                });
-              }
+              const spanX = bounds.maxX - bounds.minX;
+              const visualRadiusPx = Math.max(12, (claim.radius / spanX) * svgSize);
 
-              territoryClaims.forEach((tc) => {
-                const isAlreadyAdded = displayList.some(
-                  (d) => Math.abs(d.x - tc.x) < 2 && Math.abs(d.z - tc.z) < 2
-                );
-                if (!isAlreadyAdded) {
-                  displayList.push({
-                    id: tc.id,
-                    name: tc.name,
-                    x: tc.x,
-                    z: tc.z,
-                    radius: tc.radius || 40,
-                    ownerName: tc.ownerName,
-                    extractedGold: tc.extractedGold || 0,
-                    isPlayer: false,
-                  });
-                }
-              });
+              return (
+                <React.Fragment key={claim.id}>
+                  {/* Survey Boundary Circle */}
+                  <div
+                    style={{
+                      left: `${px}px`,
+                      top: `${py}px`,
+                      width: `${visualRadiusPx * 2}px`,
+                      height: `${visualRadiusPx * 2}px`,
+                    }}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-dashed pointer-events-none z-10 transition-all ${
+                      claim.isPlayer
+                        ? 'border-amber-600 bg-amber-500/15 shadow-[0_0_15px_rgba(217,119,6,0.3)]'
+                        : 'border-stone-600/60 bg-stone-700/10'
+                    }`}
+                  />
 
-              return displayList.map((claim) => {
-                const { px, py, isInside } = toMapCoords(claim.x, claim.z);
-                if (!isInside && surveyMode === 'local') return null;
-
-                const spanX = bounds.maxX - bounds.minX;
-                const visualRadiusPx = Math.max(12, (claim.radius / spanX) * svgSize);
-
-                return (
-                  <React.Fragment key={claim.id}>
-                    {/* Survey Boundary Circle */}
+                  {/* Claim Center Post Pin */}
+                  <div
+                    style={{ left: `${px}px`, top: `${py}px` }}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 group z-25 ${
+                      claim.isPlayer ? 'cursor-pointer' : 'cursor-default'
+                    }`}
+                    onClick={() => {
+                      if (onFastTravel && claim.isPlayer) {
+                        onFastTravel({ x: claim.x, y: playerPosition.y, z: claim.z }, claim.name);
+                      }
+                    }}
+                  >
                     <div
-                      style={{
-                        left: `${px}px`,
-                        top: `${py}px`,
-                        width: `${visualRadiusPx * 2}px`,
-                        height: `${visualRadiusPx * 2}px`,
-                      }}
-                      className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-dashed pointer-events-none z-10 transition-all ${
+                      className={`w-6 h-6 rounded-full flex items-center justify-center shadow-md transition-transform group-hover:scale-125 ${
                         claim.isPlayer
-                          ? 'border-amber-600 bg-amber-500/15 shadow-[0_0_15px_rgba(217,119,6,0.3)]'
-                          : 'border-stone-600/60 bg-stone-700/10'
+                          ? 'bg-amber-600 text-stone-950 ring-2 ring-amber-300 font-bold'
+                          : 'bg-[#7c5332] text-amber-100 ring-1 ring-amber-900/60'
                       }`}
-                    />
-
-                    {/* Claim Center Post Pin */}
-                    <div
-                      style={{ left: `${px}px`, top: `${py}px` }}
-                      className="absolute -translate-x-1/2 -translate-y-1/2 group cursor-pointer z-25"
-                      onClick={() => {
-                        if (onFastTravel && claim.isPlayer) {
-                          onFastTravel({ x: claim.x, y: playerPosition.y, z: claim.z });
-                        }
-                      }}
                     >
-                      <div
-                        className={`w-6 h-6 rounded-full flex items-center justify-center shadow-md transition-transform group-hover:scale-125 ${
-                          claim.isPlayer
-                            ? 'bg-amber-600 text-stone-950 ring-2 ring-amber-300 font-bold'
-                            : 'bg-[#7c5332] text-amber-100 ring-1 ring-amber-900/60'
-                        }`}
-                      >
-                        <Pickaxe className="w-3.5 h-3.5" />
-                      </div>
+                      <Pickaxe className="w-3.5 h-3.5" />
+                    </div>
 
-                      {/* Tooltip */}
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-stone-900/95 text-stone-100 text-[11px] font-serif px-2.5 py-1.5 rounded-lg shadow-xl whitespace-nowrap z-30 border border-amber-600/40">
-                        <div className="font-bold text-amber-300 flex items-center gap-1.5">
-                          <Pickaxe className="w-3 h-3 text-amber-400" />
-                          <span>{claim.name}</span>
-                          {claim.isPlayer && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                              YOUR CLAIM
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-stone-400 font-mono mt-0.5">
-                          Owner: {claim.ownerName} • Yield: {claim.extractedGold?.toFixed(1) || '0.0'} oz gold
-                        </div>
-                        {claim.isPlayer && onFastTravel && (
-                          <div className="text-[9px] text-amber-400 font-mono mt-0.5">Click to Travel to Claim</div>
+                    {/* Tooltip */}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-stone-900/95 text-stone-100 text-[11px] font-serif px-2.5 py-1.5 rounded-lg shadow-xl whitespace-nowrap z-30 border border-amber-600/40">
+                      <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                        <Pickaxe className="w-3 h-3 text-amber-400" />
+                        <span>{claim.name}</span>
+                        {claim.isPlayer && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            YOUR CLAIM
+                          </span>
                         )}
                       </div>
+                      <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+                        Owner: {claim.ownerName} • Yield: {claim.extractedGold?.toFixed(1) || '0.0'} oz gold
+                      </div>
+                      {claim.isPlayer && onFastTravel && (
+                        <div className="text-[9px] text-amber-400 font-mono mt-0.5">Click to Travel to Claim</div>
+                      )}
                     </div>
-                  </React.Fragment>
-                );
-              });
-            })()}
+                  </div>
+                </React.Fragment>
+              );
+            })}
 
             {/* Player Position Pin */}
             <div
@@ -663,6 +672,41 @@ export const MapModal: React.FC<MapModalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Quick Travel to Your Owned Claims */}
+        {playerOwnedClaims.length > 0 && (
+          <div className="mt-2.5 p-2 bg-[#ede1c2] border border-[#bfa37b] rounded-lg flex items-center justify-between flex-wrap gap-2 text-xs font-serif shadow-sm">
+            <div className="flex items-center gap-2 text-[#5c3a21] font-bold">
+              <Pickaxe className="w-4 h-4 text-amber-700" />
+              <span>Your Mining Claims ({playerOwnedClaims.length}):</span>
+            </div>
+            <div className="flex items-center flex-wrap gap-1.5">
+              {playerOwnedClaims.map((c) => {
+                const distToPlayer = Math.round(
+                  Math.hypot(playerPosition.x - c.x, playerPosition.z - c.z)
+                );
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      if (onFastTravel) {
+                        onFastTravel({ x: c.x, y: playerPosition.y, z: c.z }, c.name);
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-[#8c6239] hover:bg-[#6e4e30] text-amber-100 rounded-md font-sans text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all hover:scale-105 cursor-pointer"
+                    title={`Fast-travel directly to ${c.name}`}
+                  >
+                    <Navigation className="w-3 h-3 text-amber-300 fill-amber-300" />
+                    <span>{c.name}</span>
+                    <span className="text-[10px] text-amber-300/80 font-mono">
+                      ({distToPlayer > 1000 ? `${(distToPlayer / 1000).toFixed(1)}km` : `${distToPlayer}m`})
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Legend / Footer */}
         <div className="mt-3 pt-3 border-t border-[#8c6239]/40 flex flex-wrap items-center justify-between gap-3 text-xs font-serif">

@@ -19,8 +19,9 @@ import {
   Send,
   Trash2,
   HelpCircle,
+  Navigation,
 } from 'lucide-react';
-import { BuiltStructure, ClaimInfo, PlayerState, TerritoryClaim, ClaimTradeOffer } from '../types';
+import { BuiltStructure, ClaimInfo, PlayerState, TerritoryClaim, ClaimTradeOffer, Vector3D } from '../types';
 import { territoryClaims } from '../services/territoryClaimService';
 import { soundEngine } from '../audio/soundEffects';
 
@@ -32,6 +33,7 @@ interface ClaimDeedModalProps {
   builtStructures?: BuiltStructure[];
   goldCount?: number;
   blocksDug?: number;
+  onFastTravel?: (pos: Vector3D, label?: string) => void;
   onRenameClaim?: (newName: string) => void;
   onUpdateClaimName?: (newName: string) => void;
   onOpenBuilder?: () => void;
@@ -50,6 +52,7 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
   builtStructures = [],
   goldCount,
   blocksDug,
+  onFastTravel,
   onRenameClaim,
   onUpdateClaimName,
   onOpenBuilder,
@@ -515,8 +518,20 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
                 </div>
 
                 {/* Footer Controls */}
-                <div className="flex items-center justify-between pt-3 border-t-2 border-[#b5956c] font-sans text-xs">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between pt-3 border-t-2 border-[#b5956c] font-sans text-xs flex-wrap gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {onFastTravel && claim && (
+                      <button
+                        onClick={() => {
+                          onFastTravel(claimCoords, claim.name);
+                          onClose();
+                        }}
+                        className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-emerald-50 font-bold rounded-lg shadow cursor-pointer flex items-center gap-1.5 transition-all hover:scale-105"
+                        title="Fast-travel directly to this claim stake"
+                      >
+                        <Navigation className="w-3.5 h-3.5 fill-emerald-200 text-emerald-200" /> Fast-Travel to Claim
+                      </button>
+                    )}
                     <button
                       onClick={() => setActiveTab('sell')}
                       className="px-4 py-2 bg-[#8b6540] hover:bg-[#6c4d2e] text-[#f7eedc] font-bold rounded-lg shadow cursor-pointer flex items-center gap-1.5"
@@ -746,6 +761,21 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
                             <div className="text-right">
                               <span className="font-bold text-emerald-900 text-sm block">${priceDollars} USD</span>
                               <span className="text-[10px] text-stone-600 block">or {priceGold} oz gold</span>
+                            </div>
+                          )}
+
+                          {isOwnClaim && onFastTravel && (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => {
+                                  onFastTravel({ x: c.x, y: 0, z: c.z }, c.name);
+                                  onClose();
+                                }}
+                                className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-emerald-100 font-bold rounded cursor-pointer transition text-[11px] flex items-center gap-1 shadow"
+                                title="Fast-travel directly to this claim stake"
+                              >
+                                <Navigation className="w-3 h-3 fill-emerald-100 text-emerald-100" /> Travel to Claim
+                              </button>
                             </div>
                           )}
 

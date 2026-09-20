@@ -301,6 +301,12 @@ export class TerritoryClaimService {
     return Array.from(this.claimsCache.values()).find((c) => c.ownerId === pId);
   }
 
+  // Get all claims owned by the local or specified prospector
+  public getPlayerClaims(prospectorId?: string): TerritoryClaim[] {
+    const pId = prospectorId || this.getOrCreateProspectorId();
+    return Array.from(this.claimsCache.values()).filter((c) => c.ownerId === pId);
+  }
+
   // Delete/abandon a claim
   public async deleteClaim(claimId: string): Promise<boolean> {
     this.claimsCache.delete(claimId);
