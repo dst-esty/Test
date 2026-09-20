@@ -84,16 +84,24 @@ interface MelodyNote {
   vibratoDelay?: number;
 }
 
+// Volume constant for gentle background frontier music
+const QUIET_ATMOSPHERE_VOLUME = 0.16;
+
 class WesternMusicEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private isPlaying: boolean = false;
-  private isMuted: boolean = false;
-  private volume: number = 0.55;
+  private isMuted: boolean = true; // Muted by default on page load per user request
+  private volume: number = QUIET_ATMOSPHERE_VOLUME; // Quiet gentle volume
   private currentTrackId: WesternTrackId = 'campfire';
   private loopTimer: number | null = null;
   private currentStep: number = 0;
   private listeners: Array<() => void> = [];
+  // Dawn/dusk diurnal management
+  private diurnalTime: number = 12;
+  private inDiurnalWindow: boolean = false;
+  private diurnalPhaseName: 'dawn' | 'dusk' | 'none' = 'none';
+  private userManualOverride: boolean = false;
 
   constructor() {
     // Pick a random track on startup for continuous playlist shuffle
@@ -146,6 +154,14 @@ class WesternMusicEngine {
     return this.volume;
   }
 
+  public getDiurnalStatus(): { inWindow: boolean; phase: 'dawn' | 'dusk' | 'none'; timeOfDay: number } {
+    return {
+      inWindow: this.inDiurnalWindow,
+      phase: this.diurnalPhaseName,
+      timeOfDay: this.diurnalTime,
+    };
+  }
+
   public getCurrentTrack(): WesternTrackInfo {
     return (
       WESTERN_TRACKS.find((t) => t.id === this.currentTrackId) || WESTERN_TRACKS[0]
@@ -155,24 +171,100 @@ class WesternMusicEngine {
   public setVolume(vol: number) {
     this.volume = Math.max(0, Math.min(1, vol));
     if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setValueAtTime(
-        this.isPlaying && !this.isMuted ? this.volume : 0,
-        this.ctx.currentTime
-      );
+      const targetGain = this.isPlaying && !this.isMuted ? this.volume : 0;
+      this.masterGain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.1);
     }
     this.notify();
   }
 
   public toggleMute(): boolean {
     this.isMuted = !this.isMuted;
+    this.userManualOverride = true; // User explicitly intervened
     if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setValueAtTime(
-        this.isPlaying && !this.isMuted ? this.volume : 0,
-        this.ctx.currentTime
-      );
+      const targetGain = this.isPlaying && !this.isMuted ? this.volume : 0;
+      this.masterGain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.15);
     }
     this.notify();
     return this.isMuted;
+  }
+
+  public unmute(): void {
+    if (this.isMuted) {
+      this.isMuted = false;
+      this.userManualOverride = true;
+      if (this.masterGain && this.ctx) {
+        this.masterGain.gain.setTargetAtTime(this.isPlaying ? this.volume : 0, this.ctx.currentTime, 0.15);
+      }
+      this.notify();
+    }
+  }
+
+  public mute(): void {
+    if (!this.isMuted) {
+      this.isMuted = true;
+      this.userManualOverride = true;
+      if (this.masterGain && this.ctx) {
+        this.masterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.15);
+      }
+      this.notify();
+    }
+  }
+
+  /**
+   * Called continuously by diurnal time ticker in game.
+   * Handles dawn (5:30 - 7:00) and dusk (18:00 - 19:30) limited acoustic plays.
+   * When time enters dawn or dusk and user hasn't manually muted,
+   * it gently unmutes at quiet volume (0.16) and fades in.
+   * When dawn/dusk ends, it softly fades out and mutes.
+   */
+  public updateDiurnalTime(timeOfDay: number) {
+    this.diurnalTime = timeOfDay;
+
+    // Dawn window: 5.4 to 6.8 (approx 5:24 AM to 6:48 AM)
+    const isDawn = timeOfDay >= 5.4 && timeOfDay <= 6.8;
+    // Dusk window: 18.0 to 19.5 (approx 6:00 PM to 7:30 PM sunset)
+    const isDusk = timeOfDay >= 18.0 && timeOfDay <= 19.5;
+    const inWindow = isDawn || isDusk;
+    const phase: 'dawn' | 'dusk' | 'none' = isDawn ? 'dawn' : isDusk ? 'dusk' : 'none';
+
+    const windowChanged = inWindow !== this.inDiurnalWindow || phase !== this.diurnalPhaseName;
+    this.inDiurnalWindow = inWindow;
+    this.diurnalPhaseName = phase;
+
+    // Diurnal automation:
+    // If not manually overridden by the user, only play quietly during dawn & dusk
+    if (!this.userManualOverride) {
+      if (inWindow) {
+        // Unmute and start playback if entering window
+        if (this.isMuted || !this.isPlaying) {
+          this.isMuted = false;
+          this.volume = QUIET_ATMOSPHERE_VOLUME;
+          this.initContext();
+          if (!this.isPlaying) {
+            this.isPlaying = true;
+            this.currentStep = 0;
+            this.scheduleNextBar();
+          }
+          if (this.masterGain && this.ctx) {
+            this.masterGain.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.8);
+          }
+          this.notify();
+        }
+      } else {
+        // Outside dawn and dusk, fade out and mute
+        if (!this.isMuted) {
+          this.isMuted = true;
+          if (this.masterGain && this.ctx) {
+            this.masterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 1.2);
+          }
+          this.notify();
+        }
+      }
+    } else {
+      if (windowChanged) {
+        this.notify();
+      }
+    }
   }
 
   public switchTrack(trackId: WesternTrackId) {

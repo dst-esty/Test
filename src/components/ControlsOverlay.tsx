@@ -431,6 +431,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   }, []);
 
   const isMusicActive = musicPlaying && !musicMuted;
+  const diurnalStatus = westernMusic.getDiurnalStatus();
   const handleToggleMusic = () => {
     if (isMusicActive) {
       westernMusic.toggleMute();
@@ -1253,8 +1254,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           }`}
           title={
             isMusicActive
-              ? `Western Music: ${currentTrack.title} (Playing) - Click to silence`
-              : 'Western Music (Silenced) - Click to play'
+              ? `Western Music: ${currentTrack.title} (${diurnalStatus.inWindow ? `${diurnalStatus.phase === 'dawn' ? 'Dawn' : 'Dusk'} Serenade - Quiet` : 'Quiet'}) - Click to silence`
+              : `Western Music (Muted by default • Plays quietly at Dawn & Dusk) - Click to play`
           }
           aria-label="Western Music"
         >

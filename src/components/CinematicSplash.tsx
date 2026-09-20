@@ -9,10 +9,16 @@ interface CinematicSplashProps {
 
 export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame }) => {
   const [phase, setPhase] = useState<'studio' | 'title' | 'menu'>('studio');
-  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => westernMusic.getIsMuted());
   const [hasInteracted, setHasInteracted] = useState<boolean>(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return westernMusic.subscribe(() => {
+      setIsAudioMuted(westernMusic.getIsMuted());
+    });
+  }, []);
 
   // Play deep cinematic orchestral brass / brass chord & wind upon user interaction or start
   const playCinematicSting = useCallback(() => {
@@ -80,9 +86,6 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
     // After title reveals, settle into the interactive title menu
     const timer2 = setTimeout(() => {
       setPhase('menu');
-      if (!westernMusic.getIsPlaying()) {
-        westernMusic.play();
-      }
     }, 6200);
 
     return () => {
@@ -214,23 +217,20 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
   // Quick Skip or Direct Enter
   const handleStartGame = useCallback(() => {
     soundEngine.startAmbiance();
-    if (!westernMusic.getIsPlaying() && !isAudioMuted) {
-      westernMusic.play();
-    }
     soundEngine.playGogglesClick(true);
     onEnterGame();
-  }, [onEnterGame, isAudioMuted]);
+  }, [onEnterGame]);
 
   const handleSkipToMenu = useCallback(() => {
     setPhase('menu');
     setHasInteracted(true);
     playCinematicSting();
-    if (!westernMusic.getIsPlaying() && !isAudioMuted) {
-      westernMusic.play();
-    }
-  }, [playCinematicSting, isAudioMuted]);
+  }, [playCinematicSting]);
 
   const handleToggleAudio = useCallback(() => {
+    if (!westernMusic.getIsPlaying()) {
+      westernMusic.play();
+    }
     const nextMute = westernMusic.toggleMute();
     setIsAudioMuted(nextMute);
   }, []);

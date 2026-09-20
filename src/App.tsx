@@ -902,6 +902,11 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Diurnal acoustic serenade: Synchronize ambient music to dawn and dusk windows
+  useEffect(() => {
+    westernMusic.updateDiurnalTime(timeOfDay);
+  }, [timeOfDay]);
+
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [viewMode, setViewMode] = useState<'first' | 'third'>('first');
   const [interactionPrompt, setInteractionPrompt] = useState<string | undefined>(undefined);
@@ -1536,9 +1541,7 @@ export default function App() {
           setSoundEnabled(next);
           soundEngine.setMuted(!next);
           if (!next) {
-            if (!westernMusic.getIsMuted()) westernMusic.toggleMute();
-          } else {
-            if (westernMusic.getIsMuted()) westernMusic.toggleMute();
+            westernMusic.mute();
           }
         }}
         soundEnabled={soundEnabled}
