@@ -21,7 +21,6 @@ import {
   ShieldAlert,
   ShieldCheck,
   Shovel,
-  Music,
   DollarSign,
   Layers,
   TreePine,
@@ -49,7 +48,6 @@ import {
 } from 'lucide-react';
 import { MineStructureType, PlayerState, GraphicsQuality, ClaimInfo, TerritoryClaim } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
-import { westernMusic } from '../audio/westernMusic';
 import { soundEngine } from '../audio/soundEffects';
 import { InventoryModal } from './InventoryModal';
 import { territoryClaims } from '../services/territoryClaimService';
@@ -198,9 +196,6 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onConsumeFood,
   onPurchaseProvisions,
 }) => {
-  const [musicPlaying, setMusicPlaying] = useState(westernMusic.getIsPlaying());
-  const [musicMuted, setMusicMuted] = useState(westernMusic.getIsMuted());
-  const [currentTrack, setCurrentTrack] = useState(westernMusic.getCurrentTrack());
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const [isExcavationPanelCollapsed, setIsExcavationPanelCollapsed] = useState(true);
   const [isTrenchPanelCollapsed, setIsTrenchPanelCollapsed] = useState(true);
@@ -421,29 +416,6 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isVigilanceModalOpen, isInventoryOpen, toggleHud, onToggleGoggles, playerState.isRidingMount, onToggleMount]);
-
-  useEffect(() => {
-    return westernMusic.subscribe(() => {
-      setMusicPlaying(westernMusic.getIsPlaying());
-      setMusicMuted(westernMusic.getIsMuted());
-      setCurrentTrack(westernMusic.getCurrentTrack());
-    });
-  }, []);
-
-  const isMusicActive = musicPlaying && !musicMuted;
-  const diurnalStatus = westernMusic.getDiurnalStatus();
-  const handleToggleMusic = () => {
-    if (isMusicActive) {
-      westernMusic.toggleMute();
-    } else {
-      if (musicMuted) {
-        westernMusic.toggleMute();
-      }
-      if (!musicPlaying) {
-        westernMusic.play();
-      }
-    }
-  };
 
   const tools: { id: PlayerState['equippedTool']; label: string; icon: React.ReactNode; key: string }[] = [
     { id: 'hands', label: 'Bare Hands', icon: <Hand className="w-4 h-4" />, key: '~' },
@@ -1243,33 +1215,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           </button>
         )}
 
-        {/* 4. Western Music Icon Button */}
-        <button
-          id="btn-western-music-toggle"
-          onClick={handleToggleMusic}
-          className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg ${
-            isMusicActive
-              ? 'border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.5)] text-amber-300'
-              : 'border-amber-600/40 hover:border-amber-400/80 shadow-black/40 text-stone-500 hover:text-stone-300'
-          }`}
-          title={
-            isMusicActive
-              ? `Western Music: ${currentTrack.title} (${diurnalStatus.inWindow ? `${diurnalStatus.phase === 'dawn' ? 'Dawn' : 'Dusk'} Serenade - Quiet` : 'Quiet'}) - Click to silence`
-              : `Western Music (Muted by default • Plays quietly at Dawn & Dusk) - Click to play`
-          }
-          aria-label="Western Music"
-        >
-          {isMusicActive ? (
-            <Music className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform animate-pulse" />
-          ) : (
-            <div className="relative flex items-center justify-center">
-              <Music className="w-4 h-4 text-stone-500 group-hover:text-stone-300 transition-colors" />
-              <span className="absolute w-[18px] h-[1.5px] bg-red-500/80 rotate-45 pointer-events-none rounded-full" />
-            </div>
-          )}
-        </button>
-
-        {/* 5. Replay Cinematic Splash / Title Screen Button */}
+        {/* 4. Replay Cinematic Splash / Title Screen Button */}
         {onOpenTitleScreen && (
           <button
             id="btn-cinematic-splash-toggle"

@@ -1,14 +1,15 @@
 /**
- * Procedural Old West Soundtrack Synthesizer
- * 100% self-contained Web Audio procedural synthesis of authentic 19th-century
- * frontier Western music:
- * - Nylon & steel acoustic guitar fingerpicking arpeggios
- * - Classic Ennio Morricone-style lone desert whistling / harmonica melodies
- * - Deep upright acoustic bass plucks
- * - Subtle cowboy spurs & brushed snare rhythm
+ * Procedural Ghostly Frontier Homage Synthesizer
+ *
+ * Designed specifically as a very rare, ghostly acoustic tribute at Dawn and Dusk:
+ * - Haunting solo nylon-string acoustic fingerpicking arpeggios
+ * - Ethereal, lone whistler melody echoing like a phantom through the Superstition canyons
+ * - No continuous background music, no drums, no spurs
+ * - Triggers solely as a rare homage once during the golden twilight of dawn and dusk,
+ *   plays a single poignant 8-bar tribute, then softly fades away into the mountain breeze.
  */
 
-export type WesternTrackId = 'campfire' | 'high_noon' | 'prospector_waltz';
+export type WesternTrackId = 'ghostly_homage' | 'campfire' | 'high_noon' | 'prospector_waltz';
 
 export interface WesternTrackInfo {
   id: WesternTrackId;
@@ -20,24 +21,31 @@ export interface WesternTrackInfo {
 
 export const WESTERN_TRACKS: WesternTrackInfo[] = [
   {
-    id: 'campfire',
-    title: 'Superstition Campfire',
-    subtitle: 'Acoustic Fingerpicking & Lone Whistler',
-    bpm: 76,
+    id: 'ghostly_homage',
+    title: 'Ghostly Tribute of the Superstitions',
+    subtitle: 'Rare Dawn & Dusk Homage • Ethereal Nylon Guitar & Phantom Whistler',
+    bpm: 64,
     timeSignature: '4/4',
   },
   {
-    id: 'high_noon',
-    title: 'High Noon Standoff',
-    subtitle: 'Spanish Minor Arpeggios & Harmonica',
+    id: 'campfire',
+    title: 'Superstition Campfire (Homage)',
+    subtitle: 'Acoustic Fingerpicking & Lone Whistler',
     bpm: 68,
     timeSignature: '4/4',
   },
   {
+    id: 'high_noon',
+    title: 'High Noon Standoff (Homage)',
+    subtitle: 'Spanish Minor Arpeggios & Harmonica',
+    bpm: 64,
+    timeSignature: '4/4',
+  },
+  {
     id: 'prospector_waltz',
-    title: 'Prospector’s Frontier Waltz',
+    title: 'Prospector’s Frontier Waltz (Homage)',
     subtitle: 'Gentle 3/4 Acoustic Trail Ballad',
-    bpm: 88,
+    bpm: 72,
     timeSignature: '3/4',
   },
 ];
@@ -58,9 +66,12 @@ const NOTE_FREQS: Record<string, number> = {
   B3: 246.94,
   C4: 261.63,
   D4: 293.66,
+  'D#4': 311.13,
   E4: 329.63,
   F4: 349.23,
+  'F#4': 369.99,
   G4: 392.0,
+  'G#4': 415.3,
   A4: 440.0,
   B4: 493.88,
   C5: 523.25,
@@ -84,31 +95,29 @@ interface MelodyNote {
   vibratoDelay?: number;
 }
 
-// Volume constant for gentle background frontier music
-const QUIET_ATMOSPHERE_VOLUME = 0.16;
+// Gentle, ghostly atmospheric volume
+const GHOSTLY_TRIBUTE_VOLUME = 0.10;
 
 class WesternMusicEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private isPlaying: boolean = false;
-  private isMuted: boolean = true; // Muted by default on page load per user request
-  private volume: number = QUIET_ATMOSPHERE_VOLUME; // Quiet gentle volume
-  private currentTrackId: WesternTrackId = 'campfire';
+  private isMuted: boolean = false;
+  private volume: number = GHOSTLY_TRIBUTE_VOLUME;
+  private currentTrackId: WesternTrackId = 'ghostly_homage';
   private loopTimer: number | null = null;
   private currentStep: number = 0;
+  private totalStepsInTribute: number = 8; // Exactly 8 bars for a single poignant homage
   private listeners: Array<() => void> = [];
-  // Dawn/dusk diurnal management
+
+  // Diurnal rare tribute state tracking
   private diurnalTime: number = 12;
   private inDiurnalWindow: boolean = false;
   private diurnalPhaseName: 'dawn' | 'dusk' | 'none' = 'none';
-  private userManualOverride: boolean = false;
+  private lastTributePhaseTriggered: 'dawn' | 'dusk' | 'none' = 'none';
 
   constructor() {
-    // Pick a random track on startup for continuous playlist shuffle
-    const randomTrack = WESTERN_TRACKS[Math.floor(Math.random() * WESTERN_TRACKS.length)];
-    if (randomTrack) {
-      this.currentTrackId = randomTrack.id;
-    }
+    this.currentTrackId = 'ghostly_homage';
   }
 
   private initContext() {
@@ -116,6 +125,7 @@ class WesternMusicEngine {
       const AudioCtx =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
       this.ctx = new AudioCtx();
 
       this.masterGain = this.ctx.createGain();
@@ -126,7 +136,7 @@ class WesternMusicEngine {
       this.masterGain.connect(this.ctx.destination);
     }
 
-    if (this.ctx.state === 'suspended') {
+    if (this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
   }
@@ -139,7 +149,13 @@ class WesternMusicEngine {
   }
 
   private notify() {
-    this.listeners.forEach((l) => l());
+    this.listeners.forEach((l) => {
+      try {
+        l();
+      } catch {
+        // ignore listener errors
+      }
+    });
   }
 
   public getIsPlaying(): boolean {
@@ -179,7 +195,6 @@ class WesternMusicEngine {
 
   public toggleMute(): boolean {
     this.isMuted = !this.isMuted;
-    this.userManualOverride = true; // User explicitly intervened
     if (this.masterGain && this.ctx) {
       const targetGain = this.isPlaying && !this.isMuted ? this.volume : 0;
       this.masterGain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.15);
@@ -191,7 +206,6 @@ class WesternMusicEngine {
   public unmute(): void {
     if (this.isMuted) {
       this.isMuted = false;
-      this.userManualOverride = true;
       if (this.masterGain && this.ctx) {
         this.masterGain.gain.setTargetAtTime(this.isPlaying ? this.volume : 0, this.ctx.currentTime, 0.15);
       }
@@ -202,7 +216,6 @@ class WesternMusicEngine {
   public mute(): void {
     if (!this.isMuted) {
       this.isMuted = true;
-      this.userManualOverride = true;
       if (this.masterGain && this.ctx) {
         this.masterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.15);
       }
@@ -212,95 +225,73 @@ class WesternMusicEngine {
 
   /**
    * Called continuously by diurnal time ticker in game.
-   * Handles dawn (5:30 - 7:00) and dusk (18:00 - 19:30) limited acoustic plays.
-   * When time enters dawn or dusk and user hasn't manually muted,
-   * it gently unmutes at quiet volume (0.16) and fades in.
-   * When dawn/dusk ends, it softly fades out and mutes.
+   * Handles rare ghostly homage tributes strictly at dawn (5:45 - 6:30) and dusk (18:15 - 19:00).
+   * It plays a single poignant homage phrase (8 bars), then automatically concludes and silences.
    */
   public updateDiurnalTime(timeOfDay: number) {
     this.diurnalTime = timeOfDay;
 
-    // Dawn window: 5.4 to 6.8 (approx 5:24 AM to 6:48 AM)
-    const isDawn = timeOfDay >= 5.4 && timeOfDay <= 6.8;
-    // Dusk window: 18.0 to 19.5 (approx 6:00 PM to 7:30 PM sunset)
-    const isDusk = timeOfDay >= 18.0 && timeOfDay <= 19.5;
+    // Dawn golden window: 5.7 to 6.3 (approx 5:42 AM to 6:18 AM sunrise)
+    const isDawn = timeOfDay >= 5.7 && timeOfDay <= 6.3;
+    // Dusk twilight window: 18.2 to 18.8 (approx 6:12 PM to 6:48 PM sunset)
+    const isDusk = timeOfDay >= 18.2 && timeOfDay <= 18.8;
     const inWindow = isDawn || isDusk;
-    const phase: 'dawn' | 'dusk' | 'none' = isDawn ? 'dawn' : isDusk ? 'dusk' : 'none';
+    const currentPhase: 'dawn' | 'dusk' | 'none' = isDawn ? 'dawn' : isDusk ? 'dusk' : 'none';
 
-    const windowChanged = inWindow !== this.inDiurnalWindow || phase !== this.diurnalPhaseName;
     this.inDiurnalWindow = inWindow;
-    this.diurnalPhaseName = phase;
+    this.diurnalPhaseName = currentPhase;
 
-    // Diurnal automation:
-    // If not manually overridden by the user, only play quietly during dawn & dusk
-    if (!this.userManualOverride) {
-      if (inWindow) {
-        // Unmute and start playback if entering window
-        if (this.isMuted || !this.isPlaying) {
-          this.isMuted = false;
-          this.volume = QUIET_ATMOSPHERE_VOLUME;
-          this.initContext();
-          if (!this.isPlaying) {
-            this.isPlaying = true;
-            this.currentStep = 0;
-            this.scheduleNextBar();
-          }
-          if (this.masterGain && this.ctx) {
-            this.masterGain.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.8);
-          }
-          this.notify();
-        }
-      } else {
-        // Outside dawn and dusk, fade out and mute
-        if (!this.isMuted) {
-          this.isMuted = true;
-          if (this.masterGain && this.ctx) {
-            this.masterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 1.2);
-          }
-          this.notify();
-        }
+    // Reset the triggered state once outside dawn and dusk
+    if (!inWindow) {
+      if (this.lastTributePhaseTriggered !== 'none') {
+        this.lastTributePhaseTriggered = 'none';
       }
-    } else {
-      if (windowChanged) {
-        this.notify();
+      // If currently playing outside the window, smoothly fade out
+      if (this.isPlaying) {
+        this.fadeOutAndStop(2.0);
       }
+      return;
+    }
+
+    // Trigger the rare tribute ONCE per dawn or dusk transition
+    if (currentPhase !== 'none' && this.lastTributePhaseTriggered !== currentPhase && !this.isPlaying) {
+      this.lastTributePhaseTriggered = currentPhase;
+      this.playGhostlyHomage();
     }
   }
 
-  public switchTrack(trackId: WesternTrackId) {
-    if (this.currentTrackId === trackId) return;
-    this.currentTrackId = trackId;
-    this.currentStep = 0;
-    if (this.isPlaying) {
-      this.stop();
-      this.play();
-    } else {
-      this.notify();
-    }
-  }
+  /**
+   * Plays a single, ethereal, haunting 8-bar tribute homage.
+   * Does NOT loop; fades gently to silence upon completion.
+   */
+  public playGhostlyHomage() {
+    this.initContext();
+    if (!this.ctx || !this.masterGain) return;
 
-  public shuffleNextTrack() {
-    const others = WESTERN_TRACKS.filter((t) => t.id !== this.currentTrackId);
-    const next = others[Math.floor(Math.random() * others.length)] || WESTERN_TRACKS[0];
-    this.currentTrackId = next.id;
+    if (this.loopTimer) {
+      window.clearTimeout(this.loopTimer);
+      this.loopTimer = null;
+    }
+
+    this.isPlaying = true;
     this.currentStep = 0;
+    this.currentTrackId = 'ghostly_homage';
+
+    // Gentle 1.5s fade-in of the master gain
+    this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+    this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
+    this.masterGain.gain.linearRampToValueAtTime(
+      this.isMuted ? 0 : this.volume,
+      this.ctx.currentTime + 1.5
+    );
+
+    this.scheduleNextBar();
     this.notify();
-  }
-
-  public nextTrack() {
-    this.shuffleNextTrack();
   }
 
   public play() {
-    this.initContext();
-    if (this.isPlaying) return;
-    this.isPlaying = true;
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
-    }
-    this.currentStep = 0;
-    this.scheduleNextBar();
-    this.notify();
+    // Treat explicit play requests as triggering the single homage phrase
+    this.playGhostlyHomage();
   }
 
   public stop() {
@@ -310,197 +301,136 @@ class WesternMusicEngine {
       this.loopTimer = null;
     }
     if (this.masterGain && this.ctx) {
+      this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
       this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
     }
     this.notify();
+  }
+
+  private fadeOutAndStop(fadeDurationSec: number = 2.0) {
+    if (!this.isPlaying) return;
+    if (this.masterGain && this.ctx) {
+      const now = this.ctx.currentTime;
+      this.masterGain.gain.cancelScheduledValues(now);
+      this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now);
+      this.masterGain.gain.exponentialRampToValueAtTime(0.0001, now + fadeDurationSec);
+    }
+    if (this.loopTimer) {
+      window.clearTimeout(this.loopTimer);
+      this.loopTimer = null;
+    }
+    window.setTimeout(() => {
+      this.stop();
+    }, fadeDurationSec * 1000);
   }
 
   public togglePlay() {
     if (this.isPlaying) {
       this.stop();
     } else {
-      this.play();
+      this.playGhostlyHomage();
     }
   }
 
   // ==========================================
-  // Track Sequences & Chord Progressions
+  // Ghostly Tribute Musical Sequences
   // ==========================================
 
-  // Theme 1: "Superstition Campfire" (4/4, Am – C – Dm – E7 – F – C – Dm – E7)
-  private getCampfireSequence(): { chords: ChordPattern[]; melodies: MelodyNote[][] } {
+  // Ethereal Minor Homage: Am - Em - Fmaj7 - Em - Dm - Am - E7 - Am
+  private getGhostlyHomageSequence(): { chords: ChordPattern[]; melodies: MelodyNote[][] } {
     const chords: ChordPattern[] = [
+      // Bar 1: Am ethereal fingerpicking
       { bass: 'A2', arpeggio: ['A3', 'C4', 'E4', 'A4', 'E4', 'C4', 'E4', 'A3'] },
-      { bass: 'C3', arpeggio: ['G3', 'C4', 'E4', 'G4', 'E4', 'C4', 'E4', 'G3'] },
+      // Bar 2: Em echoing in canyon
+      { bass: 'E2', arpeggio: ['G3', 'B3', 'E4', 'G4', 'E4', 'B3', 'E4', 'G3'] },
+      // Bar 3: Fmaj7 melancholic twilight
+      { bass: 'F2', arpeggio: ['A3', 'C4', 'E4', 'A4', 'E4', 'C4', 'E4', 'A3'] },
+      // Bar 4: Em resolving softly
+      { bass: 'E2', arpeggio: ['G3', 'B3', 'E4', 'G4', 'E4', 'B3', 'E4', 'G3'] },
+      // Bar 5: Dm gentle yearning
       { bass: 'D3', arpeggio: ['A3', 'D4', 'F4', 'A4', 'F4', 'D4', 'F4', 'A3'] },
-      { bass: 'E2', arpeggio: ['B3', 'E4', 'G4', 'B4', 'G4', 'E4', 'G4', 'B3'] },
-      { bass: 'F2', arpeggio: ['A3', 'C4', 'F4', 'A4', 'F4', 'C4', 'F4', 'A3'] },
-      { bass: 'C3', arpeggio: ['G3', 'C4', 'E4', 'G4', 'E4', 'C4', 'E4', 'G3'] },
-      { bass: 'D3', arpeggio: ['A3', 'D4', 'F4', 'A4', 'F4', 'D4', 'F4', 'A3'] },
-      { bass: 'E2', arpeggio: ['G3', 'B3', 'D4', 'E4', 'B3', 'G3', 'B3', 'E3'] },
-    ];
-
-    const melodies: MelodyNote[][] = [
-      // Bar 1: Intro phrase (Whistling enters on beat 2)
-      [
-        { note: 'E5', beatOffset: 1.5, durationBeats: 1.2, vibratoDelay: 0.3 },
-        { note: 'A5', beatOffset: 3.0, durationBeats: 1.0, vibratoDelay: 0.2 },
-      ],
-      // Bar 2:
-      [
-        { note: 'G5', beatOffset: 0.0, durationBeats: 1.5, vibratoDelay: 0.4 },
-        { note: 'E5', beatOffset: 2.0, durationBeats: 1.8, vibratoDelay: 0.3 },
-      ],
-      // Bar 3:
-      [
-        { note: 'D5', beatOffset: 0.5, durationBeats: 1.2, vibratoDelay: 0.3 },
-        { note: 'F5', beatOffset: 2.0, durationBeats: 1.6, vibratoDelay: 0.2 },
-      ],
-      // Bar 4:
-      [
-        { note: 'E5', beatOffset: 0.0, durationBeats: 2.5, vibratoDelay: 0.5 },
-      ],
-      // Bar 5:
-      [
-        { note: 'A5', beatOffset: 0.5, durationBeats: 1.4, vibratoDelay: 0.3 },
-        { note: 'C5', beatOffset: 2.2, durationBeats: 1.5, vibratoDelay: 0.2 },
-      ],
-      // Bar 6:
-      [
-        { note: 'B4', beatOffset: 0.0, durationBeats: 1.8, vibratoDelay: 0.4 },
-        { note: 'G4', beatOffset: 2.0, durationBeats: 1.6, vibratoDelay: 0.2 },
-      ],
-      // Bar 7:
-      [
-        { note: 'A4', beatOffset: 0.5, durationBeats: 2.0, vibratoDelay: 0.3 },
-        { note: 'B4', beatOffset: 2.8, durationBeats: 1.0, vibratoDelay: 0.2 },
-      ],
-      // Bar 8:
-      [
-        { note: 'A4', beatOffset: 0.0, durationBeats: 3.2, vibratoDelay: 0.5 },
-      ],
-    ];
-
-    return { chords, melodies };
-  }
-
-  // Theme 2: "High Noon Standoff" (4/4, Dm – C – Bb – A7 Spanish Cadence)
-  private getHighNoonSequence(): { chords: ChordPattern[]; melodies: MelodyNote[][] } {
-    const chords: ChordPattern[] = [
-      { bass: 'D3', arpeggio: ['A3', 'D4', 'F4', 'A4', 'F4', 'D4', 'F4', 'A3'] },
-      { bass: 'C3', arpeggio: ['G3', 'C4', 'E4', 'G4', 'E4', 'C4', 'E4', 'G3'] },
-      { bass: 'B2', arpeggio: ['F3', 'B3', 'D4', 'F4', 'D4', 'B3', 'D4', 'F3'] },
+      // Bar 6: Am sorrowful memory
       { bass: 'A2', arpeggio: ['E3', 'A3', 'C4', 'E4', 'C4', 'A3', 'C4', 'E3'] },
-      { bass: 'D3', arpeggio: ['A3', 'D4', 'F4', 'A4', 'F4', 'D4', 'F4', 'A3'] },
-      { bass: 'C3', arpeggio: ['G3', 'C4', 'E4', 'G4', 'E4', 'C4', 'E4', 'G3'] },
-      { bass: 'B2', arpeggio: ['F3', 'B3', 'D4', 'F4', 'D4', 'B3', 'D4', 'F3'] },
-      { bass: 'A2', arpeggio: ['A3', 'C4', 'E4', 'A4', 'E4', 'C4', 'E4', 'A3'] },
+      // Bar 7: E7 twilight resolution
+      { bass: 'E2', arpeggio: ['G#4', 'B3', 'D4', 'E4', 'D4', 'B3', 'D4', 'G#4'] },
+      // Bar 8: Am final fade into the canyon breeze
+      { bass: 'A2', arpeggio: ['A3', 'C4', 'E4', 'A4'] },
     ];
 
     const melodies: MelodyNote[][] = [
-      // Bar 1: Harmonica style
+      // Bar 1: Phantom whistle floats in on beat 2
       [
-        { note: 'D5', beatOffset: 1.0, durationBeats: 2.2, vibratoDelay: 0.3 },
+        { note: 'E5', beatOffset: 1.5, durationBeats: 1.8, vibratoDelay: 0.4 },
       ],
       // Bar 2:
       [
-        { note: 'E5', beatOffset: 0.5, durationBeats: 1.2, vibratoDelay: 0.2 },
-        { note: 'C5', beatOffset: 2.0, durationBeats: 1.8, vibratoDelay: 0.4 },
+        { note: 'G5', beatOffset: 0.5, durationBeats: 2.2, vibratoDelay: 0.5 },
       ],
       // Bar 3:
       [
-        { note: 'D5', beatOffset: 0.0, durationBeats: 1.5, vibratoDelay: 0.3 },
-        { note: 'F5', beatOffset: 2.0, durationBeats: 1.5, vibratoDelay: 0.2 },
+        { note: 'A5', beatOffset: 0.5, durationBeats: 1.8, vibratoDelay: 0.4 },
+        { note: 'E5', beatOffset: 2.8, durationBeats: 1.0, vibratoDelay: 0.3 },
       ],
       // Bar 4:
       [
-        { note: 'E5', beatOffset: 0.0, durationBeats: 3.0, vibratoDelay: 0.5 },
+        { note: 'B4', beatOffset: 0.5, durationBeats: 2.8, vibratoDelay: 0.6 },
       ],
       // Bar 5:
       [
-        { note: 'A5', beatOffset: 0.5, durationBeats: 2.0, vibratoDelay: 0.3 },
+        { note: 'D5', beatOffset: 0.5, durationBeats: 2.0, vibratoDelay: 0.4 },
       ],
       // Bar 6:
       [
-        { note: 'G5', beatOffset: 0.0, durationBeats: 1.5, vibratoDelay: 0.3 },
-        { note: 'F5', beatOffset: 2.0, durationBeats: 1.5, vibratoDelay: 0.2 },
+        { note: 'C5', beatOffset: 0.5, durationBeats: 1.6, vibratoDelay: 0.3 },
+        { note: 'B4', beatOffset: 2.5, durationBeats: 1.2, vibratoDelay: 0.3 },
       ],
       // Bar 7:
       [
-        { note: 'E5', beatOffset: 0.5, durationBeats: 1.2, vibratoDelay: 0.2 },
-        { note: 'F5', beatOffset: 2.0, durationBeats: 1.4, vibratoDelay: 0.3 },
+        { note: 'B4', beatOffset: 0.5, durationBeats: 2.4, vibratoDelay: 0.5 },
       ],
-      // Bar 8:
+      // Bar 8: Final lone ghostly note fading into mountain silence
       [
-        { note: 'D5', beatOffset: 0.0, durationBeats: 3.2, vibratoDelay: 0.4 },
+        { note: 'A4', beatOffset: 0.2, durationBeats: 3.6, vibratoDelay: 0.6 },
       ],
     ];
 
     return { chords, melodies };
   }
 
-  // Theme 3: "Prospector's Frontier Waltz" (3/4 time, Em – G – Am – B7)
-  private getWaltzSequence(): { chords: ChordPattern[]; melodies: MelodyNote[][] } {
-    const chords: ChordPattern[] = [
-      { bass: 'E2', arpeggio: ['G3', 'B3', 'E4', 'B3', 'G3', 'E3'] },
-      { bass: 'G2', arpeggio: ['B3', 'D4', 'G4', 'D4', 'B3', 'G3'] },
-      { bass: 'A2', arpeggio: ['C4', 'E4', 'A4', 'E4', 'C4', 'A3'] },
-      { bass: 'B2', arpeggio: ['D4', 'F4', 'B4', 'F4', 'D4', 'B3'] },
-      { bass: 'C3', arpeggio: ['E4', 'G4', 'C5', 'G4', 'E4', 'C4'] },
-      { bass: 'G2', arpeggio: ['B3', 'D4', 'G4', 'D4', 'B3', 'G3'] },
-      { bass: 'A2', arpeggio: ['C4', 'E4', 'A4', 'E4', 'C4', 'A3'] },
-      { bass: 'E2', arpeggio: ['G3', 'B3', 'E4', 'B3', 'G3', 'E3'] },
-    ];
-
-    const melodies: MelodyNote[][] = [
-      [{ note: 'E5', beatOffset: 0.5, durationBeats: 1.8, vibratoDelay: 0.3 }],
-      [{ note: 'G5', beatOffset: 0.0, durationBeats: 2.2, vibratoDelay: 0.4 }],
-      [{ note: 'A5', beatOffset: 0.5, durationBeats: 1.8, vibratoDelay: 0.3 }],
-      [{ note: 'B5', beatOffset: 0.0, durationBeats: 2.0, vibratoDelay: 0.4 }],
-      [{ note: 'C5', beatOffset: 0.5, durationBeats: 1.8, vibratoDelay: 0.3 }],
-      [{ note: 'B4', beatOffset: 0.0, durationBeats: 2.0, vibratoDelay: 0.3 }],
-      [{ note: 'A4', beatOffset: 0.5, durationBeats: 1.6, vibratoDelay: 0.2 }],
-      [{ note: 'E4', beatOffset: 0.0, durationBeats: 2.5, vibratoDelay: 0.4 }],
-    ];
-
-    return { chords, melodies };
-  }
-
   // ==========================================
-  // Sound Synthesis Helpers
+  // Ethereal Ghostly Sound Synthesis
   // ==========================================
 
-  // Acoustic Guitar Pluck Synthesizer
-  private playGuitarPluck(freq: number, time: number, gainVal: number = 0.18) {
+  // Haunting solo acoustic nylon guitar pluck
+  private playGuitarPluck(freq: number, time: number, gainVal: number = 0.12) {
     if (!this.ctx || !this.masterGain) return;
 
     // Body resonance filter
     const bodyFilter = this.ctx.createBiquadFilter();
     bodyFilter.type = 'bandpass';
-    bodyFilter.frequency.setValueAtTime(freq * 1.5, time);
-    bodyFilter.Q.setValueAtTime(3.2, time);
+    bodyFilter.frequency.setValueAtTime(freq * 1.4, time);
+    bodyFilter.Q.setValueAtTime(3.5, time);
 
-    // Warm highpass to avoid sub-rumble
+    // Warm highpass to eliminate rumble
     const lowFilter = this.ctx.createBiquadFilter();
     lowFilter.type = 'highpass';
-    lowFilter.frequency.setValueAtTime(75, time);
+    lowFilter.frequency.setValueAtTime(80, time);
 
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(gainVal, time);
-    // Fast initial pluck transient decaying into warm resonant body
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.95);
+    // Soft, long acoustic decay
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + 1.2);
 
-    // Primary plucked string oscillator (triangle with subtle sawtooth shimmer)
     const osc1 = this.ctx.createOscillator();
     osc1.type = 'triangle';
     osc1.frequency.setValueAtTime(freq, time);
 
     const osc2 = this.ctx.createOscillator();
-    osc2.type = 'sawtooth';
-    osc2.frequency.setValueAtTime(freq * 2.01, time); // 1st harmonic
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(freq * 2.0, time);
     const osc2Gain = this.ctx.createGain();
-    osc2Gain.gain.setValueAtTime(0.08, time);
-    osc2Gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.35);
+    osc2Gain.gain.setValueAtTime(0.04, time);
+    osc2Gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.5);
     osc2.connect(osc2Gain);
     osc2Gain.connect(bodyFilter);
 
@@ -510,136 +440,73 @@ class WesternMusicEngine {
     gain.connect(this.masterGain);
 
     osc1.start(time);
-    osc1.stop(time + 1.0);
+    osc1.stop(time + 1.3);
     osc2.start(time);
-    osc2.stop(time + 0.4);
+    osc2.stop(time + 0.6);
   }
 
-  // Deep Upright Acoustic Bass Pluck
-  private playAcousticBass(freq: number, time: number) {
-    if (!this.ctx || !this.masterGain) return;
-
-    const osc = this.ctx.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(freq, time);
-    osc.frequency.exponentialRampToValueAtTime(freq * 0.98, time + 0.12);
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(260, time);
-    filter.frequency.exponentialRampToValueAtTime(120, time + 0.6);
-
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.3, time);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 1.2);
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.masterGain);
-
-    osc.start(time);
-    osc.stop(time + 1.25);
-  }
-
-  // Lone Desert Whistler / Harmonica Synthesizer
+  // Phantom Whistler / Ghostly Wind Melody
   private playLoneWhistle(
     freq: number,
     time: number,
     duration: number,
-    vibratoDelay: number = 0.35
+    vibratoDelay: number = 0.4
   ) {
     if (!this.ctx || !this.masterGain) return;
 
     const osc = this.ctx.createOscillator();
     osc.type = 'sine';
     // Gentle natural portamento slide up to note
-    osc.frequency.setValueAtTime(freq * 0.97, time);
-    osc.frequency.exponentialRampToValueAtTime(freq, time + 0.08);
+    osc.frequency.setValueAtTime(freq * 0.985, time);
+    osc.frequency.exponentialRampToValueAtTime(freq, time + 0.12);
 
-    // Whistle vibrato LFO (5.2 Hz) that swells after note onset
+    // Gentle, expressive vibrato LFO (5.0 Hz)
     const lfo = this.ctx.createOscillator();
-    lfo.frequency.setValueAtTime(5.4, time);
+    lfo.frequency.setValueAtTime(5.0, time);
     const lfoGain = this.ctx.createGain();
     lfoGain.gain.setValueAtTime(0.0, time);
     lfoGain.gain.setValueAtTime(0.0, time + vibratoDelay);
-    lfoGain.gain.linearRampToValueAtTime(freq * 0.015, time + vibratoDelay + 0.4);
+    lfoGain.gain.linearRampToValueAtTime(freq * 0.012, time + vibratoDelay + 0.5);
     lfo.connect(lfoGain);
     lfoGain.connect(osc.frequency);
 
-    // Breath tone / whistle resonance filter
+    // Ethereal bandpass filter simulating distance and canyon air
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
     filter.frequency.setValueAtTime(freq, time);
-    filter.Q.setValueAtTime(8.0, time);
+    filter.Q.setValueAtTime(6.0, time);
 
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(0.0, time);
-    // Smooth swell in and out like a real human breath
-    gain.gain.linearRampToValueAtTime(0.16, time + 0.12);
-    gain.gain.setValueAtTime(0.16, time + Math.max(0.15, duration - 0.25));
-    gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
+    // Smooth swell in and slow fade out like a ghostly breath
+    gain.gain.linearRampToValueAtTime(0.12, time + 0.25);
+    gain.gain.setValueAtTime(0.12, time + Math.max(0.2, duration - 0.4));
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
 
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(this.masterGain);
 
     osc.start(time);
-    osc.stop(time + duration + 0.1);
+    osc.stop(time + duration + 0.2);
     lfo.start(time);
-    lfo.stop(time + duration + 0.1);
+    lfo.stop(time + duration + 0.2);
   }
 
-  // Subtle Cowboy Spurs & Brushed Shaker Rhythm
-  private playSpurOrShaker(time: number, isAccent: boolean = false) {
-    if (!this.ctx || !this.masterGain) return;
-
-    const bufferSize = Math.floor(this.ctx.sampleRate * 0.08);
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.28));
-    }
-
-    const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(isAccent ? 3800 : 2600, time);
-    filter.Q.setValueAtTime(3.0, time);
-
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(isAccent ? 0.05 : 0.025, time);
-    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.075);
-
-    noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.masterGain);
-
-    noise.start(time);
-    noise.stop(time + 0.08);
-  }
-
-  // Schedule a complete bar of music
+  // Schedule next bar of the 8-bar ghostly homage
   private scheduleNextBar() {
     if (!this.isPlaying || !this.ctx) return;
 
     const track = this.getCurrentTrack();
-    let chords: ChordPattern[] = [];
-    let melodies: MelodyNote[][] = [];
+    const data = this.getGhostlyHomageSequence();
+    const chords = data.chords;
+    const melodies = data.melodies;
 
-    if (this.currentTrackId === 'campfire') {
-      const data = this.getCampfireSequence();
-      chords = data.chords;
-      melodies = data.melodies;
-    } else if (this.currentTrackId === 'high_noon') {
-      const data = this.getHighNoonSequence();
-      chords = data.chords;
-      melodies = data.melodies;
-    } else {
-      const data = this.getWaltzSequence();
-      chords = data.chords;
-      melodies = data.melodies;
+    // Check if we reached the end of the 8-bar homage tribute
+    if (this.currentStep >= this.totalStepsInTribute) {
+      // Single tribute has completed! Smoothly fade out and stop until the next dawn/dusk
+      this.fadeOutAndStop(2.5);
+      return;
     }
 
     const barIdx = this.currentStep % chords.length;
@@ -647,21 +514,15 @@ class WesternMusicEngine {
     const currentMelody = melodies[barIdx] || [];
 
     const beatDuration = 60 / track.bpm;
-    const beatsPerBar = track.timeSignature === '3/4' ? 3 : 4;
+    const beatsPerBar = 4;
     const barDuration = beatsPerBar * beatDuration;
     const startTime = this.ctx.currentTime + 0.05;
 
-    // 1. Play Upright Bass on Downbeat
+    // 1. Subtle acoustic bass note on root
     const bassFreq = NOTE_FREQS[currentChord.bass] || 110;
-    this.playAcousticBass(bassFreq, startTime);
+    this.playGuitarPluck(bassFreq, startTime, 0.14);
 
-    // In 4/4 time, play a secondary bass note on beat 3
-    if (beatsPerBar === 4) {
-      const secondaryBassTime = startTime + beatDuration * 2;
-      this.playAcousticBass(bassFreq * 1.5, secondaryBassTime);
-    }
-
-    // 2. Play Guitar Fingerpicking Arpeggio
+    // 2. Ethereal nylon guitar fingerpicking arpeggio
     const numPicks = currentChord.arpeggio.length;
     const pickInterval = barDuration / numPicks;
     for (let p = 0; p < numPicks; p++) {
@@ -669,38 +530,25 @@ class WesternMusicEngine {
       const pickFreq = NOTE_FREQS[pickNote];
       if (pickFreq) {
         const pickTime = startTime + p * pickInterval;
-        const gain = p % 2 === 0 ? 0.16 : 0.12;
+        const gain = p === 0 ? 0.12 : 0.09;
         this.playGuitarPluck(pickFreq, pickTime, gain);
       }
     }
 
-    // 3. Play Lone Whistle / Harmonica Melody Notes for this Bar
+    // 3. Phantom Whistler Melody note
     for (const m of currentMelody) {
       const noteFreq = NOTE_FREQS[m.note];
       if (noteFreq) {
         const noteTime = startTime + m.beatOffset * beatDuration;
         const noteDuration = m.durationBeats * beatDuration;
-        this.playLoneWhistle(noteFreq, noteTime, noteDuration, m.vibratoDelay || 0.3);
+        this.playLoneWhistle(noteFreq, noteTime, noteDuration, m.vibratoDelay || 0.4);
       }
     }
 
-    // 4. Play Cowboy Spurs & Subtle Rhythm Shaker
-    for (let b = 0; b < beatsPerBar; b++) {
-      const beatTime = startTime + b * beatDuration;
-      // Off-beat shaker
-      this.playSpurOrShaker(beatTime + beatDuration * 0.5, b === 1 || b === 3);
-    }
-
-    // Advance step and schedule next bar slightly before completion
+    // Step counter
     this.currentStep++;
 
-    // When the track finishes its progression, shuffle seamlessly to another track behind the scenes
-    const requiredCycles = track.id === 'prospector_waltz' ? 2 : 1;
-    if (this.currentStep >= chords.length * requiredCycles) {
-      this.shuffleNextTrack();
-    }
-
-    const scheduleDelayMs = Math.max(200, (barDuration - 0.15) * 1000);
+    const scheduleDelayMs = Math.max(200, (barDuration - 0.12) * 1000);
     this.loopTimer = window.setTimeout(() => {
       if (this.isPlaying) {
         this.scheduleNextBar();

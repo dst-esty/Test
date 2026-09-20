@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Play, Volume2, VolumeX, SkipForward, Compass, Sparkles, Shield, Skull, MapPin } from 'lucide-react';
+import { Play, SkipForward, Compass, Sparkles, Shield, Skull, MapPin } from 'lucide-react';
 import { soundEngine } from '../audio/soundEffects';
-import { westernMusic } from '../audio/westernMusic';
 
 interface CinematicSplashProps {
   onEnterGame: () => void;
@@ -9,16 +8,9 @@ interface CinematicSplashProps {
 
 export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame }) => {
   const [phase, setPhase] = useState<'studio' | 'title' | 'menu'>('studio');
-  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => westernMusic.getIsMuted());
   const [hasInteracted, setHasInteracted] = useState<boolean>(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return westernMusic.subscribe(() => {
-      setIsAudioMuted(westernMusic.getIsMuted());
-    });
-  }, []);
 
   // Play deep cinematic orchestral brass / brass chord & wind upon user interaction or start
   const playCinematicSting = useCallback(() => {
@@ -227,14 +219,6 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
     playCinematicSting();
   }, [playCinematicSting]);
 
-  const handleToggleAudio = useCallback(() => {
-    if (!westernMusic.getIsPlaying()) {
-      westernMusic.play();
-    }
-    const nextMute = westernMusic.toggleMute();
-    setIsAudioMuted(nextMute);
-  }, []);
-
   // Key shortcuts: Space or Enter to proceed, Esc to skip straight to game
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -283,18 +267,8 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
           </div>
         </div>
 
-        {/* Audio & Skip controls */}
+        {/* Skip controls */}
         <div className="flex items-center gap-3 font-sans">
-          <button
-            id="splash-audio-toggle"
-            onClick={handleToggleAudio}
-            className="p-2.5 rounded-full bg-stone-900/80 hover:bg-stone-800 text-stone-300 hover:text-amber-400 border border-stone-700/60 backdrop-blur-md transition-all cursor-pointer"
-            title={isAudioMuted ? 'Unmute Audio' : 'Mute Audio'}
-            aria-label="Toggle audio"
-          >
-            {isAudioMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-amber-400" />}
-          </button>
-
           {phase !== 'menu' && (
             <button
               id="splash-skip-btn"
