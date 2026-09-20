@@ -3488,6 +3488,169 @@ class SoundEngine {
     noise.start(t);
     noise.stop(t + 0.16);
   }
+
+  /**
+   * Authentic US Cavalry Brass Bugle Call (Fort McDowell 6th/8th Cavalry).
+   * Generates traditional military bugle harmonic notes (C4, G4, C5, E5, G5)
+   * with brass tube formant filtering, bell flare resonances, and outdoor mountain echo.
+   */
+  public playCavalryBugleCall(pattern: 'assembly' | 'boots_and_saddles' | 'charge' = 'boots_and_saddles') {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // Harmonic overtone bugle pitches in standard Bb cavalry regulation bugle:
+    // Eb4 ~ 311.1Hz, Bb4 ~ 466.2Hz, Eb5 ~ 622.3Hz, G5 ~ 784.0Hz, Bb5 ~ 932.3Hz
+    const Bb_BUGLE: Record<string, number> = {
+      low: 311.1,     // Root harmonic
+      mid: 466.2,     // 5th
+      high: 622.3,    // Octave
+      third: 784.0,   // Major 3rd above octave
+      top: 932.3,     // High 5th
+    };
+
+    type BugleNote = { note: number; time: number; dur: number; vol: number };
+    let sequence: BugleNote[] = [];
+
+    if (pattern === 'boots_and_saddles') {
+      // Classic "Boots and Saddles" cavalry mount call
+      sequence = [
+        { note: Bb_BUGLE.mid, time: 0.0, dur: 0.22, vol: 0.22 },
+        { note: Bb_BUGLE.high, time: 0.26, dur: 0.20, vol: 0.24 },
+        { note: Bb_BUGLE.mid, time: 0.48, dur: 0.18, vol: 0.22 },
+        { note: Bb_BUGLE.high, time: 0.68, dur: 0.35, vol: 0.28 },
+        { note: Bb_BUGLE.third, time: 1.08, dur: 0.22, vol: 0.26 },
+        { note: Bb_BUGLE.high, time: 1.34, dur: 0.20, vol: 0.24 },
+        { note: Bb_BUGLE.mid, time: 1.56, dur: 0.45, vol: 0.20 },
+      ];
+    } else if (pattern === 'charge') {
+      // Gallop / Charge fanfare
+      sequence = [
+        { note: Bb_BUGLE.mid, time: 0.0, dur: 0.12, vol: 0.26 },
+        { note: Bb_BUGLE.high, time: 0.14, dur: 0.12, vol: 0.28 },
+        { note: Bb_BUGLE.third, time: 0.28, dur: 0.14, vol: 0.30 },
+        { note: Bb_BUGLE.top, time: 0.44, dur: 0.60, vol: 0.35 },
+      ];
+    } else {
+      // Assembly / Routine Trail Patrol
+      sequence = [
+        { note: Bb_BUGLE.mid, time: 0.0, dur: 0.18, vol: 0.22 },
+        { note: Bb_BUGLE.mid, time: 0.22, dur: 0.18, vol: 0.22 },
+        { note: Bb_BUGLE.high, time: 0.44, dur: 0.32, vol: 0.26 },
+        { note: Bb_BUGLE.third, time: 0.80, dur: 0.24, vol: 0.28 },
+        { note: Bb_BUGLE.high, time: 1.08, dur: 0.50, vol: 0.24 },
+      ];
+    }
+
+    sequence.forEach(({ note, time: noteTime, dur, vol }) => {
+      if (!this.ctx) return;
+      const startTime = t + noteTime;
+
+      // 1. Dual harmonic brass oscillators (sawtooth + triangle)
+      const osc1 = this.ctx.createOscillator();
+      const osc2 = this.ctx.createOscillator();
+      osc1.type = 'sawtooth';
+      osc2.type = 'triangle';
+      osc1.frequency.setValueAtTime(note, startTime);
+      osc2.frequency.setValueAtTime(note * 1.002, startTime); // Slight chorus thickness
+
+      // 2. Brass lip-buzz envelope & bell resonance filter
+      const brassFilter = this.ctx.createBiquadFilter();
+      brassFilter.type = 'bandpass';
+      brassFilter.frequency.setValueAtTime(note * 1.8, startTime);
+      brassFilter.Q.setValueAtTime(3.2, startTime);
+
+      // 3. High-cut warming to simulate open-air canyon acoustic propagation
+      const distanceFilter = this.ctx.createBiquadFilter();
+      distanceFilter.type = 'lowpass';
+      distanceFilter.frequency.setValueAtTime(2400, startTime);
+
+      // 4. Amplitude envelope with brass tonguing attack and smooth decay
+      const gainNode = this.ctx.createGain();
+      gainNode.gain.setValueAtTime(0.001, startTime);
+      gainNode.gain.exponentialRampToValueAtTime(vol * 0.45, startTime + 0.04);
+      gainNode.gain.setValueAtTime(vol * 0.42, startTime + dur - 0.04);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + dur + 0.08);
+
+      // Reverb / Mountain canyon delay simulation
+      const echoGain = this.ctx.createGain();
+      echoGain.gain.setValueAtTime(0.12 * vol, startTime + 0.22);
+      echoGain.gain.exponentialRampToValueAtTime(0.001, startTime + dur + 0.5);
+
+      osc1.connect(brassFilter);
+      osc2.connect(brassFilter);
+      brassFilter.connect(distanceFilter);
+      distanceFilter.connect(gainNode);
+      distanceFilter.connect(echoGain);
+
+      gainNode.connect(this.ctx.destination);
+      echoGain.connect(this.ctx.destination);
+
+      osc1.start(startTime);
+      osc2.start(startTime);
+      osc1.stop(startTime + dur + 0.6);
+      osc2.stop(startTime + dur + 0.6);
+    });
+  }
+
+  /**
+   * Sound of multiple mounted cavalry horses trotting together with leather tack and sabre jingle.
+   */
+  public playCavalryTroopHooves() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // Troop of 3 horses galloping/trotting slightly out of phase
+    const offsets = [0, 0.06, 0.14, 0.22, 0.28, 0.36];
+    offsets.forEach((dt, i) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'triangle';
+      const basePitch = (i % 2 === 0 ? 115 : 90) + (Math.random() * 12 - 6);
+      osc.frequency.setValueAtTime(basePitch, t + dt);
+      osc.frequency.exponentialRampToValueAtTime(40, t + dt + 0.05);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(380, t + dt);
+
+      gain.gain.setValueAtTime(0.09, t + dt);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dt + 0.05);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(t + dt);
+      osc.stop(t + dt + 0.06);
+    });
+
+    // Subtle metallic sabre scabbard / bit chain jingle
+    const jingleOsc = this.ctx.createOscillator();
+    const jingleGain = this.ctx.createGain();
+    const jingleFilter = this.ctx.createBiquadFilter();
+
+    jingleOsc.type = 'sine';
+    jingleOsc.frequency.setValueAtTime(3200 + Math.random() * 800, t);
+    jingleFilter.type = 'bandpass';
+    jingleFilter.frequency.setValueAtTime(3400, t);
+    jingleFilter.Q.setValueAtTime(8, t);
+
+    jingleGain.gain.setValueAtTime(0.02, t);
+    jingleGain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+
+    jingleOsc.connect(jingleFilter);
+    jingleFilter.connect(jingleGain);
+    jingleGain.connect(this.ctx.destination);
+
+    jingleOsc.start(t);
+    jingleOsc.stop(t + 0.14);
+  }
 }
 
 export const soundEngine = new SoundEngine();

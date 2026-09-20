@@ -20,6 +20,7 @@ import { MiningSystem } from '../world/mining';
 import { WildlifeManager } from '../world/wildlife';
 import { CombatManager } from '../world/combat';
 import { ApacheEncounterManager } from '../world/apacheEncounters';
+import { CavalryPatrolManager } from '../world/cavalryPatrol';
 import { AtmosphereManager } from '../world/atmosphere';
 import { MineBuildingSystem, STRUCTURE_BLUEPRINTS, validateStructurePlacement } from '../world/mineBuilding';
 import { soundEngine } from '../audio/soundEffects';
@@ -424,6 +425,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const wildlifeManagerRef = useRef<WildlifeManager | null>(null);
   const combatManagerRef = useRef<CombatManager | null>(null);
   const apacheEncountersRef = useRef<ApacheEncounterManager | null>(null);
+  const cavalryPatrolRef = useRef<CavalryPatrolManager | null>(null);
   const atmosphereManagerRef = useRef<AtmosphereManager | null>(null);
   const smokeSignalSystemRef = useRef<ApacheSmokeSignalSystem | null>(null);
   const apacheDrumTimerRef = useRef<number>(0);
@@ -881,6 +883,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     const apacheEncounters = new ApacheEncounterManager(scene);
     apacheEncountersRef.current = apacheEncounters;
+
+    const cavalryPatrol = new CavalryPatrolManager(scene);
+    cavalryPatrolRef.current = cavalryPatrol;
 
     const hydrologyEngine = new DesertHydrologyEngine(scene);
     hydrologyEngineRef.current = hydrologyEngine;
@@ -4165,6 +4170,26 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      // 3a-0b. Fort McDowell US Cavalry Patrol Greeting
+      if (cavalryPatrolRef.current) {
+        const cavalryDialogue = cavalryPatrolRef.current.getNearbyCavalryDialogue(playerPos.current);
+        if (cavalryDialogue) {
+          const handleCavalryHail = () => {
+            soundEngine.playCavalryBugleCall('assembly');
+            if (onShowBanner) {
+              onShowBanner(`🎖️ ${cavalryDialogue.rank} ${cavalryDialogue.name}: ${cavalryDialogue.text}`);
+            }
+          };
+
+          if (executeAction) {
+            handleCavalryHail();
+          } else {
+            onPromptInteract(`Hail Cavalry Patrol (${cavalryDialogue.name}) [E]`, handleCavalryHail);
+          }
+          return;
+        }
+      }
+
       // 3a-1. Tortilla Flat Livery Stable & Corral (x: 14.8, z: -242.5)
       const distToLivery = Math.hypot(px - 14.8, pz - (-242.5));
       if (distToLivery < 10.0 && onOpenTortillaFlat) {
@@ -5991,6 +6016,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         townfolkManagerRef.current.update(delta, playerPos.current);
       }
 
+      // 5b-6. Fort McDowell US Cavalry Patrol Column
+      if (cavalryPatrolRef.current) {
+        cavalryPatrolRef.current.update(
+          delta,
+          playerPos.current,
+          getTerrainHeight,
+          (msg) => {
+            if (onShowBanner) onShowBanner(msg);
+          }
+        );
+      }
+
       // 5c. Subterranean Mine Shaft & Granular Mini-Voxel Engine
       if (undergroundLayersRef.current) {
         undergroundLayersRef.current.update(delta, performance.now(), timeOfDay, weather);
@@ -6372,6 +6409,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       if (apacheEncountersRef.current && typeof apacheEncountersRef.current.dispose === 'function') {
         apacheEncountersRef.current.dispose();
         apacheEncountersRef.current = null;
+      }
+      if (cavalryPatrolRef.current && typeof cavalryPatrolRef.current.dispose === 'function') {
+        cavalryPatrolRef.current.dispose();
+        cavalryPatrolRef.current = null;
       }
       if (mineBuildingRef.current && typeof mineBuildingRef.current.dispose === 'function') {
         mineBuildingRef.current.dispose();
