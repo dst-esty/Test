@@ -2434,6 +2434,499 @@ class SoundEngine {
     stirrupOsc.start(t + 0.08);
     stirrupOsc.stop(t + 0.38);
   }
+
+  /**
+   * Distant Apache canyon war drums reverberating through the Superstition Mountains.
+   * Procedural resonant low-frequency rawhide drum pulse.
+   */
+  public playApacheWarDrum(intensity: number = 0.5) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const volume = Math.min(0.28, 0.08 + intensity * 0.18);
+
+    // Double beat rhythm (ta-TUM heartbeat pattern)
+    [0, 0.18].forEach((offset, idx) => {
+      if (!this.ctx) return;
+      const beatTime = t + offset;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'sine';
+      // Rawhide drum membrane pitch drop
+      const startPitch = idx === 0 ? 92 : 80;
+      const endPitch = idx === 0 ? 54 : 44;
+      osc.frequency.setValueAtTime(startPitch, beatTime);
+      osc.frequency.exponentialRampToValueAtTime(endPitch, beatTime + 0.35);
+
+      // Warm cavernous body filter
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(260, beatTime);
+      filter.frequency.exponentialRampToValueAtTime(140, beatTime + 0.4);
+
+      const beatVol = idx === 0 ? volume * 0.7 : volume;
+      gain.gain.setValueAtTime(0.001, beatTime);
+      gain.gain.linearRampToValueAtTime(beatVol, beatTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, beatTime + 0.65);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(beatTime);
+      osc.stop(beatTime + 0.7);
+    });
+  }
+
+  /**
+   * Eerie desert night horned owl warning call echoing from high rocky bluffs.
+   */
+  public playApacheSentinelCall() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // Classic Great Horned Owl "Whoo-hoo-o-o, whoo-o-o"
+    const notes = [
+      { delay: 0.0, dur: 0.28, freq: 360 },
+      { delay: 0.38, dur: 0.22, freq: 380 },
+      { delay: 0.72, dur: 0.42, freq: 340 },
+    ];
+
+    notes.forEach(({ delay, dur, freq }) => {
+      if (!this.ctx) return;
+      const st = t + delay;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq - 15, st);
+      osc.frequency.linearRampToValueAtTime(freq + 10, st + dur * 0.4);
+      osc.frequency.linearRampToValueAtTime(freq - 25, st + dur);
+
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(freq, st);
+      filter.Q.setValueAtTime(3.0, st);
+
+      gain.gain.setValueAtTime(0.001, st);
+      gain.gain.linearRampToValueAtTime(0.07, st + dur * 0.3);
+      gain.gain.exponentialRampToValueAtTime(0.001, st + dur);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(st);
+      osc.stop(st + dur + 0.02);
+    });
+  }
+
+  /**
+   * Distant Apache battle war cry echoing through the rocky canyon passes.
+   * Modulated vocal formant sweep with canyon resonance.
+   */
+  public playApacheWarCry() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const tremolo = this.ctx.createOscillator();
+    const tremoloGain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(750, t);
+    osc.frequency.exponentialRampToValueAtTime(1150, t + 0.25);
+    osc.frequency.exponentialRampToValueAtTime(550, t + 0.65);
+
+    // Rapid trill / ululation modulation
+    tremolo.type = 'sine';
+    tremolo.frequency.setValueAtTime(14, t);
+    tremoloGain.gain.setValueAtTime(160, t);
+    tremolo.connect(osc.frequency);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(950, t);
+    filter.Q.setValueAtTime(4.5, t);
+
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.18, t + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    tremolo.start(t);
+    osc.start(t);
+    tremolo.stop(t + 0.72);
+    osc.stop(t + 0.72);
+  }
+
+  /**
+   * Aerodynamic arrow whistling whoosh passing close by.
+   */
+  public playArrowWhoosh() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    const bufferSize = this.ctx.sampleRate * 0.25;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2200, t);
+    filter.frequency.exponentialRampToValueAtTime(650, t + 0.22);
+    filter.Q.setValueAtTime(6.0, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.15, t + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    noise.start(t);
+    noise.stop(t + 0.25);
+  }
+
+  /**
+   * Arrow striking ground, rock, or wooden headframe with sharp thud.
+   */
+  public playArrowImpact() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(320, t);
+    osc.frequency.exponentialRampToValueAtTime(80, t + 0.09);
+
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.13);
+  }
+
+  /**
+   * Heavy galloping desert war pony hooves on hard canyon gravel.
+   */
+  public playWarHorseGallop() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // Double-strike hoofbeat (ba-dump)
+    [0.0, 0.09].forEach((delay) => {
+      if (!this.ctx) return;
+      const st = t + delay;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(140, st);
+      osc.frequency.exponentialRampToValueAtTime(45, st + 0.08);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(300, st);
+
+      gain.gain.setValueAtTime(0.16, st);
+      gain.gain.exponentialRampToValueAtTime(0.001, st + 0.09);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(st);
+      osc.stop(st + 0.1);
+    });
+  }
+
+  /**
+   * Eerie mountain wind whisper and tumbling pebbles as a high-ridge scout disappears.
+   */
+  public playScoutVanish() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    const bufferSize = this.ctx.sampleRate * 0.4;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1200, t);
+    filter.frequency.exponentialRampToValueAtTime(400, t + 0.38);
+    filter.Q.setValueAtTime(3.0, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.08, t + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    noise.start(t);
+    noise.stop(t + 0.42);
+  }
+
+  /**
+   * Heavy rockfall, burning timber crackle, and catastrophic collapse when Apache saboteurs strike a mine.
+   */
+  public playMineSabotageRumble() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // 1. Deep seismic subterranean rumble
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(80, t);
+    osc.frequency.exponentialRampToValueAtTime(28, t + 1.2);
+
+    const oscFilter = this.ctx.createBiquadFilter();
+    oscFilter.type = 'lowpass';
+    oscFilter.frequency.setValueAtTime(160, t);
+    oscFilter.frequency.exponentialRampToValueAtTime(45, t + 1.2);
+
+    const oscGain = this.ctx.createGain();
+    oscGain.gain.setValueAtTime(0.001, t);
+    oscGain.gain.linearRampToValueAtTime(0.35, t + 0.1);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, t + 1.4);
+
+    osc.connect(oscFilter);
+    oscFilter.connect(oscGain);
+    oscGain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 1.45);
+
+    // 2. Tumbled boulders and falling scree noise burst
+    const bufferSize = Math.floor(this.ctx.sampleRate * 1.3);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.45));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.setValueAtTime(320, t);
+    noiseFilter.frequency.exponentialRampToValueAtTime(90, t + 1.2);
+    noiseFilter.Q.setValueAtTime(1.8, t);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.01, t);
+    noiseGain.gain.linearRampToValueAtTime(0.28, t + 0.15);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 1.3);
+
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.ctx.destination);
+    noise.start(t);
+    noise.stop(t + 1.35);
+
+    // 3. Sharp timber snap
+    const snap = this.ctx.createOscillator();
+    snap.type = 'triangle';
+    snap.frequency.setValueAtTime(420, t + 0.08);
+    snap.frequency.exponentialRampToValueAtTime(60, t + 0.28);
+    const snapGain = this.ctx.createGain();
+    snapGain.gain.setValueAtTime(0.001, t + 0.08);
+    snapGain.gain.linearRampToValueAtTime(0.22, t + 0.1);
+    snapGain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    snap.connect(snapGain);
+    snapGain.connect(this.ctx.destination);
+    snap.start(t + 0.08);
+    snap.stop(t + 0.32);
+  }
+
+  /**
+   * Procedural rustle of mesquite branches, ironwood sticks, and tumbling scree stones (Jacob Waltz concealment).
+   */
+  public playBrushCamouflage() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // Foliage rustle noise burst
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.65);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      // Modulate noise with crinkly bursts
+      const mod = Math.sin((i / 44100) * 45) * 0.5 + 0.5;
+      data[i] = (Math.random() * 2 - 1) * (0.4 + 0.6 * mod);
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1800, t);
+    filter.frequency.linearRampToValueAtTime(950, t + 0.5);
+    filter.Q.setValueAtTime(2.2, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.18, t + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    noise.start(t);
+    noise.stop(t + 0.65);
+
+    // Stone thud as berm rocks are stacked
+    const thud = this.ctx.createOscillator();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(140, t + 0.22);
+    thud.frequency.exponentialRampToValueAtTime(45, t + 0.45);
+    const thudGain = this.ctx.createGain();
+    thudGain.gain.setValueAtTime(0.001, t + 0.22);
+    thudGain.gain.linearRampToValueAtTime(0.14, t + 0.25);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.48);
+    thud.connect(thudGain);
+    thudGain.connect(this.ctx.destination);
+    thud.start(t + 0.22);
+    thud.stop(t + 0.5);
+  }
+
+  /**
+   * Chilling high-canyon Apache war cry / warning call signaling an aggressive assault.
+   */
+  public playWarWhoop() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // Undulating frequency sweep mimicking canyon war call
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+
+    // Vibrato LFO
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(14, t);
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.setValueAtTime(110, t);
+    lfo.connect(osc.frequency);
+
+    osc.frequency.setValueAtTime(580, t);
+    osc.frequency.exponentialRampToValueAtTime(920, t + 0.25);
+    osc.frequency.exponentialRampToValueAtTime(640, t + 0.7);
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(750, t);
+    filter.Q.setValueAtTime(3.5, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.24, t + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.75);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    lfo.start(t);
+    osc.start(t);
+    lfo.stop(t + 0.8);
+    osc.stop(t + 0.8);
+  }
+
+  /**
+   * Heavy visceral bone-jarring impact of a mounted warrior's lance strike or war horse trample.
+   */
+  public playLanceStrike() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // 1. Heavy low-frequency body thud
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(32, t + 0.35);
+
+    const oscGain = this.ctx.createGain();
+    oscGain.gain.setValueAtTime(0.38, t);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+
+    osc.connect(oscGain);
+    oscGain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.4);
+
+    // 2. Leather and wooden shaft impact crack
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.15);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.25));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.setValueAtTime(850, t);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.35, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.ctx.destination);
+    noise.start(t);
+    noise.stop(t + 0.16);
+  }
 }
 
 export const soundEngine = new SoundEngine();

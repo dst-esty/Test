@@ -200,6 +200,12 @@ export interface BuiltStructure {
   fuelHoursRemaining?: number; // In game hours (e.g. 12-16 hrs max per day/night without stoking)
   maxFuelHours?: number;
   isLit?: boolean;
+  condition?: number; // 0 (ruined/sabotaged) to 100 (pristine)
+  sabotaged?: boolean;
+  sabotageType?: 'burned' | 'collapsed' | 'dismantled';
+  sabotagedAt?: number;
+  concealed?: boolean; // Camouflaged with desert brush and stones (Jacob Waltz technique)
+  concealmentQuality?: number; // 0 to 100
 }
 
 export interface StructureBlueprint {
@@ -371,7 +377,7 @@ export interface GameSettings {
 }
 
 export interface GameOverDetails {
-  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom';
+  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom' | 'apache_raid';
   title: string;
   subtitle: string;
   cause: string;

@@ -33,6 +33,7 @@ import { advanceDiurnalTime } from './world/atmosphere';
 import { Compass, BookOpen, Map as MapIcon, Sparkles, AlertCircle } from 'lucide-react';
 import { isMobileDevice } from './utils/device';
 import { safeLocalStorage } from './utils/storage';
+import { VigilanceStatus } from './services/apacheVigilanceService';
 
 export default function App() {
   // Player State
@@ -395,6 +396,7 @@ export default function App() {
     return 'balanced';
   });
   const [currentFps, setCurrentFps] = useState<number>(60);
+  const [vigilanceStatus, setVigilanceStatus] = useState<VigilanceStatus | null>(null);
 
   const handleCycleGraphicsQuality = useCallback(() => {
     setGraphicsQuality((prev) => {
@@ -1364,6 +1366,7 @@ export default function App() {
         onRegisterScopeZoomHandler={(fn) => {
           scopeZoomHandlerRef.current = fn;
         }}
+        onUpdateVigilance={setVigilanceStatus}
       />
 
       {/* Compass & Diurnal Cycle HUD with Day/Night Illumination Toggle & Endless Coordinates */}
@@ -1402,6 +1405,7 @@ export default function App() {
       {/* Main Controls & Inventory Overlay */}
       <ControlsOverlay
         playerState={playerState}
+        vigilanceStatus={vigilanceStatus}
         timeOfDay={timeOfDay}
         nearestLandmark={nearestLandmark}
         isAimingRifle={isAimingRifle}

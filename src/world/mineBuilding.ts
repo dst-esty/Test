@@ -372,6 +372,10 @@ export class MineBuildingSystem {
     }
   > = new Map();
 
+  // Apache Sabotage & Jacob Waltz Concealment Visuals
+  private sabotageVisuals: Map<string, THREE.Group> = new Map();
+  private concealmentVisuals: Map<string, THREE.Group> = new Map();
+
   // Particle debris systems
   private constructionParticles: {
     mesh: THREE.Mesh;
@@ -3054,7 +3058,7 @@ export class MineBuildingSystem {
   ): { hit: boolean; structure?: BuiltStructure } {
     for (let i = 0; i < this.builtStructures.length; i++) {
       const s = this.builtStructures[i];
-      // Campfires, rails, torches, and shaft/portal entrances can be stepped into / entered without solid block
+      // Campfires, rails, torches, and shaft/portal entrances can normally be stepped into / entered without solid block
       if (
         s.type === 'campfire' ||
         s.type === 'rail_track' ||
@@ -3062,8 +3066,18 @@ export class MineBuildingSystem {
         s.type === 'deep_shaft' ||
         s.type === 'headframe_hoist' ||
         s.type === 'frontier_torch'
-      )
+      ) {
+        // If sabotaged by Apache rockfall, portal & shaft are physically impassable barriers until cleared!
+        if (s.sabotaged && (s.type === 'timber_portal' || s.type === 'deep_shaft')) {
+          const r = 2.0 + playerRadius;
+          const dx = x - s.position.x;
+          const dz = z - s.position.z;
+          if (Math.abs(dx) <= r && Math.abs(dz) <= r && (dx * dx + dz * dz < r * r)) {
+            return { hit: true, structure: s };
+          }
+        }
         continue;
+      }
       const bp = STRUCTURE_BLUEPRINTS[s.type];
       const hw = (bp?.dimensions.width || 3.2) * 0.42;
       const hd = (bp?.dimensions.depth || 3.2) * 0.42;
@@ -3078,7 +3092,280 @@ export class MineBuildingSystem {
     return { hit: false };
   }
 
+  // ==========================================
+  // APACHE SABOTAGE & JACOB WALTZ CONCEALMENT
+  // ==========================================
+
+  public sabotageStructure(
+    structureId: string,
+    sabotageType: 'burned' | 'collapsed' | 'dismantled' = 'collapsed'
+  ): BuiltStructure | null {
+    const struct = this.builtStructures.find((s) => s.id === structureId);
+    if (!struct) return null;
+
+    struct.sabotaged = true;
+    struct.sabotagedAt = Date.now();
+    struct.sabotageType = sabotageType;
+    struct.condition = 0;
+
+    // If it was concealed, the raid strips the camouflage away
+    if (struct.concealed) {
+      this.removeConcealmentVisual(structureId);
+      struct.concealed = false;
+      struct.concealmentQuality = 0;
+    }
+
+    // Play mine sabotage rumble
+    soundEngine.playMineSabotageRumble();
+
+    // Create 3D Sabotage visual (charred timbers, tumbled rock slide blocking entrance)
+    this.createSabotageVisual(struct);
+
+    return struct;
+  }
+
+  public repairStructure(structureId: string): BuiltStructure | null {
+    const struct = this.builtStructures.find((s) => s.id === structureId);
+    if (!struct || !struct.sabotaged) return null;
+
+    struct.sabotaged = false;
+    struct.condition = 100;
+    delete struct.sabotagedAt;
+    delete struct.sabotageType;
+
+    // Remove 3D sabotage visual
+    this.removeSabotageVisual(structureId);
+
+    // Play construction and pickaxe audio
+    soundEngine.playConstruct();
+    soundEngine.playHammerStake();
+
+    // Spawn dust burst
+    this.spawnDustBurst(
+      new THREE.Vector3(struct.position.x, struct.position.y + 1.5, struct.position.z),
+      0xdcb386,
+      45
+    );
+
+    return struct;
+  }
+
+  public concealStructure(structureId: string, concealed: boolean): BuiltStructure | null {
+    const struct = this.builtStructures.find((s) => s.id === structureId);
+    if (!struct || struct.sabotaged) return null;
+
+    struct.concealed = concealed;
+    struct.concealmentQuality = concealed ? 95 : 0;
+
+    if (concealed) {
+      soundEngine.playBrushCamouflage();
+      this.createConcealmentVisual(struct);
+      this.spawnDustBurst(
+        new THREE.Vector3(struct.position.x, struct.position.y + 1.2, struct.position.z),
+        0x786e4a,
+        25
+      );
+    } else {
+      soundEngine.playBrushCamouflage();
+      this.removeConcealmentVisual(structureId);
+    }
+
+    return struct;
+  }
+
+  private createSabotageVisual(struct: BuiltStructure) {
+    this.removeSabotageVisual(struct.id);
+
+    const group = new THREE.Group();
+    group.position.set(struct.position.x, struct.position.y, struct.position.z);
+    group.rotation.y = struct.rotationY;
+
+    const rockMat = new THREE.MeshStandardMaterial({
+      color: 0x5a3d2c,
+      roughness: 0.96,
+    });
+    const charredWoodMat = new THREE.MeshStandardMaterial({
+      color: 0x181412,
+      roughness: 0.98,
+    });
+    const emberMat = new THREE.MeshStandardMaterial({
+      color: 0xff3b00,
+      emissive: 0xff2200,
+      emissiveIntensity: 0.8,
+      roughness: 0.5,
+    });
+
+    if (struct.type === 'timber_portal' || struct.type === 'deep_shaft') {
+      // 1. Tumbled rockslide mound completely barricading portal opening
+      for (let i = 0; i < 22; i++) {
+        const radius = 0.55 + Math.random() * 0.5;
+        const geo = new THREE.DodecahedronGeometry(radius, 0);
+        const boulder = new THREE.Mesh(geo, rockMat);
+        const bx = (Math.random() - 0.5) * 3.8;
+        const bz = (Math.random() - 0.5) * 1.8;
+        const by = 0.4 + Math.random() * 2.6 * (1.0 - Math.abs(bx) / 2.5);
+        boulder.position.set(bx, by, bz);
+        boulder.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+        boulder.castShadow = true;
+        group.add(boulder);
+      }
+
+      // 2. Charred collapsed timber props tilted and cracked across the rockslide
+      for (let t = 0; t < 5; t++) {
+        const tGeo = new THREE.BoxGeometry(0.42, 3.2 + Math.random() * 1.2, 0.42);
+        const timber = new THREE.Mesh(tGeo, charredWoodMat);
+        timber.position.set((Math.random() - 0.5) * 3.0, 1.2 + Math.random() * 1.2, (Math.random() - 0.5) * 1.0);
+        timber.rotation.set(
+          (Math.random() - 0.5) * 1.2,
+          Math.random() * Math.PI,
+          (Math.random() - 0.5) * 1.2
+        );
+        timber.castShadow = true;
+        group.add(timber);
+      }
+
+      // 3. Glowing embers and smoldering ash bed
+      for (let e = 0; e < 8; e++) {
+        const ember = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.12), emberMat);
+        ember.position.set((Math.random() - 0.5) * 3.2, 0.3 + Math.random() * 1.2, (Math.random() - 0.5) * 1.2);
+        group.add(ember);
+      }
+    } else if (struct.type === 'headframe_hoist') {
+      // Buckled hoist shear-legs and snapped cable
+      for (let i = 0; i < 14; i++) {
+        const geo = new THREE.DodecahedronGeometry(0.5 + Math.random() * 0.4, 0);
+        const rock = new THREE.Mesh(geo, rockMat);
+        rock.position.set((Math.random() - 0.5) * 3.5, 0.4 + Math.random() * 1.2, (Math.random() - 0.5) * 3.5);
+        group.add(rock);
+      }
+      for (let t = 0; t < 4; t++) {
+        const timber = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4.0, 0.4), charredWoodMat);
+        timber.position.set((Math.random() - 0.5) * 2.5, 1.5, (Math.random() - 0.5) * 2.5);
+        timber.rotation.set(0.6, Math.random() * Math.PI, -0.5);
+        group.add(timber);
+      }
+    } else {
+      // Smashed camp / sluice / forge
+      for (let i = 0; i < 10; i++) {
+        const geo = new THREE.DodecahedronGeometry(0.4 + Math.random() * 0.3, 0);
+        const rock = new THREE.Mesh(geo, rockMat);
+        rock.position.set((Math.random() - 0.5) * 3.0, 0.3 + Math.random() * 0.8, (Math.random() - 0.5) * 3.0);
+        group.add(rock);
+      }
+      for (let t = 0; t < 3; t++) {
+        const timber = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.4, 0.3), charredWoodMat);
+        timber.position.set((Math.random() - 0.5) * 2.0, 0.6, (Math.random() - 0.5) * 2.0);
+        timber.rotation.set(Math.random() * 1.2, Math.random() * Math.PI, Math.random() * 1.2);
+        group.add(timber);
+      }
+    }
+
+    this.structuresGroup.add(group);
+    this.sabotageVisuals.set(struct.id, group);
+  }
+
+  private removeSabotageVisual(structureId: string) {
+    const existing = this.sabotageVisuals.get(structureId);
+    if (existing) {
+      this.structuresGroup.remove(existing);
+      this.sabotageVisuals.delete(structureId);
+    }
+  }
+
+  private createConcealmentVisual(struct: BuiltStructure) {
+    this.removeConcealmentVisual(struct.id);
+
+    const group = new THREE.Group();
+    group.position.set(struct.position.x, struct.position.y, struct.position.z);
+    group.rotation.y = struct.rotationY;
+
+    const brushMat = new THREE.MeshStandardMaterial({
+      color: 0x485239, // Arid desert mesquite & creosote green
+      roughness: 0.95,
+    });
+    const dryBrushMat = new THREE.MeshStandardMaterial({
+      color: 0x5e5b42, // Sunbaked ironwood scrub
+      roughness: 0.98,
+    });
+    const stickMat = new THREE.MeshStandardMaterial({
+      color: 0x423224, // Saguaro ribs & dead ironwood sticks
+      roughness: 0.92,
+    });
+    const bermRockMat = new THREE.MeshStandardMaterial({
+      color: 0x76533c, // Mountain hillside sandstone
+      roughness: 0.94,
+    });
+
+    if (struct.type === 'timber_portal' || struct.type === 'deep_shaft') {
+      // 1. Framework of crisscrossing saguaro ribs and desert ironwood poles
+      for (let s = 0; s < 10; s++) {
+        const stickGeo = new THREE.CylinderGeometry(0.06, 0.08, 4.4 + Math.random() * 0.6, 6);
+        const stick = new THREE.Mesh(stickGeo, stickMat);
+        stick.position.set(-1.8 + s * 0.4, 2.2 + (Math.random() - 0.5) * 0.4, 0.15 + (Math.random() - 0.5) * 0.2);
+        stick.rotation.set((Math.random() - 0.5) * 0.25, 0, (Math.random() - 0.5) * 0.45);
+        stick.castShadow = true;
+        group.add(stick);
+      }
+
+      // 2. Thick leafy clusters of desert mesquite and creosote covering the opening
+      for (let b = 0; b < 24; b++) {
+        const r = 0.55 + Math.random() * 0.4;
+        const bGeo = new THREE.DodecahedronGeometry(r, 1);
+        const mat = Math.random() > 0.4 ? brushMat : dryBrushMat;
+        const foliage = new THREE.Mesh(bGeo, mat);
+        const fx = -2.0 + (b % 6) * 0.8 + (Math.random() - 0.5) * 0.3;
+        const fy = 0.8 + Math.floor(b / 6) * 0.95 + (Math.random() - 0.5) * 0.3;
+        const fz = 0.25 + (Math.random() - 0.5) * 0.4;
+        foliage.position.set(fx, fy, fz);
+        foliage.scale.set(1.1 + Math.random() * 0.4, 0.8 + Math.random() * 0.4, 0.7 + Math.random() * 0.3);
+        foliage.castShadow = true;
+        group.add(foliage);
+      }
+
+      // 3. Natural rock berm along the ground to blend seamlessly with the mountain scree
+      for (let r = 0; r < 12; r++) {
+        const geo = new THREE.DodecahedronGeometry(0.45 + Math.random() * 0.35, 0);
+        const rock = new THREE.Mesh(geo, bermRockMat);
+        rock.position.set(-2.2 + r * 0.4, 0.3 + Math.random() * 0.3, 0.35 + (Math.random() - 0.5) * 0.4);
+        rock.castShadow = true;
+        group.add(rock);
+      }
+
+      // 4. Subtle Jacob Waltz trail marker: small flat capstone balanced on ironwood stake
+      const markerStake = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.2, 5), stickMat);
+      markerStake.position.set(2.1, 0.6, 0.5);
+      group.add(markerStake);
+
+      const markerStone = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.12, 0.25), bermRockMat);
+      markerStone.position.set(2.1, 1.25, 0.5);
+      group.add(markerStone);
+    } else {
+      // General brush screen concealing camp / structure
+      for (let b = 0; b < 14; b++) {
+        const r = 0.6 + Math.random() * 0.4;
+        const bGeo = new THREE.DodecahedronGeometry(r, 1);
+        const mat = Math.random() > 0.4 ? brushMat : dryBrushMat;
+        const foliage = new THREE.Mesh(bGeo, mat);
+        foliage.position.set((Math.random() - 0.5) * 3.5, 0.8 + Math.random() * 1.2, (Math.random() - 0.5) * 3.5);
+        group.add(foliage);
+      }
+    }
+
+    this.structuresGroup.add(group);
+    this.concealmentVisuals.set(struct.id, group);
+  }
+
+  private removeConcealmentVisual(structureId: string) {
+    const existing = this.concealmentVisuals.get(structureId);
+    if (existing) {
+      this.structuresGroup.remove(existing);
+      this.concealmentVisuals.delete(structureId);
+    }
+  }
+
   public dispose() {
+    this.sabotageVisuals.clear();
+    this.concealmentVisuals.clear();
     this.structuresGroup.clear();
     this.excavationSiteGroup.clear();
     this.ghostGroup.clear();

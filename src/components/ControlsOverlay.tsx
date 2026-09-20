@@ -41,6 +41,10 @@ import {
   Gauge,
   MapPin,
   Store,
+  Eye,
+  Mountain,
+  Wind,
+  AlertTriangle,
 } from 'lucide-react';
 import { MineStructureType, PlayerState, GraphicsQuality, ClaimInfo, TerritoryClaim } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
@@ -49,6 +53,7 @@ import { InventoryModal } from './InventoryModal';
 import { territoryClaims } from '../services/territoryClaimService';
 import { VirtualJoystick } from './VirtualJoystick';
 import { isMobileDevice } from '../utils/device';
+import { VigilanceStatus, SACRED_ZONES } from '../services/apacheVigilanceService';
 
 interface ControlsOverlayProps {
   playerState: PlayerState;
@@ -122,10 +127,12 @@ interface ControlsOverlayProps {
   onZoomOutScope?: () => void;
   onConsumeFood?: (type: 'venison' | 'bighorn' | 'rabbit' | 'provisions') => void;
   onPurchaseProvisions?: (amount: number, goldCost: number) => void;
+  vigilanceStatus?: VigilanceStatus | null;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   playerState,
+  vigilanceStatus,
   onSelectTool,
   onOpenMap,
   onOpenJournal,
@@ -219,6 +226,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
 
   const [dismissRotatePrompt, setDismissRotatePrompt] = useState<boolean>(false);
   const [isClaimPanelCollapsed, setIsClaimPanelCollapsed] = useState<boolean>(false);
+  const [isVigilanceModalOpen, setIsVigilanceModalOpen] = useState<boolean>(false);
 
   const localProspectorId = useMemo(() => territoryClaims.getOrCreateProspectorId(), []);
 
@@ -646,6 +654,83 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               </>
             )}
           </div>
+
+          {/* Apache Peak Vigilance Indicator */}
+          {vigilanceStatus && (
+            <button
+              onClick={() => setIsVigilanceModalOpen(true)}
+              className={`group flex items-center gap-2 px-2.5 py-1 rounded-full backdrop-blur-md border shadow-md text-[10px] font-mono select-none transition-all cursor-pointer hover:scale-[1.03] active:scale-95 ${
+                vigilanceStatus.level === 'wrathful'
+                  ? 'bg-red-950/95 border-red-500 shadow-[0_0_12px_rgba(239,68,68,0.7)] animate-pulse'
+                  : vigilanceStatus.level === 'hostile'
+                  ? 'bg-rose-950/90 border-rose-600/80 shadow-[0_0_8px_rgba(225,29,72,0.5)]'
+                  : vigilanceStatus.level === 'alert'
+                  ? 'bg-orange-950/85 border-orange-500/70 shadow-orange-900/30'
+                  : vigilanceStatus.level === 'watchful'
+                  ? 'bg-amber-950/75 border-amber-600/60 shadow-amber-900/20'
+                  : 'bg-stone-900/90 border-stone-700/60'
+              }`}
+              title="Apache Peak Vigilance & Mountain Sentinels Surveillance. Click to view Sacred Lore & Threat Status."
+            >
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    vigilanceStatus.level === 'wrathful'
+                      ? 'bg-red-500 animate-ping'
+                      : vigilanceStatus.level === 'hostile'
+                      ? 'bg-rose-500 animate-pulse'
+                      : vigilanceStatus.level === 'alert'
+                      ? 'bg-orange-500 animate-pulse'
+                      : vigilanceStatus.level === 'watchful'
+                      ? 'bg-amber-400'
+                      : 'bg-stone-400'
+                  }`}
+                />
+                <Mountain
+                  className={`w-3.5 h-3.5 ${
+                    vigilanceStatus.level === 'wrathful'
+                      ? 'text-red-400'
+                      : vigilanceStatus.level === 'hostile'
+                      ? 'text-rose-400'
+                      : vigilanceStatus.level === 'alert'
+                      ? 'text-orange-400'
+                      : vigilanceStatus.level === 'watchful'
+                      ? 'text-amber-400'
+                      : 'text-stone-400'
+                  }`}
+                />
+                <span
+                  className={`font-semibold tracking-wider uppercase ${
+                    vigilanceStatus.level === 'wrathful'
+                      ? 'text-red-300 font-bold'
+                      : vigilanceStatus.level === 'hostile'
+                      ? 'text-rose-300'
+                      : vigilanceStatus.level === 'alert'
+                      ? 'text-orange-300'
+                      : vigilanceStatus.level === 'watchful'
+                      ? 'text-amber-300'
+                      : 'text-stone-300'
+                  }`}
+                >
+                  VIGILANCE: {vigilanceStatus.value}%
+                </span>
+              </div>
+
+              {vigilanceStatus.activeSmokeSignals && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-200 border border-amber-600/40 text-[9px] animate-pulse">
+                  <Wind className="w-2.5 h-2.5" />
+                  SMOKE
+                </span>
+              )}
+
+              {vigilanceStatus.activeZone && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-950/80 text-red-300 border border-red-700/50 text-[9px]">
+                  <AlertTriangle className="w-2.5 h-2.5 text-red-400" />
+                  SACRED
+                </span>
+              )}
+            </button>
+          )}
 
           {/* Collapsible Supply Icon & Panel (Field Supplies & Tools) */}
           {isSupplyCollapsed ? (
@@ -1793,6 +1878,222 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         onConsumeFood={onConsumeFood}
         onPurchaseProvisions={onPurchaseProvisions}
       />
+
+      {/* Apache Lore & Peak Vigilance Tactical Modal */}
+      {isVigilanceModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+          onClick={() => setIsVigilanceModalOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-2xl bg-stone-950/95 border-2 border-stone-800 rounded-2xl shadow-2xl p-6 text-stone-200 overflow-y-auto max-h-[90vh] font-sans"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close Button */}
+            <button
+              onClick={() => setIsVigilanceModalOpen(false)}
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-stone-800 text-stone-400 hover:text-stone-100 transition-colors cursor-pointer"
+              title="Close [Esc]"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Header */}
+            <div className="flex items-center gap-3 border-b border-stone-800 pb-4 mb-5">
+              <div className="p-2.5 rounded-xl bg-amber-950/60 border border-amber-600/40 text-amber-400">
+                <Mountain className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold tracking-wide text-amber-100 uppercase">
+                  Apache Lore & Peak Vigilance
+                </h2>
+                <p className="text-xs text-stone-400">
+                  Surveillance of the Sacred Superstitions & Mountain Guardian Wrath
+                </p>
+              </div>
+            </div>
+
+            {/* Current Threat Level Banner */}
+            {vigilanceStatus && (
+              <div className="space-y-4 mb-6">
+                <div
+                  className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${
+                    vigilanceStatus.level === 'wrathful'
+                      ? 'bg-red-950/70 border-red-500/80 shadow-[0_0_20px_rgba(239,68,68,0.4)]'
+                      : vigilanceStatus.level === 'hostile'
+                      ? 'bg-rose-950/60 border-rose-600/70'
+                      : vigilanceStatus.level === 'alert'
+                      ? 'bg-orange-950/50 border-orange-600/60'
+                      : vigilanceStatus.level === 'watchful'
+                      ? 'bg-amber-950/40 border-amber-600/50'
+                      : 'bg-stone-900/60 border-stone-700/60'
+                  }`}
+                >
+                  <div>
+                    <div className="text-[11px] font-mono font-semibold tracking-wider text-stone-400 uppercase">
+                      Current Mountain Threat Level
+                    </div>
+                    <div
+                      className={`text-base font-bold tracking-wide mt-0.5 ${
+                        vigilanceStatus.level === 'wrathful'
+                          ? 'text-red-300'
+                          : vigilanceStatus.level === 'hostile'
+                          ? 'text-rose-300'
+                          : vigilanceStatus.level === 'alert'
+                          ? 'text-orange-300'
+                          : vigilanceStatus.level === 'watchful'
+                          ? 'text-amber-300'
+                          : 'text-stone-300'
+                      }`}
+                    >
+                      {vigilanceStatus.level === 'wrathful'
+                        ? '⚡ WRATH OF THE SACRED PEAKS'
+                        : vigilanceStatus.level === 'hostile'
+                        ? '🏹 WAR PARTY MOBILIZING'
+                        : vigilanceStatus.level === 'alert'
+                        ? '🔥 ALERT SENTINEL RIDGES'
+                        : vigilanceStatus.level === 'watchful'
+                        ? '👁️ WATCHFUL EYES ON HIGH CRAGS'
+                        : '🌲 DORMANT / DRIFTING PEACE'}
+                    </div>
+                    <p className="text-xs text-stone-300 mt-1 max-w-md">
+                      {vigilanceStatus.description}
+                    </p>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <div className="text-3xl font-black font-mono text-amber-400">
+                      {vigilanceStatus.value}%
+                    </div>
+                    <div className="text-[10px] font-mono text-stone-400">Peak Vigilance</div>
+                  </div>
+                </div>
+
+                {/* Progress Bar with Notches */}
+                <div className="space-y-1.5">
+                  <div className="relative w-full bg-stone-900 h-3 rounded-full overflow-hidden border border-stone-800">
+                    <div
+                      className={`h-full transition-all duration-500 rounded-full ${
+                        vigilanceStatus.level === 'wrathful'
+                          ? 'bg-gradient-to-r from-orange-600 via-rose-600 to-red-600'
+                          : vigilanceStatus.level === 'hostile'
+                          ? 'bg-gradient-to-r from-amber-600 to-rose-600'
+                          : vigilanceStatus.level === 'alert'
+                          ? 'bg-gradient-to-r from-amber-500 to-orange-500'
+                          : vigilanceStatus.level === 'watchful'
+                          ? 'bg-amber-500'
+                          : 'bg-emerald-600'
+                      }`}
+                      style={{ width: `${Math.min(100, vigilanceStatus.value)}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[9px] font-mono text-stone-400 px-1">
+                    <span>DORMANT (0-20%)</span>
+                    <span>WATCHFUL (20%)</span>
+                    <span>ALERT (40%)</span>
+                    <span>HOSTILE (65%)</span>
+                    <span className="text-red-400">WRATH (85%+)</span>
+                  </div>
+                </div>
+
+                {/* Active Signs Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                  <div className="p-3 rounded-xl bg-stone-900/60 border border-stone-800 flex items-center gap-3">
+                    <Wind className={`w-5 h-5 ${vigilanceStatus.activeSmokeSignals ? 'text-amber-400 animate-pulse' : 'text-stone-500'}`} />
+                    <div>
+                      <div className="text-xs font-semibold text-stone-200">Smoke Signals</div>
+                      <div className="text-[11px] text-stone-400">
+                        {vigilanceStatus.activeSmokeSignals
+                          ? 'Active puffs rising from Weaver’s Needle & Peralta Rim'
+                          : 'No active smoke telegraphs detected on ridgelines'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-stone-900/60 border border-stone-800 flex items-center gap-3">
+                    <AlertTriangle className={`w-5 h-5 ${vigilanceStatus.activeZone ? 'text-red-400 animate-bounce' : 'text-stone-500'}`} />
+                    <div>
+                      <div className="text-xs font-semibold text-stone-200">Sacred Territory</div>
+                      <div className="text-[11px] text-stone-400">
+                        {vigilanceStatus.activeZone
+                          ? `Inside ${vigilanceStatus.activeZone.name} (${vigilanceStatus.activeZone.desecrationMultiplier}x Desecration Heat)`
+                          : 'Operating outside designated sacred sanctuary perimeters'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sacred Grounds Reference */}
+            <div className="space-y-3 mb-6">
+              <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-amber-300">
+                Sacred Mountain Grounds & Desecration Multipliers
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {SACRED_ZONES.map((zone) => {
+                  const isPlayerInside = vigilanceStatus?.activeZone?.name === zone.name;
+                  return (
+                    <div
+                      key={zone.name}
+                      className={`p-2.5 rounded-lg border text-xs transition-all ${
+                        isPlayerInside
+                          ? 'bg-amber-950/60 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
+                          : 'bg-stone-900/40 border-stone-800 text-stone-400'
+                      }`}
+                    >
+                      <div className="flex justify-between items-center mb-1">
+                        <div>
+                          <span className={`font-semibold ${isPlayerInside ? 'text-amber-200' : 'text-stone-300'}`}>
+                            {zone.name}
+                          </span>
+                          <span className="text-[10px] text-stone-400 block font-serif italic">
+                            "{zone.nativeName}"
+                          </span>
+                        </div>
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-amber-400 font-bold self-start">
+                          {zone.desecrationMultiplier}x Heat
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-stone-400 leading-snug mt-1">
+                        {zone.description}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Prospector Cause & Effect Lore */}
+            <div className="p-4 rounded-xl bg-stone-900/40 border border-stone-800 text-xs text-stone-300 space-y-2">
+              <div className="font-bold text-amber-200 font-mono text-[11px] uppercase tracking-wider">
+                Historical Lore of the Superstition Apache
+              </div>
+              <p className="leading-relaxed text-[11px] text-stone-300">
+                To the Tonto Apache, the Superstition Mountains were the sacred home of the Thunder God and sacred ancestral spirits. Digging for gold or blasting rock with black powder was considered a severe violation of the earth. When Mexican mining expeditions (the Peralta family in 1848) and foreign prospectors entered to extract wealth, the Apache defended the range, destroyed timber shafts, and collapsed mine portals under stone avalanches to return the mountains to peace.
+              </p>
+              <div className="grid grid-cols-2 gap-2 pt-2 text-[10px] font-mono">
+                <div className="bg-stone-950/60 p-2 rounded border border-stone-800">
+                  <span className="text-red-400 font-bold">💥 Dynamite Blasting:</span>
+                  <p className="text-stone-400 mt-0.5">+16 to 35 Vigilance. Rattles canyon walls for miles.</p>
+                </div>
+                <div className="bg-stone-950/60 p-2 rounded border border-stone-800">
+                  <span className="text-amber-400 font-bold">⛏️ Excavation & Sinking:</span>
+                  <p className="text-stone-400 mt-0.5">Digging inside sacred zones steadily escalates alert.</p>
+                </div>
+                <div className="bg-stone-950/60 p-2 rounded border border-stone-800">
+                  <span className="text-orange-400 font-bold">🏗️ Industrial Timbers:</span>
+                  <p className="text-stone-400 mt-0.5">Building mine portals permanently agitates lookouts.</p>
+                </div>
+                <div className="bg-stone-950/60 p-2 rounded border border-stone-800">
+                  <span className="text-emerald-400 font-bold">🏕️ Tortilla Flat Sanctuary:</span>
+                  <p className="text-stone-400 mt-0.5">Vigilance steadily cools down while resting in town.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* On-Screen Mobile Virtual Controls (Joystick & Action Buttons) */}
       {showTouchControls && (

@@ -19,6 +19,7 @@ import { createLandmarkStructures } from '../world/landmarks';
 import { MiningSystem } from '../world/mining';
 import { WildlifeManager } from '../world/wildlife';
 import { CombatManager } from '../world/combat';
+import { ApacheEncounterManager } from '../world/apacheEncounters';
 import { AtmosphereManager } from '../world/atmosphere';
 import { MineBuildingSystem, STRUCTURE_BLUEPRINTS, validateStructurePlacement } from '../world/mineBuilding';
 import { soundEngine } from '../audio/soundEffects';
@@ -60,6 +61,8 @@ import { TownfolkManager } from '../world/townfolk';
 import { townfolkVoice } from '../services/townfolkVoiceService';
 import { DialogueNPCInfo } from './TownfolkDialogueOverlay';
 import { createPostProcessingPipeline, PostProcessingPipeline } from '../world/postProcessing';
+import { apacheVigilance, VigilanceStatus } from '../services/apacheVigilanceService';
+import { ApacheSmokeSignalSystem } from '../world/apacheSmokeSignals';
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -135,6 +138,7 @@ interface WorldCanvasProps {
   onRegisterToggleScopeHandler?: (fn: () => void) => void;
   onRegisterScopeZoomHandler?: (fn: (delta: number) => void) => void;
   onRegisterTeleportHandler?: (fn: (pos: Vector3D) => void) => void;
+  onUpdateVigilance?: (status: VigilanceStatus) => void;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
@@ -209,6 +213,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onRegisterToggleScopeHandler,
   onRegisterScopeZoomHandler,
   onRegisterTeleportHandler,
+  onUpdateVigilance,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
@@ -388,7 +393,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const mineBuildingRef = useRef<MineBuildingSystem | null>(null);
   const wildlifeManagerRef = useRef<WildlifeManager | null>(null);
   const combatManagerRef = useRef<CombatManager | null>(null);
+  const apacheEncountersRef = useRef<ApacheEncounterManager | null>(null);
   const atmosphereManagerRef = useRef<AtmosphereManager | null>(null);
+  const smokeSignalSystemRef = useRef<ApacheSmokeSignalSystem | null>(null);
+  const apacheDrumTimerRef = useRef<number>(0);
+  const apacheOwlTimerRef = useRef<number>(0);
+  const lastVigilanceSyncTime = useRef<number>(0);
   const hydrologyEngineRef = useRef<DesertHydrologyEngine | null>(null);
   const undergroundLayersRef = useRef<UndergroundLayersManager | null>(null);
   const isClimbingLadderRef = useRef(false);
@@ -760,7 +770,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     if (playerStateRef.current.builtStructures?.length) {
       playerStateRef.current.builtStructures.forEach((s) => {
-        mineBuilding.buildStructure(s.type, s.position, s.rotationY);
+        const built = mineBuilding.buildStructure(s.type, s.position, s.rotationY);
+        if (built) {
+          if (s.sabotaged) {
+            mineBuilding.sabotageStructure(built.id, s.sabotageType);
+          } else if (s.concealed) {
+            mineBuilding.concealStructure(built.id, true);
+          }
+        }
       });
     }
 
@@ -773,6 +790,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const atmosphereManager = new AtmosphereManager(scene);
     atmosphereManagerRef.current = atmosphereManager;
     atmosphereManager.updateAtmosphere(timeOfDay, weather, sunLight, hemiLight);
+
+    const smokeSignalSystem = new ApacheSmokeSignalSystem(scene);
+    smokeSignalSystemRef.current = smokeSignalSystem;
+
+    const apacheEncounters = new ApacheEncounterManager(scene);
+    apacheEncountersRef.current = apacheEncounters;
 
     const hydrologyEngine = new DesertHydrologyEngine(scene);
     hydrologyEngineRef.current = hydrologyEngine;
@@ -1370,6 +1393,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const digX = playerPos.current.x + (forwardXZ.x || 0) * 1.6;
         const digZ = playerPos.current.z + (forwardXZ.y || 0) * 1.6;
         const result = digHoleInTerrain(digX, digZ, 0.42, 1.85, 'pickaxe');
+        apacheVigilance.reportExcavation({ x: digX, y: getTerrainHeight(digX, digZ), z: digZ }, 1);
         if (result.hole) {
           multiplayer.broadcastDig(result.hole, 'pickaxe');
         }
@@ -1480,6 +1504,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // Physically deform terrain vertices and penetrate progressive geological rock strata!
       const result = digHoleInTerrain(digX, digZ, 0.48, 1.85, 'shovel');
+      apacheVigilance.reportExcavation({ x: digX, y: digY, z: digZ }, 1);
 
       // Broadcast shovel excavation to multiplayer peers
       if (result.hole) {
@@ -2040,6 +2065,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
         if (wallRes.success) {
           if (onTriggerHitMarker) onTriggerHitMarker();
+          if (cavernHit.point) {
+            apacheVigilance.reportExcavation(
+              { x: cavernHit.point.x, y: cavernHit.point.y, z: cavernHit.point.z },
+              activeTool === 'dynamite' ? 4 : 1
+            );
+          }
 
           const oreYield = wallRes.oreYield || 0;
           const isAutoRedeem = playerStateRef.current.autoRedeemGold !== false;
@@ -2113,6 +2144,43 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const uLayers = undergroundLayersRef.current;
       if (!uLayers) return;
       if (level === 0) {
+        // Check if surface shaft or portal was collapsed by an Apache raid!
+        const surfacePortal = playerStateRef.current.builtStructures?.find(
+          (s) =>
+            (s.type === 'timber_portal' || s.type === 'deep_shaft' || s.type === 'headframe_hoist') &&
+            Math.hypot(s.position.x - uLayers.surfacePos.x, s.position.z - uLayers.surfacePos.z) < 6.5
+        );
+
+        if (surfacePortal?.sabotaged) {
+          const hasPickaxe = playerStateRef.current.equippedTool === 'pickaxe';
+          if (hasPickaxe) {
+            // Player excavates rockslide with pickaxe to escape
+            soundEngine.playPickaxe();
+            soundEngine.playPebbleShower();
+            if (mineBuildingRef.current) {
+              mineBuildingRef.current.repairStructure(surfacePortal.id);
+            }
+            setPlayerState((prev) => ({
+              ...prev,
+              builtStructures: (prev.builtStructures || []).map((s) =>
+                s.id === surfacePortal.id
+                  ? { ...s, sabotaged: false, condition: 100, sabotageType: undefined }
+                  : s
+              ),
+            }));
+            if (onShowBanner) {
+              onShowBanner("⛏️ Broke through the Apache rockslide with your Pickaxe! Emerged onto the desert surface.");
+            }
+          } else {
+            soundEngine.playPebbleShower();
+            soundEngine.playMountainGroan();
+            if (onShowBanner) {
+              onShowBanner("⚠️ SURFACE EXIT BURIED IN BOULDERS! Apache saboteurs collapsed the shaft. Equip Pickaxe to dig through!");
+            }
+            return;
+          }
+        }
+
         soundEngine.playLadderClimb();
         uLayers.setSubterraneanLevel(0);
         const surfY = getTerrainHeight(uLayers.surfacePos.x + 1.5, uLayers.surfacePos.z + 1.5);
@@ -2317,6 +2385,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         });
         if (hitCombat) bulletHitTarget = true;
+
+        // 1b. Shoot Apache scouts or mounted war party
+        if (!bulletHitTarget && apacheEncountersRef.current) {
+          const hitApache = apacheEncountersRef.current.checkBulletHit(cam.position, lookDir, (msg) => {
+            if (onShowBanner) onShowBanner(msg);
+          });
+          if (hitApache) {
+            bulletHitTarget = true;
+            if (onTriggerHitMarker) onTriggerHitMarker();
+          }
+        }
 
         // 2. High-caliber bullet strike against wildlife & hunting game (deer, sheep, rabbits, snakes)
         if (wildlifeManagerRef.current) {
@@ -2530,6 +2609,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         onBuildStructure(type, { x: targetPos.x, y: targetPos.y, z: targetPos.z }, ghostRotationY.current);
       }
 
+      // Report timber portal / building desecration to Apache vigilance
+      apacheVigilance.reportStructureBuilt({ x: targetPos.x, y: targetPos.y, z: targetPos.z }, type);
+
       // If building a mine portal or shaft, anchor subterranean layers to this structure!
       if (type === 'timber_portal' || type === 'deep_shaft' || type === 'headframe_hoist') {
         const sY = getTerrainHeight(targetPos.x, targetPos.z);
@@ -2653,6 +2735,47 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         if (playerStateRef.current.carriedObject) {
           executeStowRock();
           return;
+        }
+      }
+
+      if (e.code === 'KeyK' || e.code === 'KeyG') {
+        // Jacob Waltz Mine Camouflage Technique: Disguise or expose nearby mining structure
+        if (mineBuildingRef.current) {
+          const nearby = mineBuildingRef.current.getNearbyStructure(playerPos.current, 4.8);
+          if (nearby) {
+            if (nearby.sabotaged) {
+              if (onShowBanner) {
+                onShowBanner("⚠️ Cannot camouflage collapsed ruins! Clear Apache rockslide first [E].");
+              }
+              soundEngine.playMountainGroan();
+            } else if (nearby.concealed) {
+              // Pull aside brush camouflage
+              mineBuildingRef.current.concealStructure(nearby.id, false);
+              setPlayerState((prev) => ({
+                ...prev,
+                builtStructures: (prev.builtStructures || []).map((s) =>
+                  s.id === nearby.id ? { ...s, concealed: false, concealmentQuality: 0 } : s
+                ),
+              }));
+              if (onShowBanner) {
+                onShowBanner("🌿 Mesquite camouflage pulled back. Portal is now exposed to ridge sentinels.");
+              }
+            } else {
+              // Apply Jacob Waltz camouflage with native desert mesquite and scree
+              mineBuildingRef.current.concealStructure(nearby.id, true);
+              // Disguising mine calms Apache vigilance
+              apacheVigilance.coolDown(8);
+              setPlayerState((prev) => ({
+                ...prev,
+                builtStructures: (prev.builtStructures || []).map((s) =>
+                  s.id === nearby.id ? { ...s, concealed: true, concealmentQuality: 95 } : s
+                ),
+              }));
+              if (onShowBanner) {
+                onShowBanner("🌿 Mine Entrance Camouflaged! Disguised with desert brush & scree (Jacob Waltz technique). Hidden from Apache scouts.");
+              }
+            }
+          }
         }
       }
 
@@ -3590,6 +3713,58 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
             return;
           } else if (nearby.type === 'headframe_hoist') {
+            if (nearby.sabotaged) {
+              const hasPickaxe = playerStateRef.current.equippedTool === 'pickaxe';
+              const hasMaterials =
+                (playerStateRef.current.blocksDug || 0) >= 3 &&
+                (playerStateRef.current.woodPlanks || 0) >= 1;
+
+              const repairAction = () => {
+                if (!hasPickaxe && !hasMaterials) {
+                  if (onShowBanner) onShowBanner("⚠️ Hoist Rigging Smashed! Requires Pickaxe or 3 Rocks & 1 Wood Plank.");
+                  soundEngine.playMountainGroan();
+                  return;
+                }
+                if (mineBuildingRef.current) {
+                  mineBuildingRef.current.repairStructure(nearby.id);
+                }
+                if (!hasPickaxe && hasMaterials) {
+                  setPlayerState((prev) => ({
+                    ...prev,
+                    blocksDug: Math.max(0, (prev.blocksDug || 0) - 3),
+                    woodPlanks: Math.max(0, (prev.woodPlanks || 0) - 1),
+                    builtStructures: (prev.builtStructures || []).map((s) =>
+                      s.id === nearby.id
+                        ? { ...s, sabotaged: false, condition: 100, sabotageType: undefined }
+                        : s
+                    ),
+                  }));
+                } else {
+                  setPlayerState((prev) => ({
+                    ...prev,
+                    builtStructures: (prev.builtStructures || []).map((s) =>
+                      s.id === nearby.id
+                        ? { ...s, sabotaged: false, condition: 100, sabotageType: undefined }
+                        : s
+                    ),
+                  }));
+                }
+                if (onShowBanner) onShowBanner("⛏️ Headframe Hoist Repaired! Cables re-strung and shear-legs secured.");
+              };
+
+              if (executeAction) {
+                repairAction();
+              } else {
+                const prompt = hasPickaxe
+                  ? '⛏️ Repair Smashed Headframe Hoist with Pickaxe [E]'
+                  : hasMaterials
+                  ? '⛏️ Rebuild Headframe Hoist [E] (Costs 3 Rocks, 1 Wood)'
+                  : '⚠️ Headframe Hoist Smashed by Apache! (Need Pickaxe or 3 Rocks, 1 Wood) [E]';
+                onPromptInteract(prompt, repairAction);
+              }
+              return;
+            }
+
             const enterAction = () => {
               const uLayersInst = undergroundLayersRef.current;
               if (uLayersInst) {
@@ -3613,7 +3788,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             if (executeAction) {
               enterAction();
             } else {
-              onPromptInteract('Ride Headframe Hoist into Shaft [E]', enterAction);
+              const hoistPrompt = nearby.concealed
+                ? 'Ride Camouflaged Headframe Hoist into Shaft [E]  •  [K] Remove Brush'
+                : 'Ride Headframe Hoist into Shaft [E]  •  [K] Camouflage Mine';
+              onPromptInteract(hoistPrompt, enterAction);
             }
             return;
           } else if (nearby.type === 'rail_track') {
@@ -3632,10 +3810,69 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             nearby.type === 'timber_portal' ||
             nearby.type === 'deep_shaft'
           ) {
-            const label =
-              nearby.type === 'timber_portal'
-                ? 'Enter Timber Mine Portal Shaft [E]'
-                : 'Descend Deep Bedrock Shaft [E]';
+            if (nearby.sabotaged) {
+              const hasPickaxe = playerStateRef.current.equippedTool === 'pickaxe';
+              const hasMaterials =
+                (playerStateRef.current.blocksDug || 0) >= 3 &&
+                (playerStateRef.current.woodPlanks || 0) >= 1;
+
+              const repairAction = () => {
+                if (!hasPickaxe && !hasMaterials) {
+                  if (onShowBanner) {
+                    onShowBanner("⚠️ Cannot clear collapsed mine! Requires Pickaxe equipped or 3 Rocks & 1 Wood Plank.");
+                  }
+                  soundEngine.playMountainGroan();
+                  return;
+                }
+
+                if (mineBuildingRef.current) {
+                  mineBuildingRef.current.repairStructure(nearby.id);
+                }
+
+                if (!hasPickaxe && hasMaterials) {
+                  setPlayerState((prev) => ({
+                    ...prev,
+                    blocksDug: Math.max(0, (prev.blocksDug || 0) - 3),
+                    woodPlanks: Math.max(0, (prev.woodPlanks || 0) - 1),
+                    builtStructures: (prev.builtStructures || []).map((s) =>
+                      s.id === nearby.id
+                        ? { ...s, sabotaged: false, condition: 100, sabotageType: undefined }
+                        : s
+                    ),
+                  }));
+                } else {
+                  setPlayerState((prev) => ({
+                    ...prev,
+                    builtStructures: (prev.builtStructures || []).map((s) =>
+                      s.id === nearby.id
+                        ? { ...s, sabotaged: false, condition: 100, sabotageType: undefined }
+                        : s
+                    ),
+                  }));
+                }
+
+                if (onShowBanner) {
+                  onShowBanner("⛏️ Rockfall Cleared & Timbers Rebuilt! Camouflage with brush [K] to evade future Apache raids.");
+                }
+              };
+
+              if (executeAction) {
+                repairAction();
+              } else {
+                const repairPrompt = hasPickaxe
+                  ? '⛏️ Clear Apache Rockslide with Pickaxe [E]'
+                  : hasMaterials
+                  ? '⛏️ Rebuild Collapsed Mine [E] (Costs 3 Rocks, 1 Wood)'
+                  : '⚠️ Mine Collapsed by Apache! (Need Pickaxe or 3 Rocks & 1 Wood) [E]';
+                onPromptInteract(repairPrompt, repairAction);
+              }
+              return;
+            }
+
+            const baseName = nearby.type === 'timber_portal' ? 'Timber Mine Portal Shaft' : 'Deep Bedrock Shaft';
+            const label = nearby.concealed
+              ? `Enter Camouflaged ${baseName} [E]  •  [K] Remove Brush Camouflage`
+              : `Enter ${baseName} [E]  •  [K] Camouflage Mine (Hides from Apache)`;
 
             const enterAction = () => {
               const uLayersInst = undergroundLayersRef.current;
@@ -5354,6 +5591,26 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             });
           },
           (blastPos) => {
+            // Report blast to Apache vigilance (blasting echoes across sacred canyons)
+            apacheVigilance.reportDynamiteBlast({ x: blastPos.x, y: blastPos.y, z: blastPos.z });
+
+            // Check if dynamite blast struck any active mounted warriors
+            if (apacheEncountersRef.current) {
+              apacheEncountersRef.current.checkDynamiteBlast(blastPos, (msg) => {
+                if (onShowBanner) onShowBanner(msg);
+              });
+
+              // Blasting dynamite inside sacred zones with elevated vigilance risks provoking immediate war party response
+              const vStatus = apacheVigilance.getStatus();
+              if (vStatus.activeZone && vStatus.value >= 35) {
+                if (Math.random() < 0.6) {
+                  apacheEncountersRef.current.triggerWarPartyRaid(playerPos.current, getTerrainHeight, (msg) => {
+                    if (onShowBanner) onShowBanner(msg);
+                  });
+                }
+              }
+            }
+
             // Dynamite blast triggers voxel & foliage/rock destruction
             let goldBlasted = 0;
             if (miningSystemRef.current) {
@@ -5445,6 +5702,80 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               }
             }
           }
+        );
+      }
+
+      // 5a-2. Update Apache Scouts & Mounted War Party Encounters
+      if (apacheEncountersRef.current) {
+        const camDir = new THREE.Vector3();
+        camera.getWorldDirection(camDir);
+        const isAiming = isAimingRifleRef.current || false;
+        const isInsideMine = (playerStateRef.current.currentMineLevel || 0) > 0;
+
+        apacheEncountersRef.current.update(
+          delta,
+          playerPos.current,
+          isAiming,
+          camDir,
+          isInsideMine,
+          getTerrainHeight,
+          (dmg, reason) => {
+            if (onTriggerDamageFlash) onTriggerDamageFlash();
+            setPlayerState((prev) => {
+              const nextHealth = prev.health - dmg;
+              if (nextHealth <= 0 && prev.health > 0) {
+                soundEngine.playPlayerDeath();
+                const deathCause =
+                  reason === 'apache_lance'
+                    ? "Impaled by a charging Apache warrior's war lance during a full-gallop cavalry assault across the sacred canyon floor."
+                    : reason === 'apache_cavalry_trample'
+                    ? "Trampled under the hooves of charging Apache war horses defending their ancestral mountain stronghold."
+                    : reason === 'apache_scout_snipe'
+                    ? "Struck down by a deadly sniper arrow loosed from high cliff rim crags by an unseen Apache ridge sentinel."
+                    : reason === 'apache_arrow'
+                    ? "Felled by a whistling flint war arrow. The mountain guardians defended the sacred earth and reclaimed the canyon pass."
+                    : "Struck down by Apache carbine fire while trespassing on sacred mountain grounds. The guardians reclaimed the earth and scattered your prospecting gear.";
+
+                triggerDeath({
+                  reason: 'apache_raid',
+                  title: 'Overcome by Mountain Guardians',
+                  subtitle: 'Defenders of the Sacred Superstitions',
+                  cause: deathCause,
+                  goldFound: prev.goldFound || 0,
+                  blocksDug: prev.blocksDug || 0,
+                  landmarksDiscovered: prev.discoveredLandmarks?.length || 1,
+                  timeSurvivedSeconds: Math.floor((Date.now() - expeditionStartTime.current) / 1000),
+                  coordinates: { x: playerPos.current.x, y: playerPos.current.y, z: playerPos.current.z },
+                });
+                return {
+                  ...prev,
+                  health: 0,
+                };
+              }
+              return {
+                ...prev,
+                health: nextHealth,
+              };
+            });
+          },
+          (bannerMsg) => {
+            if (onShowBanner) onShowBanner(bannerMsg);
+          },
+          playerStateRef.current.builtStructures,
+          (sabotagedStruct) => {
+            if (mineBuildingRef.current) {
+              mineBuildingRef.current.sabotageStructure(sabotagedStruct.id, 'collapsed');
+            }
+            setPlayerState((prev) => ({
+              ...prev,
+              builtStructures: (prev.builtStructures || []).map((s) =>
+                s.id === sabotagedStruct.id
+                  ? { ...s, sabotaged: true, condition: 0, sabotageType: 'collapsed', concealed: false }
+                  : s
+              ),
+            }));
+          },
+          playerStateRef.current.health
         );
       }
 
@@ -5553,6 +5884,50 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           health: Math.round(currentHealthRef.current * 10) / 10,
           isSprinting: currentSprint,
         }));
+      }
+
+      // 8b. Apache Peak Vigilance & Smoke Signal Simulation
+      const isInsideTown = Math.hypot(playerPos.current.x, playerPos.current.z - (-246)) < 65;
+      const vigilanceStatus = apacheVigilance.update(delta, playerPos.current, isInsideTown);
+
+      if (smokeSignalSystemRef.current) {
+        smokeSignalSystemRef.current.setVigilanceState(vigilanceStatus.activeSmokeSignals);
+        smokeSignalSystemRef.current.update(delta, camera, now * 0.001);
+      }
+
+      // Check threshold notifications (warning banners across the Superstitions)
+      const vigilanceWarning = apacheVigilance.checkThresholdWarning(vigilanceStatus);
+      if (vigilanceWarning && onShowBanner) {
+        onShowBanner(vigilanceWarning);
+      }
+
+      // Procedural Apache War Drums & Canyon Sentinel Call Audio
+      if (vigilanceStatus.drumbeatIntensity > 0) {
+        apacheDrumTimerRef.current -= delta;
+        if (apacheDrumTimerRef.current <= 0) {
+          soundEngine.playApacheWarDrum(vigilanceStatus.drumbeatIntensity);
+          // Frequency scales with intensity: 14s at low vigilance down to 4s at max threat
+          const interval = Math.max(3.8, 14.0 - vigilanceStatus.drumbeatIntensity * 10.0);
+          apacheDrumTimerRef.current = interval + (Math.random() - 0.5) * 1.5;
+        }
+      } else {
+        apacheDrumTimerRef.current = 0;
+      }
+
+      // Owl sentinel warning calls in watchful/alert wilderness
+      if (vigilanceStatus.level !== 'dormant' && !isInsideTown) {
+        apacheOwlTimerRef.current -= delta;
+        if (apacheOwlTimerRef.current <= 0) {
+          soundEngine.playApacheSentinelCall();
+          // Occurs every 35-70 seconds
+          apacheOwlTimerRef.current = 35 + Math.random() * 35;
+        }
+      }
+
+      // Throttle vigilance status callback to HUD (~5Hz)
+      if (onUpdateVigilance && (nowMs - lastVigilanceSyncTime.current > 200)) {
+        lastVigilanceSyncTime.current = nowMs;
+        onUpdateVigilance(vigilanceStatus);
       }
 
       // Update endless procedural terrain chunk streaming around player
@@ -5669,6 +6044,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       if (atmosphereManagerRef.current && typeof atmosphereManagerRef.current.dispose === 'function') {
         atmosphereManagerRef.current.dispose();
+      }
+      if (smokeSignalSystemRef.current && typeof smokeSignalSystemRef.current.dispose === 'function') {
+        smokeSignalSystemRef.current.dispose();
+        smokeSignalSystemRef.current = null;
+      }
+      if (apacheEncountersRef.current && typeof apacheEncountersRef.current.dispose === 'function') {
+        apacheEncountersRef.current.dispose();
+        apacheEncountersRef.current = null;
       }
       if (mineBuildingRef.current && typeof mineBuildingRef.current.dispose === 'function') {
         mineBuildingRef.current.dispose();

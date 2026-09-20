@@ -14,6 +14,7 @@ import {
   Layers,
   ChevronDown,
   Droplets,
+  Flame,
 } from 'lucide-react';
 
 interface GameOverModalProps {
@@ -59,6 +60,15 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ details, onRestart
           glow: 'from-red-950/80 via-stone-950/90 to-black/95',
           icon: <Crosshair className="w-8 h-8 text-red-400 animate-pulse" />,
           epitaphHeader: 'SHOT DOWN IN AN UNMARKED CANYON',
+        };
+      case 'apache_raid':
+        return {
+          badge: 'DEFENDERS OF SACRED SUPERSTITIONS',
+          color: 'text-rose-400',
+          borderColor: 'border-rose-700/60',
+          glow: 'from-rose-950/80 via-stone-950/90 to-black/95',
+          icon: <Flame className="w-8 h-8 text-rose-400 animate-pulse" />,
+          epitaphHeader: 'SACRED GROUND RECLAIMED BY APACHE GUARDIANS',
         };
       case 'drowning':
         return {
