@@ -2818,6 +2818,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       if (e.code === 'KeyM') {
         if (playerStateRef.current.ownedMount) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
           const newRiding = !playerStateRef.current.isRidingMount;
           setPlayerState((prev) => ({
             ...prev,

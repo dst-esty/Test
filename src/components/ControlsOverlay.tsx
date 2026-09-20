@@ -45,6 +45,7 @@ import {
   Mountain,
   Wind,
   AlertTriangle,
+  Film,
 } from 'lucide-react';
 import { MineStructureType, PlayerState, GraphicsQuality, ClaimInfo, TerritoryClaim } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
@@ -130,11 +131,13 @@ interface ControlsOverlayProps {
   onPurchaseProvisions?: (amount: number, goldCost: number) => void;
   onDrinkCanteen?: () => void;
   vigilanceStatus?: VigilanceStatus | null;
+  onOpenTitleScreen?: () => void;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   playerState,
   vigilanceStatus,
+  onOpenTitleScreen,
   onSelectTool,
   onOpenMap,
   onOpenJournal,
@@ -229,6 +232,19 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
 
   const [dismissRotatePrompt, setDismissRotatePrompt] = useState<boolean>(false);
   const [isVigilanceModalOpen, setIsVigilanceModalOpen] = useState<boolean>(false);
+
+  // Release pointer lock whenever modals open so the user has full mouse/touch interaction
+  useEffect(() => {
+    if (isVigilanceModalOpen || isInventoryOpen) {
+      if (document.pointerLockElement) {
+        try {
+          document.exitPointerLock();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }, [isVigilanceModalOpen, isInventoryOpen]);
 
   useEffect(() => {
     const handleOrientationCheck = () => {
@@ -387,13 +403,24 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       } else if (e.code === 'KeyG') {
         e.preventDefault();
         onToggleGoggles?.();
-      } else if (e.code === 'Escape' && isInventoryOpen) {
-        setIsInventoryOpen(false);
+      } else if (e.code === 'KeyM') {
+        if (playerState.isRidingMount && onToggleMount) {
+          e.preventDefault();
+          onToggleMount();
+        }
+      } else if (e.code === 'Escape') {
+        if (isVigilanceModalOpen) {
+          e.preventDefault();
+          setIsVigilanceModalOpen(false);
+        } else if (isInventoryOpen) {
+          e.preventDefault();
+          setIsInventoryOpen(false);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isInventoryOpen, toggleHud, onToggleGoggles]);
+  }, [isVigilanceModalOpen, isInventoryOpen, toggleHud, onToggleGoggles, playerState.isRidingMount, onToggleMount]);
 
   useEffect(() => {
     return westernMusic.subscribe(() => {
@@ -950,7 +977,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                       playerState.isRidingMount ? 'text-stone-950 font-bold' : 'text-amber-400'
                     }`}
                   >
-                    {playerState.isRidingMount ? 'Riding [M]' : 'Mount [M]'}
+                    {playerState.isRidingMount ? 'Dismount [M]' : 'Mount [M]'}
                   </span>
                 </button>
               )}
@@ -1240,6 +1267,19 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             </div>
           )}
         </button>
+
+        {/* 5. Replay Cinematic Splash / Title Screen Button */}
+        {onOpenTitleScreen && (
+          <button
+            id="btn-cinematic-splash-toggle"
+            onClick={onOpenTitleScreen}
+            className="group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-stone-900/90 hover:bg-stone-850 border border-amber-600/50 hover:border-amber-400/90 text-stone-400 hover:text-amber-300 transition-all transform hover:scale-105 active:scale-95 cursor-pointer select-none backdrop-blur-md shadow-lg"
+            title="Cinematic Title Screen & Game Overview"
+            aria-label="Cinematic Title Screen"
+          >
+            <Film className="w-4 h-4 text-amber-400/90 group-hover:scale-110 transition-transform" />
+          </button>
+        )}
       </div>
 
         {/* Portal Excavation & Mountain Strain Warning Card (Collapsible) */}
@@ -1768,6 +1808,41 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       </div>
       )}
 
+      {/* Dedicated Dismount Button - Always prominent when riding mount */}
+      {playerState.isRidingMount && onToggleMount && (
+        <div
+          id="mount-dismount-banner"
+          className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 z-40 pointer-events-auto flex items-center justify-center animate-in fade-in slide-in-from-bottom-3 duration-200"
+        >
+          <button
+            id="btn-dedicated-dismount"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleMount();
+            }}
+            className="group flex items-center gap-3 px-5 py-2.5 sm:py-3 rounded-full bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-stone-950 font-bold text-sm shadow-[0_6px_30px_rgba(245,158,11,0.7)] border-2 border-amber-200 hover:border-white transition-all transform hover:scale-105 active:scale-95 cursor-pointer touch-manipulation font-sans select-none"
+            title="Dismount companion [M]"
+            aria-label="Dismount companion"
+          >
+            <span className="text-xl leading-none">
+              {playerState.ownedMount === 'burro' ? '🫏' : '🐎'}
+            </span>
+            <div className="flex flex-col text-left">
+              <span className="text-xs sm:text-sm font-black tracking-wider uppercase text-stone-950 leading-tight">
+                Dismount {playerState.mountName || (playerState.ownedMount === 'burro' ? 'Burro' : 'Horse')}
+              </span>
+              <span className="text-[10px] text-stone-900 font-mono font-bold leading-tight">
+                Click or press [M] to dismount
+              </span>
+            </div>
+            <span className="ml-1 text-[11px] font-mono font-black bg-stone-950 text-amber-300 px-2 py-0.5 rounded-full border border-amber-400/60 shadow">
+              [M]
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Full Expedition Inventory Saddlebag & Frontier Assayer Modal */}
       <InventoryModal
         isOpen={isInventoryOpen}
@@ -1785,18 +1860,24 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       {/* Apache Lore & Peak Vigilance Tactical Modal */}
       {isVigilanceModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+          id="apache-vigilance-modal-backdrop"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md pointer-events-auto select-auto cursor-default animate-in fade-in duration-200"
           onClick={() => setIsVigilanceModalOpen(false)}
         >
           <div
-            className="relative w-full max-w-2xl bg-stone-950/95 border-2 border-stone-800 rounded-2xl shadow-2xl p-6 text-stone-200 overflow-y-auto max-h-[90vh] font-sans"
+            id="apache-vigilance-modal-content"
+            className="relative w-full max-w-2xl bg-stone-950/95 border-2 border-amber-600/40 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)] p-5 sm:p-6 text-stone-200 overflow-y-auto max-h-[85vh] font-sans overscroll-contain pointer-events-auto touch-pan-y"
             onClick={(e) => e.stopPropagation()}
+            onWheel={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
           >
             {/* Close Button */}
             <button
+              id="btn-close-vigilance-top"
               onClick={() => setIsVigilanceModalOpen(false)}
-              className="absolute top-4 right-4 p-2 rounded-full hover:bg-stone-800 text-stone-400 hover:text-stone-100 transition-colors cursor-pointer"
+              className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-full bg-stone-900/90 hover:bg-stone-800 text-stone-300 hover:text-white border border-stone-700/80 transition-colors cursor-pointer z-20 shadow-md"
               title="Close [Esc]"
+              aria-label="Close vigilance modal"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1993,6 +2074,23 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   <p className="text-stone-400 mt-0.5">Vigilance steadily cools down while resting in town.</p>
                 </div>
               </div>
+            </div>
+
+            {/* Bottom Dismiss / Return to Frontier Button */}
+            <div className="mt-5 pt-3 border-t border-stone-800 flex items-center justify-between">
+              <span className="text-[11px] text-stone-500 font-mono">
+                Click anywhere outside or press [Esc] to close
+              </span>
+              <button
+                id="btn-close-vigilance-footer"
+                onClick={() => setIsVigilanceModalOpen(false)}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs font-mono tracking-wider uppercase transition-all shadow-lg active:scale-95 cursor-pointer flex items-center gap-2"
+              >
+                <span>Close Lore</span>
+                <span className="text-[10px] bg-stone-950/40 text-stone-950 px-1.5 py-0.5 rounded font-mono font-bold">
+                  [Esc]
+                </span>
+              </button>
             </div>
           </div>
         </div>

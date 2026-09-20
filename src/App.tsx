@@ -20,6 +20,7 @@ import { TortillaFlatModal } from './components/TortillaFlatModal';
 import { TownfolkDialogueOverlay, DialogueNPCInfo } from './components/TownfolkDialogueOverlay';
 import { GameOverModal } from './components/GameOverModal';
 import { CompassHUD } from './components/CompassHUD';
+import { CinematicSplash } from './components/CinematicSplash';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
 import { soundEngine } from './audio/soundEffects';
 import { westernMusic } from './audio/westernMusic';
@@ -180,6 +181,7 @@ export default function App() {
   const [clues, setClues] = useState<ClueItem[]>(INITIAL_CLUES);
 
   // Modals & UI States
+  const [showSplash, setShowSplash] = useState(true);
   const [hasShownWelcome, setHasShownWelcome] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [isJournalOpen, setIsJournalOpen] = useState(false);
@@ -344,6 +346,7 @@ export default function App() {
   } | null>(null);
 
   const isAnyModalOpen =
+    showSplash ||
     !hasShownWelcome ||
     isMapOpen ||
     isJournalOpen ||
@@ -1159,7 +1162,12 @@ export default function App() {
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
 
       if (e.code === 'KeyM') {
-        setIsMapOpen((prev) => !prev);
+        if (playerStateRef.current.isRidingMount) {
+          e.preventDefault();
+          handleToggleMount();
+        } else {
+          setIsMapOpen((prev) => !prev);
+        }
       } else if (e.code === 'KeyJ') {
         setIsJournalOpen((prev) => !prev);
       } else if (e.code === 'KeyG') {
@@ -1562,10 +1570,22 @@ export default function App() {
         onToggleGoggles={handleToggleGoggles}
         onToggleMount={handleToggleMount}
         onDrinkCanteen={handleDrinkCanteen}
+        onOpenTitleScreen={() => setShowSplash(true)}
       />
 
-      {/* Welcome & Expedition Briefing Modal */}
-      {!hasShownWelcome && (
+      {/* Cinematic Splash Screen (Triple-A Game Start Style) */}
+      {showSplash && (
+        <CinematicSplash
+          onEnterGame={() => {
+            setShowSplash(false);
+            setHasShownWelcome(true);
+            soundEngine.startAmbiance();
+          }}
+        />
+      )}
+
+      {/* Welcome & Expedition Briefing Modal (accessible if splash dismissed without starting directly) */}
+      {!showSplash && !hasShownWelcome && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-300">
           <div className="relative w-full max-w-xl bg-gradient-to-b from-[#f5ebd2] to-[#ebe0c5] text-stone-900 rounded-2xl shadow-2xl border-4 border-[#7a4f27] p-6 sm:p-8 font-serif">
             <div className="flex items-center gap-3 mb-4">
