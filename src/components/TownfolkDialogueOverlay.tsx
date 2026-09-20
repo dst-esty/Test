@@ -40,9 +40,9 @@ const CHARACTER_PRESET_QUESTIONS: Record<string, string[]> = {
     'What dangers prowl the high ridge at dusk?',
   ],
   barkeep_hank: [
+    'Can I rent a room for the night to sleep until dawn?',
     'What rumors are prospectors whispering at the tables?',
     'Tell me about Jacob Waltz and his sack of gold.',
-    'Can I buy supplies and rest my boots here?',
     'Who built this settlement out in the desert?',
   ],
   sheriff_wyatt: [

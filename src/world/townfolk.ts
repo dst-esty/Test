@@ -1036,22 +1036,23 @@ export class TownfolkManager {
         actionPrompt: 'Hear Prospector Lore & Mining Tips',
       },
 
-      // 2. Hank "Dutch" Miller - Saloon Keeper & Barkeep
+      // 2. Hank "Dutch" Miller - Saloon & Hotel Keeper
       {
         id: 'barkeep_hank',
         name: 'Hank "Dutch" Miller',
-        title: 'Superstition Saloon Keeper',
+        title: 'Superstition Saloon & Hotel Keeper',
         role: 'barkeep',
         position: new THREE.Vector3(-9.6, townY + 0.45, -243.6),
         heading: Math.PI / 2, // Facing the boardwalk entrance
         dialogues: [
-          'Welcome to the Superstition Saloon! Ice-cold sarsaparilla, mountain whiskey, and fresh trail rations for weary prospectors.',
-          'If you’re heading deep into the canyons, stock up on timber planks for shaft shoring and rifle cartridges next door before sundown.',
+          'Welcome to the Superstition Saloon & Hotel! Ice-cold sarsaparilla, mountain whiskey, and clean second-floor rooms with goose-feather beds for weary travelers.',
+          'If you’re caught in town after sundown, take a room upstairs for two dollars to sleep through the night. The canyon cold and prowling beasts outside take no prisoners.',
+          'If you’re heading deep into the canyons tomorrow, stock up on timber planks for shaft shoring and rifle cartridges next door before sundown.',
           'Had a rider from Florence come through yesterday—swore he spotted smoke signals rising over Weaver’s Needle. Don’t go into the dark without a loaded Winchester.',
           'Every dollar of gold you pull from the hills, Judge Walker at the Assay counter will cash into honest legal tender at $20.67 an ounce.',
         ],
         actionTab: 'saloon',
-        actionPrompt: 'Open Saloon & Mercantile [E]',
+        actionPrompt: 'Open Saloon & Hotel [E]',
       },
 
       // 3. Silas "Red" McCurdy - Master Hostler & Corral Master

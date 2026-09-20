@@ -18,10 +18,18 @@ import {
   Footprints,
   Package,
   Award,
+  Bed,
+  Moon,
+  Sun,
+  Clock,
+  Key,
+  BookOpen,
 } from 'lucide-react';
 import { PlayerState, Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
 import { DialogueNPCInfo } from './TownfolkDialogueOverlay';
+
+export type TortillaFlatTab = 'mercantile' | 'assayer' | 'saloon' | 'hotel' | 'stagecoach' | 'livery';
 
 interface TortillaFlatModalProps {
   isOpen: boolean;
@@ -30,8 +38,10 @@ interface TortillaFlatModalProps {
   onUpdatePlayerState: (updater: (prev: PlayerState) => PlayerState) => void;
   onFastTravel?: (target: Vector3D) => void;
   onShowBanner?: (msg: string) => void;
-  initialTab?: 'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery';
+  initialTab?: TortillaFlatTab;
   onOpenTownfolkDialogue?: (npc: DialogueNPCInfo) => void;
+  timeOfDay?: number;
+  onBookHotelRoom?: () => void;
 }
 
 export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
@@ -43,8 +53,10 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
   onShowBanner,
   initialTab = 'mercantile',
   onOpenTownfolkDialogue,
+  timeOfDay,
+  onBookHotelRoom,
 }) => {
-  const [activeTab, setActiveTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery'>(initialTab);
+  const [activeTab, setActiveTab] = useState<TortillaFlatTab>(initialTab);
   const [editingMountName, setEditingMountName] = useState(false);
   const [customNameInput, setCustomNameInput] = useState('');
 
@@ -193,6 +205,22 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
           >
             <MessageSquare className="w-4 h-4 text-amber-400" />
             Saloon Lore & Rumors
+          </button>
+          <button
+            onClick={() => setActiveTab('hotel')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-serif rounded-t-xl transition-all ${
+              activeTab === 'hotel'
+                ? 'bg-amber-900/50 text-amber-100 border-t-2 border-x border-amber-600 font-bold'
+                : 'text-stone-400 hover:text-stone-200 hover:bg-stone-800/40'
+            }`}
+          >
+            <Bed className="w-4 h-4 text-amber-400" />
+            Hotel & Boarding Rooms
+            {typeof timeOfDay === 'number' && (timeOfDay >= 19.5 || timeOfDay < 5.5) && (
+              <span className="ml-1 px-1.5 py-0.2 rounded text-[9px] font-sans bg-amber-500/30 text-amber-200 border border-amber-500/50 animate-pulse">
+                Night
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('stagecoach')}
@@ -456,6 +484,34 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
           {/* TAB 3: SALOON LORE & RUMORS */}
           {activeTab === 'saloon' && (
             <div className="space-y-3 font-serif">
+              {/* Hotel Boarding House Quick Banner */}
+              <div className="p-3.5 bg-gradient-to-r from-amber-950/80 via-stone-900 to-amber-950/80 border border-amber-600/50 rounded-xl flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-amber-900/70 border border-amber-500/60 flex items-center justify-center text-amber-300 shrink-0">
+                    <Bed className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-amber-200 flex items-center gap-2">
+                      Superstition Hotel Boarding Rooms ($2.00)
+                      {typeof timeOfDay === 'number' && (timeOfDay >= 19.5 || timeOfDay < 5.5) && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-sans bg-amber-500/30 text-amber-200 border border-amber-500/50 animate-pulse">
+                          Night
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-stone-300">
+                      Second-floor rooms with clean feather beds. Sleep safely through the night until 6:00 AM Dawn.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setActiveTab('hotel')}
+                  className="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 text-stone-950 font-bold text-xs rounded-lg transition-colors shadow shrink-0"
+                >
+                  View Rooms
+                </button>
+              </div>
+
               <div className="p-4 bg-stone-950/80 border border-amber-900/40 rounded-xl space-y-2">
                 <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
                   <MessageSquare className="w-4 h-4 text-amber-400" />
@@ -577,6 +633,144 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TAB: SUPERSTITION HOTEL & BOARDING ROOMS */}
+          {activeTab === 'hotel' && (
+            <div className="space-y-4 font-serif">
+              {/* Day / Night Atmospheric Status Card */}
+              <div
+                className={`p-4 rounded-xl border ${
+                  typeof timeOfDay === 'number' && (timeOfDay >= 19.5 || timeOfDay < 5.5)
+                    ? 'bg-gradient-to-br from-indigo-950/70 via-stone-950 to-amber-950/50 border-amber-500/40 text-stone-200'
+                    : 'bg-gradient-to-br from-amber-950/40 via-stone-950 to-stone-900 border-amber-800/40 text-stone-300'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-10 h-10 rounded-lg flex items-center justify-center border shrink-0 ${
+                        typeof timeOfDay === 'number' && (timeOfDay >= 19.5 || timeOfDay < 5.5)
+                          ? 'bg-indigo-900/70 border-indigo-400/60 text-amber-300'
+                          : 'bg-amber-900/50 border-amber-500/50 text-amber-200'
+                      }`}
+                    >
+                      {typeof timeOfDay === 'number' && (timeOfDay >= 19.5 || timeOfDay < 5.5) ? (
+                        <Moon className="w-5 h-5 text-amber-300" />
+                      ) : (
+                        <Sun className="w-5 h-5 text-amber-400" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-amber-100 flex items-center gap-2">
+                        Superstition Hotel & Boarding House
+                        {typeof timeOfDay === 'number' && (
+                          <span className="text-xs font-mono px-2 py-0.5 rounded bg-stone-900 border border-stone-700 text-amber-300">
+                            {(() => {
+                              const h = Math.floor(timeOfDay);
+                              const m = Math.floor((timeOfDay % 1) * 60);
+                              const p = h >= 12 ? 'PM' : 'AM';
+                              const dh = h % 12 === 0 ? 12 : h % 12;
+                              return `${dh}:${m.toString().padStart(2, '0')} ${p}`;
+                            })()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-stone-300 mt-0.5">
+                        {typeof timeOfDay === 'number' && (timeOfDay >= 19.5 || timeOfDay < 5.5)
+                          ? 'Night has fallen over the desert. Wilderness trails are pitch-black and prowled by mountain lions, hypothermia, and treacherous drops.'
+                          : 'Sunlight bathes the Salt River terrace. Rooms are available for weary prospectors needing uninterrupted sleep until morning.'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Room Card: Room #4 */}
+              <div className="p-4 bg-stone-950/90 border-2 border-amber-700/60 rounded-xl space-y-3 relative overflow-hidden shadow-xl">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider bg-amber-900/70 text-amber-200 border border-amber-500/50 rounded font-bold">
+                        Second Floor • Room #4
+                      </span>
+                      <span className="text-xs font-bold text-amber-300">
+                        Terrace Corner Guest Quarters
+                      </span>
+                    </div>
+                    <div className="text-xs text-stone-300 mt-1.5 leading-relaxed">
+                      Spacious cedar room overlooking the Salt River canyon. Fitted with a heavy pine bedstead, clean goose-feather tick mattress, cast-brass washbasin with cold well water, and kerosene bedside lamp.
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-xl font-bold text-amber-300 font-mono">$2.00</div>
+                    <div className="text-[10px] text-stone-400">per overnight stay</div>
+                  </div>
+                </div>
+
+                {/* Amenities Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                  <div className="p-2.5 bg-stone-900/80 border border-stone-800 rounded-lg text-center">
+                    <Sun className="w-4 h-4 text-amber-400 mx-auto mb-1" />
+                    <div className="text-[11px] font-bold text-stone-200">Sleep to 6:00 AM</div>
+                    <div className="text-[9px] text-stone-400">Awake at Sunrise Dawn</div>
+                  </div>
+                  <div className="p-2.5 bg-stone-900/80 border border-stone-800 rounded-lg text-center">
+                    <Heart className="w-4 h-4 text-red-400 mx-auto mb-1" />
+                    <div className="text-[11px] font-bold text-stone-200">Full Health (100)</div>
+                    <div className="text-[9px] text-stone-400">Heal wounds & fatigue</div>
+                  </div>
+                  <div className="p-2.5 bg-stone-900/80 border border-stone-800 rounded-lg text-center">
+                    <Droplets className="w-4 h-4 text-sky-400 mx-auto mb-1" />
+                    <div className="text-[11px] font-bold text-stone-200">Full Hydration (100)</div>
+                    <div className="text-[9px] text-stone-400">Washbasin & clean well water</div>
+                  </div>
+                  <div className="p-2.5 bg-stone-900/80 border border-stone-800 rounded-lg text-center">
+                    <Sparkles className="w-4 h-4 text-amber-300 mx-auto mb-1" />
+                    <div className="text-[11px] font-bold text-stone-200">Refill Canteen (32oz)</div>
+                    <div className="text-[9px] text-stone-400">Artisan spring water</div>
+                  </div>
+                </div>
+
+                {/* Booking Button */}
+                <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-stone-800/80">
+                  <div className="text-xs text-stone-400">
+                    {cash >= 2.0 ? (
+                      <span className="text-stone-300">
+                        Available Cash: <strong className="text-amber-300 font-mono">${cash.toFixed(2)}</strong>
+                      </span>
+                    ) : (
+                      <span className="text-amber-400/90 italic">
+                        Low on legal tender? Hank Miller will extend courtesy frontier credit!
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (onBookHotelRoom) {
+                        onBookHotelRoom();
+                        onClose();
+                      }
+                    }}
+                    className="flex items-center justify-center gap-2 px-6 py-2.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-stone-950 font-bold text-xs rounded-xl shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <Bed className="w-4 h-4" />
+                    Check In & Sleep Until Dawn ({cash >= 2.0 ? '$2.00' : 'Frontier Credit'})
+                  </button>
+                </div>
+              </div>
+
+              {/* Historic Lore & Stage Records */}
+              <div className="p-3.5 bg-stone-950/80 border border-stone-800 rounded-xl space-y-1.5">
+                <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                  <BookOpen className="w-3.5 h-3.5" />
+                  Boarding House Registry & Stage Records (1881–1884)
+                </div>
+                <p className="text-[11px] text-stone-400 leading-relaxed italic">
+                  "Tortilla Flat was settled in 1880 as a stage relay station along the old freight trail between Mesa and the Roosevelt canyon. Freight haulers, territorial rangers, and prospectors heading toward the high ridges of Weaver's Needle paid two bits for a hot stew and two dollars for a clean bed upstairs. The second-floor doors had stout oak latches to keep out mountain prowlers."
+                </p>
+              </div>
             </div>
           )}
 

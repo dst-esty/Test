@@ -129,7 +129,7 @@ interface WorldCanvasProps {
   onUpdateShaftSinkingStats?: (stats: ShaftSinkingStats | null) => void;
   onRegisterStrikeVoxelHandler?: (fn: () => void) => void;
   onRegisterPlaceTimberHandler?: (fn: () => void) => void;
-  onOpenTortillaFlat?: (tab?: 'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery') => void;
+  onOpenTortillaFlat?: (tab?: 'mercantile' | 'assayer' | 'saloon' | 'hotel' | 'stagecoach' | 'livery') => void;
   onOpenTownfolkDialogue?: (npc: DialogueNPCInfo) => void;
   onToggleDayNight?: () => void;
   onRegisterMobileActionHandler?: (fn: () => void) => void;
@@ -4205,10 +4205,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const distToSaloonDoor = Math.hypot(px - (-10.0), pz - (-246.0));
       const distToMercantileDoor = Math.hypot(px - (-10.0), pz - (-261.5));
       if ((distToSaloonDoor < 5.0 || distToMercantileDoor < 5.0) && onOpenTortillaFlat) {
-        const tab = distToMercantileDoor < distToSaloonDoor ? 'mercantile' : 'saloon';
+        const isNight = timeOfDay >= 19.5 || timeOfDay < 5.5;
+        const tab = distToMercantileDoor < distToSaloonDoor
+          ? 'mercantile'
+          : (isNight ? 'hotel' : 'saloon');
         const label = distToMercantileDoor < distToSaloonDoor
           ? 'Enter Tortilla Flat Mercantile & Assayer [E]'
-          : 'Enter Superstition Saloon [E]';
+          : (isNight
+              ? 'Enter Superstition Saloon & Hotel [E] (Boarding Rooms Available)'
+              : 'Enter Superstition Saloon & Hotel [E]');
         if (executeAction) {
           onOpenTortillaFlat(tab);
         } else {
@@ -4219,10 +4224,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       const distToSaloon = Math.hypot(px - 0, pz - (-250));
       if (distToSaloon < 24 && onOpenTortillaFlat) {
+        const isNight = timeOfDay >= 19.5 || timeOfDay < 5.5;
+        const defaultTab = isNight ? 'hotel' : 'saloon';
         if (executeAction) {
-          onOpenTortillaFlat();
+          onOpenTortillaFlat(defaultTab);
         } else {
-          onPromptInteract('Enter Tortilla Flat Saloon & Mercantile [E]', () => onOpenTortillaFlat());
+          onPromptInteract('Enter Tortilla Flat Saloon, Hotel & Mercantile [E]', () => onOpenTortillaFlat(defaultTab));
         }
         return;
       }

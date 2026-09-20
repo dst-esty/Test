@@ -1228,6 +1228,64 @@ class SoundEngine {
     });
   }
 
+  /**
+   * Sound of checking into a frontier hotel room:
+   * Heavy wooden door latch, grandfather clock pendulum tick, and resonant gentle dawn chord.
+   */
+  public playHotelRest() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // 1. Heavy oak door latch click & wooden frame settle
+    const latchOsc = this.ctx.createOscillator();
+    const latchGain = this.ctx.createGain();
+    latchOsc.type = 'triangle';
+    latchOsc.frequency.setValueAtTime(160, t);
+    latchOsc.frequency.exponentialRampToValueAtTime(45, t + 0.08);
+    latchGain.gain.setValueAtTime(0.12, t);
+    latchGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    latchOsc.connect(latchGain);
+    latchGain.connect(this.ctx.destination);
+    latchOsc.start(t);
+    latchOsc.stop(t + 0.09);
+
+    // 2. Grandfather clock pendulum tick-tock
+    [0.12, 0.32].forEach((offset, idx) => {
+      if (!this.ctx) return;
+      const tickTime = t + offset;
+      const tickOsc = this.ctx.createOscillator();
+      const tickGain = this.ctx.createGain();
+      tickOsc.type = 'sine';
+      tickOsc.frequency.setValueAtTime(idx === 0 ? 520 : 440, tickTime);
+      tickGain.gain.setValueAtTime(0.06, tickTime);
+      tickGain.gain.exponentialRampToValueAtTime(0.001, tickTime + 0.05);
+      tickOsc.connect(tickGain);
+      tickGain.connect(this.ctx.destination);
+      tickOsc.start(tickTime);
+      tickOsc.stop(tickTime + 0.06);
+    });
+
+    // 3. Gentle resonant morning bronze bell / dawn chord (C4 - G4 - E5)
+    const dawnNotes = [261.63, 392.0, 659.25];
+    dawnNotes.forEach((freq, i) => {
+      if (!this.ctx) return;
+      const bellTime = t + 0.5 + i * 0.15;
+      const bellOsc = this.ctx.createOscillator();
+      const bellGain = this.ctx.createGain();
+      bellOsc.type = 'sine';
+      bellOsc.frequency.setValueAtTime(freq, bellTime);
+      bellGain.gain.setValueAtTime(0.07, bellTime);
+      bellGain.gain.exponentialRampToValueAtTime(0.0001, bellTime + 1.2);
+      bellOsc.connect(bellGain);
+      bellGain.connect(this.ctx.destination);
+      bellOsc.start(bellTime);
+      bellOsc.stop(bellTime + 1.3);
+    });
+  }
+
   public playCampfire() {
     if (this.isMuted) return;
     this.init();

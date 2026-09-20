@@ -193,7 +193,7 @@ export default function App() {
   const [selectedDeedClaim, setSelectedDeedClaim] = useState<ClaimInfo | TerritoryClaim | null>(null);
   const [isDepotOpen, setIsDepotOpen] = useState(false);
   const [isTortillaFlatOpen, setIsTortillaFlatOpen] = useState(false);
-  const [tortillaFlatTab, setTortillaFlatTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery'>('mercantile');
+  const [tortillaFlatTab, setTortillaFlatTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'hotel' | 'stagecoach' | 'livery'>('mercantile');
   const [activeDialogueNPC, setActiveDialogueNPC] = useState<DialogueNPCInfo | null>(null);
   const [activeBuildingType, setActiveBuildingType] = useState<MineStructureType>('timber_portal');
   const [gameOverDetails, setGameOverDetails] = useState<GameOverDetails | null>(null);
@@ -491,6 +491,34 @@ export default function App() {
     });
     showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Campfire consumed ~8h of wood fuel.");
   }, [showBanner]);
+
+  // Book a Hotel / Boarding Room at Tortilla Flat Saloon ($2.00)
+  const handleBookHotelRoom = useCallback(() => {
+    const cost = 2.0;
+    const currentCash = playerState.cashDollars || 0;
+    const canAfford = currentCash >= cost;
+    const actualDeduction = canAfford ? cost : 0;
+
+    soundEngine.playHotelRest();
+    setTimeOfDay(6.0); // Safely advance time to 6:00 AM Dawn
+    setPlayerState((prev) => ({
+      ...prev,
+      cashDollars: Math.max(0, (prev.cashDollars || 0) - actualDeduction),
+      health: 100,
+      hydration: 100,
+      canteenOunces: 32,
+    }));
+
+    if (canAfford) {
+      showBanner(
+        "🛏️ Checked into the Superstition Hotel ($2.00)! Slept peacefully on a clean feather bed until 6:00 AM sunrise. Health, hydration & canteen fully replenished."
+      );
+    } else {
+      showBanner(
+        "🛏️ Hank Miller let you sleep in the second-floor boarding room on courtesy frontier credit! Awoke at 6:00 AM sunrise fully refreshed."
+      );
+    }
+  }, [playerState.cashDollars, showBanner]);
 
   const handleToggleDayNight = useCallback(() => {
     setTimeOfDay((prev) => {
@@ -1157,8 +1185,13 @@ export default function App() {
       restartHandlerRef.current();
     }
 
-    showBanner('🌅 A New Expedition Begins at Historic Tortilla Flat! Provision at the Saloon & keep your canteen full.');
-  }, [showBanner]);
+    const isNight = timeOfDay >= 19.5 || timeOfDay < 5.5;
+    if (isNight) {
+      showBanner('🌙 Arrived at Tortilla Flat after dark! Hotel rooms are available upstairs at the Superstition Saloon ($2.00) to sleep safely until dawn.');
+    } else {
+      showBanner('🌅 A New Expedition Begins at Historic Tortilla Flat! Provision at the Saloon & keep your canteen full.');
+    }
+  }, [showBanner, timeOfDay]);
 
   // Keyboard shortcuts (M, J, B, V, 1-9, Esc)
   useEffect(() => {
@@ -1771,6 +1804,8 @@ export default function App() {
         onUpdatePlayerState={setPlayerState}
         onFastTravel={handleFastTravel}
         onShowBanner={showBanner}
+        timeOfDay={timeOfDay}
+        onBookHotelRoom={handleBookHotelRoom}
         onOpenTownfolkDialogue={(npc) => {
           setIsTortillaFlatOpen(false);
           setActiveDialogueNPC(npc);
