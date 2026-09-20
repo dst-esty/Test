@@ -984,11 +984,11 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
     saloonGroup.add(corbel);
   }
 
-  // Painted Saloon & Hotel Main Signboard (Flush-mounted on facade, facing +X street)
+  // Painted Saloon Main Signboard (Flush-mounted on facade, facing +X street)
   const saloonSignTex = createWesternSignTexture(
     'SUPERSTITION SALOON & HOTEL',
     'TORTILLA FLAT — ESTABLISHED 1880',
-    'BOARDING ROOMS $2.00 • CLEAN BEDS • SARSAPARILLA & WHISKEY',
+    'MINERS BOARDING ROOMS • COLD SARSAPARILLA • WHISKEY',
     { bg: '#2b1a10', border: '#d4aa52', text: '#fceecf', subText: '#e8c47a', width: 640, height: 160 }
   );
   const saloonSign = createMountedSignboard(saloonSignTex, 9.6, 1.8, '+X', 0x24150c);
@@ -996,24 +996,17 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
   saloonSign.castShadow = true;
   saloonGroup.add(saloonSign);
 
-  // Hanging Porch Shingle: Superstition Hotel Boarding Rooms
-  const hotelShingleTex = createWesternSignTexture(
-    'HOTEL ROOMS $2.00',
-    'FEATHER BEDS • MEALS • SAFE REST',
-    'OVERNIGHT BOARDING',
-    { bg: '#1c120c', border: '#c8963e', text: '#fff2db', subText: '#dfb76c', width: 512, height: 140 }
+  // Upper Balcony Hotel Boarding Plaque
+  const hotelPlaqueTex = createWesternSignTexture(
+    'BOARDING ROOMS $2.00',
+    'FEATHER BEDS • FRESH WATER • SECURE KEYS',
+    '',
+    { bg: '#1c100a', border: '#e8c47a', text: '#fff0d0', subText: '#dfb86c', width: 480, height: 110 }
   );
-  const hotelShingle = createMountedSignboard(hotelShingleTex, 3.4, 0.9, '+X', 0x24150c);
-  hotelShingle.position.set(6.8, 3.6, 1.8);
-  hotelShingle.castShadow = true;
-  saloonGroup.add(hotelShingle);
-
-  // Hanging iron chains for shingle
-  for (const cz of [0.6, 3.0]) {
-    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.6, 6), forgedIronMat);
-    chain.position.set(6.8, 4.05, cz);
-    saloonGroup.add(chain);
-  }
+  const hotelPlaque = createMountedSignboard(hotelPlaqueTex, 4.2, 1.0, '+X', 0x24150c);
+  hotelPlaque.position.set(8.25, 4.15, -1.8);
+  hotelPlaque.castShadow = true;
+  saloonGroup.add(hotelPlaque);
 
   // Second Floor Balcony & Covered Porch
   const porchRoof = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.28, 14.4), roofShingleMat);

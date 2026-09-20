@@ -39,6 +39,7 @@ import {
   WaterTableState,
   TerritoryClaim,
   GraphicsQuality,
+  TortillaFlatTab,
 } from '../types';
 import { territoryClaims } from '../services/territoryClaimService';
 import { generateContextualClaimName } from '../utils/claimNaming';
@@ -129,7 +130,7 @@ interface WorldCanvasProps {
   onUpdateShaftSinkingStats?: (stats: ShaftSinkingStats | null) => void;
   onRegisterStrikeVoxelHandler?: (fn: () => void) => void;
   onRegisterPlaceTimberHandler?: (fn: () => void) => void;
-  onOpenTortillaFlat?: (tab?: 'mercantile' | 'assayer' | 'saloon' | 'hotel' | 'stagecoach' | 'livery') => void;
+  onOpenTortillaFlat?: (tab?: TortillaFlatTab) => void;
   onOpenTownfolkDialogue?: (npc: DialogueNPCInfo) => void;
   onToggleDayNight?: () => void;
   onRegisterMobileActionHandler?: (fn: () => void) => void;
@@ -4201,35 +4202,56 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         return;
       }
 
-      // 3a-2. Direct Building Door Entrances
-      const distToSaloonDoor = Math.hypot(px - (-10.0), pz - (-246.0));
+      // 3a-2. Direct Building Door Entrances & Superstition Hotel Boarding Rooms
+      const isNight = timeOfDayRef.current >= 19.5 || timeOfDayRef.current < 5.5;
+      const distToSaloonDoor = Math.hypot(px - (-10.0), pz - (-244.0));
+      const distToHotelDoor = Math.hypot(px - (-10.0), pz - (-248.0));
       const distToMercantileDoor = Math.hypot(px - (-10.0), pz - (-261.5));
-      if ((distToSaloonDoor < 5.0 || distToMercantileDoor < 5.0) && onOpenTortillaFlat) {
-        const isNight = timeOfDay >= 19.5 || timeOfDay < 5.5;
-        const tab = distToMercantileDoor < distToSaloonDoor
-          ? 'mercantile'
-          : (isNight ? 'hotel' : 'saloon');
-        const label = distToMercantileDoor < distToSaloonDoor
-          ? 'Enter Tortilla Flat Mercantile & Assayer [E]'
-          : (isNight
-              ? 'Enter Superstition Saloon & Hotel [E] (Boarding Rooms Available)'
-              : 'Enter Superstition Saloon & Hotel [E]');
+
+      // Direct Hotel Stairs & Boarding Entrance
+      if (distToHotelDoor < 5.5 && onOpenTortillaFlat) {
+        const label = isNight
+          ? '🛏️ Superstition Hotel: Sleep in Boarding Room until Dawn ($2.00) [E]'
+          : '🛏️ Superstition Hotel: Miner\'s Boarding House & Rooms ($2.00) [E]';
         if (executeAction) {
-          onOpenTortillaFlat(tab);
+          onOpenTortillaFlat('hotel');
         } else {
-          onPromptInteract(label, () => onOpenTortillaFlat(tab));
+          onPromptInteract(label, () => onOpenTortillaFlat('hotel'));
+        }
+        return;
+      }
+
+      if ((distToSaloonDoor < 5.5 || distToMercantileDoor < 5.5) && onOpenTortillaFlat) {
+        if (distToMercantileDoor < distToSaloonDoor) {
+          if (executeAction) {
+            onOpenTortillaFlat('mercantile');
+          } else {
+            onPromptInteract('Enter Tortilla Flat Mercantile & Assayer [E]', () => onOpenTortillaFlat('mercantile'));
+          }
+        } else {
+          const label = isNight
+            ? '🛏️ Enter Superstition Saloon & Hotel: Boarding Rooms Available ($2.00) [E]'
+            : 'Enter Superstition Saloon & Hotel [E]';
+          const targetTab: TortillaFlatTab = isNight ? 'hotel' : 'saloon';
+          if (executeAction) {
+            onOpenTortillaFlat(targetTab);
+          } else {
+            onPromptInteract(label, () => onOpenTortillaFlat(targetTab));
+          }
         }
         return;
       }
 
       const distToSaloon = Math.hypot(px - 0, pz - (-250));
-      if (distToSaloon < 24 && onOpenTortillaFlat) {
-        const isNight = timeOfDay >= 19.5 || timeOfDay < 5.5;
-        const defaultTab = isNight ? 'hotel' : 'saloon';
+      if (distToSaloon < 26 && onOpenTortillaFlat) {
+        const label = isNight
+          ? '🛏️ Superstition Hotel: Rent Room until Morning ($2.00) / Enter Saloon [E]'
+          : 'Enter Tortilla Flat Saloon & Mercantile [E]';
+        const targetTab: TortillaFlatTab = isNight ? 'hotel' : 'mercantile';
         if (executeAction) {
-          onOpenTortillaFlat(defaultTab);
+          onOpenTortillaFlat(targetTab);
         } else {
-          onPromptInteract('Enter Tortilla Flat Saloon, Hotel & Mercantile [E]', () => onOpenTortillaFlat(defaultTab));
+          onPromptInteract(label, () => onOpenTortillaFlat(targetTab));
         }
         return;
       }

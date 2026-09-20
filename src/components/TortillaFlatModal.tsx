@@ -20,8 +20,13 @@ import {
   Award,
   Navigation,
   Pickaxe,
+  Bed,
+  Moon,
+  Sun,
+  Key,
+  ShieldCheck,
 } from 'lucide-react';
-import { PlayerState, Vector3D, TerritoryClaim } from '../types';
+import { PlayerState, Vector3D, TerritoryClaim, TortillaFlatTab } from '../types';
 import { soundEngine } from '../audio/soundEffects';
 import { DialogueNPCInfo } from './TownfolkDialogueOverlay';
 import { territoryClaims } from '../services/territoryClaimService';
@@ -34,8 +39,10 @@ interface TortillaFlatModalProps {
   onFastTravel?: (target: Vector3D, label?: string) => void;
   onShowBanner?: (msg: string) => void;
   registeredClaims?: TerritoryClaim[];
-  initialTab?: 'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery';
+  initialTab?: TortillaFlatTab;
   onOpenTownfolkDialogue?: (npc: DialogueNPCInfo) => void;
+  timeOfDay?: number;
+  onSleepInHotel?: (paymentMethod: 'cash' | 'gold') => boolean | void;
 }
 
 export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
@@ -48,8 +55,10 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
   registeredClaims,
   initialTab = 'mercantile',
   onOpenTownfolkDialogue,
+  timeOfDay = 12.0,
+  onSleepInHotel,
 }) => {
-  const [activeTab, setActiveTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery'>(initialTab);
+  const [activeTab, setActiveTab] = useState<TortillaFlatTab>(initialTab);
   const [editingMountName, setEditingMountName] = useState(false);
   const [customNameInput, setCustomNameInput] = useState('');
 
@@ -198,6 +207,22 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
           >
             <MessageSquare className="w-4 h-4 text-amber-400" />
             Saloon Lore & Rumors
+          </button>
+          <button
+            onClick={() => setActiveTab('hotel')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-serif rounded-t-xl transition-all ${
+              activeTab === 'hotel'
+                ? 'bg-amber-900/50 text-amber-100 border-t-2 border-x border-amber-600 font-bold'
+                : 'text-stone-400 hover:text-stone-200 hover:bg-stone-800/40'
+            }`}
+          >
+            <Bed className="w-4 h-4 text-amber-400" />
+            <span>Superstition Hotel</span>
+            {(timeOfDay >= 19.5 || timeOfDay < 5.5) && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/40 animate-pulse">
+                NIGHT
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('stagecoach')}
@@ -580,6 +605,226 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
                       </div>
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* Upstairs Hotel Boarding Rooms Promo */}
+              <div className="p-3.5 bg-gradient-to-r from-amber-950/60 via-stone-900 to-amber-950/60 border border-amber-600/50 rounded-xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-amber-900/60 border border-amber-600/60 rounded-lg text-amber-300">
+                    <Bed className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-amber-100 flex items-center gap-1.5">
+                      Superstition Hotel Boarding Rooms (Upstairs)
+                      <span className="text-[10px] text-emerald-400 font-mono font-normal">$2.00 / night</span>
+                    </div>
+                    <p className="text-[11px] text-stone-300 font-serif">
+                      Clean feather ticks, warm wood stove, and peaceful sleep safely until 6:00 AM dawn.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setActiveTab('hotel')}
+                  className="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 text-amber-950 font-bold text-xs rounded-lg transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Bed className="w-3.5 h-3.5" />
+                  <span>Book Room</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: SUPERSTITION HOTEL & BOARDING ROOMS */}
+          {activeTab === 'hotel' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-gradient-to-r from-amber-950/70 via-stone-900 to-amber-950/70 border-2 border-amber-600/70 rounded-xl space-y-2 relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-amber-900/80 border border-amber-500 rounded-lg text-amber-300">
+                      <Bed className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold font-serif text-amber-100 text-base">
+                        Superstition Hotel & Miner's Boarding House
+                      </h3>
+                      <p className="text-xs text-amber-300/80 font-serif">
+                        Historic Second-Floor Rooms • Feather Beds • Cast-Iron Stove • Salt River Canyon
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border bg-stone-950/80">
+                    {(timeOfDay >= 19.5 || timeOfDay < 5.5) ? (
+                      <>
+                        <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                        <span className="text-indigo-300 font-bold">NIGHTTIME</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sun className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="text-amber-300 font-bold">DAYTIME</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-stone-300 leading-relaxed font-serif pt-1">
+                  Upstairs above the Superstition Saloon, clean pine boarding rooms offer a comfortable feather tick, heavy wool blankets, a private brass skeleton key, and a washbasin of pure artesian spring water. Sleeping in a hotel room protects you from nighttime desert hypothermia, predator ambushes, and fully replenishes your vital energy until 6:00 AM dawn.
+                </p>
+              </div>
+
+              {/* Room Rates & Sleep Actions */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Cash Payment Card */}
+                <div className="p-4 bg-stone-950 border border-amber-900/60 rounded-xl flex flex-col justify-between space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-serif font-bold text-amber-200 text-sm flex items-center gap-1.5">
+                        <DollarSign className="w-4 h-4 text-emerald-400" />
+                        Rent with Legal Tender Cash
+                      </span>
+                      <span className="text-emerald-400 font-mono font-bold text-sm">$2.00 / night</span>
+                    </div>
+                    <p className="text-xs text-stone-400 mt-1">
+                      Pay standard territorial rate with your pocket cash ($2.00).
+                    </p>
+                    <div className="mt-2 text-[11px] font-mono text-stone-400">
+                      Your Cash Balance: <span className="text-emerald-300 font-bold">${cash.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      if (onSleepInHotel) {
+                        onSleepInHotel('cash');
+                      } else {
+                        if (cash < 2.0) {
+                          if (onShowBanner) onShowBanner("⚠️ Need $2.00 cash to rent a room! Cash in gold at the Assayer counter.");
+                          return;
+                        }
+                        soundEngine.playHotelRest();
+                        onUpdatePlayerState((prev) => ({
+                          ...prev,
+                          cashDollars: Math.max(0, (prev.cashDollars || 0) - 2.0),
+                          health: 100,
+                          hydration: 100,
+                          canteenOunces: 32,
+                        }));
+                        if (onShowBanner) onShowBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health & Hydration fully restored.");
+                        onClose();
+                      }
+                    }}
+                    disabled={cash < 2.0}
+                    className={`w-full py-2.5 px-4 rounded-lg font-serif text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
+                      cash >= 2.0
+                        ? 'bg-emerald-700 hover:bg-emerald-600 text-emerald-50 hover:scale-[1.02]'
+                        : 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                    }`}
+                  >
+                    <Bed className="w-4 h-4" />
+                    <span>Rent Room & Sleep until Dawn ($2.00 Cash)</span>
+                  </button>
+                </div>
+
+                {/* Gold Dust Payment Card */}
+                <div className="p-4 bg-stone-950 border border-amber-900/60 rounded-xl flex flex-col justify-between space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-serif font-bold text-amber-200 text-sm flex items-center gap-1.5">
+                        <Coins className="w-4 h-4 text-amber-400" />
+                        Rent with Raw Gold Ore
+                      </span>
+                      <span className="text-amber-300 font-mono font-bold text-sm">0.10 oz Gold</span>
+                    </div>
+                    <p className="text-xs text-stone-400 mt-1">
+                      Direct barter with placer gold dust or crushed bonanza quartz.
+                    </p>
+                    <div className="mt-2 text-[11px] font-mono text-stone-400">
+                      Your Gold Dust: <span className="text-amber-300 font-bold">{gold.toFixed(1)} oz</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      if (onSleepInHotel) {
+                        onSleepInHotel('gold');
+                      } else {
+                        if (gold < 0.1) {
+                          if (onShowBanner) onShowBanner("⚠️ Need 0.10 oz gold ore to pay for a hotel room!");
+                          return;
+                        }
+                        soundEngine.playHotelRest();
+                        onUpdatePlayerState((prev) => ({
+                          ...prev,
+                          goldFound: Math.max(0, (prev.goldFound || 0) - 0.1),
+                          health: 100,
+                          hydration: 100,
+                          canteenOunces: 32,
+                        }));
+                        if (onShowBanner) onShowBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health & Hydration fully restored.");
+                        onClose();
+                      }
+                    }}
+                    disabled={gold < 0.1}
+                    className={`w-full py-2.5 px-4 rounded-lg font-serif text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
+                      gold >= 0.1
+                        ? 'bg-amber-700 hover:bg-amber-600 text-stone-950 hover:scale-[1.02]'
+                        : 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                    }`}
+                  >
+                    <Coins className="w-4 h-4" />
+                    <span>Pay with Gold Dust (0.10 oz Gold)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Room Amenities & Night Safety */}
+              <div className="p-3 bg-stone-950/80 border border-stone-800 rounded-xl space-y-2">
+                <div className="text-xs font-serif font-bold text-amber-300 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  Hotel Amenities Included with Every Stay
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-stone-300 font-serif">
+                  <div className="p-2 bg-stone-900/60 rounded border border-stone-800 flex items-center gap-2">
+                    <Sun className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>Advances time to 6:00 AM Sunrise</span>
+                  </div>
+                  <div className="p-2 bg-stone-900/60 rounded border border-stone-800 flex items-center gap-2">
+                    <Heart className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    <span>Full 100% Health Recovery</span>
+                  </div>
+                  <div className="p-2 bg-stone-900/60 rounded border border-stone-800 flex items-center gap-2">
+                    <Droplets className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <span>100% Hydration & Canteen Refill</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Speak with Miss Clara Miller */}
+              {onOpenTownfolkDialogue && (
+                <div className="p-3.5 bg-gradient-to-r from-amber-950/40 via-stone-900 to-amber-950/40 border border-amber-800/50 rounded-xl flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-serif font-bold text-amber-200">
+                      Speak with Clara Miller (Hotel Hostess & Boarding House Keeper)
+                    </div>
+                    <p className="text-[11px] text-stone-400">
+                      Ask about clean linen, local stage passengers, and rumors from the upper canyon.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onOpenTownfolkDialogue({
+                        id: 'clara_miller',
+                        name: 'Clara Miller',
+                        title: 'Hotel Hostess & Homesteader',
+                        role: 'homesteader',
+                        initialGreeting: "Welcome to Tortilla Flat, traveler! If you're staying the night, room 4 upstairs has fresh cedar-shaving pillows and warm wool blankets. How can I help you?",
+                      });
+                    }}
+                    className="px-3 py-1.5 bg-amber-800 hover:bg-amber-700 text-amber-100 rounded-lg text-xs font-serif font-semibold transition-colors shrink-0 cursor-pointer"
+                  >
+                    Speak with Clara
+                  </button>
                 </div>
               )}
             </div>

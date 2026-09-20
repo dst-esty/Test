@@ -24,7 +24,7 @@ import { CinematicSplash } from './components/CinematicSplash';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
 import { soundEngine } from './audio/soundEffects';
 import { westernMusic } from './audio/westernMusic';
-import { ClaimInfo, ClueItem, Landmark, MineStructureType, PlayerState, Vector3D, WeatherType, MineLayerData, GameOverDetails, MultiplayerPlayer, MultiplayerChatMessage, RoomDirection, WaterTableState, GraphicsQuality, TerritoryClaim } from './types';
+import { ClaimInfo, ClueItem, Landmark, MineStructureType, PlayerState, Vector3D, WeatherType, MineLayerData, GameOverDetails, MultiplayerPlayer, MultiplayerChatMessage, RoomDirection, WaterTableState, GraphicsQuality, TerritoryClaim, TortillaFlatTab } from './types';
 import { MultiplayerHUD } from './components/MultiplayerHUD';
 import { ShaftSinkingStats } from './world/undergroundVoxels';
 import { multiplayer } from './multiplayer/multiplayerService';
@@ -193,7 +193,7 @@ export default function App() {
   const [selectedDeedClaim, setSelectedDeedClaim] = useState<ClaimInfo | TerritoryClaim | null>(null);
   const [isDepotOpen, setIsDepotOpen] = useState(false);
   const [isTortillaFlatOpen, setIsTortillaFlatOpen] = useState(false);
-  const [tortillaFlatTab, setTortillaFlatTab] = useState<'mercantile' | 'assayer' | 'saloon' | 'stagecoach' | 'livery'>('mercantile');
+  const [tortillaFlatTab, setTortillaFlatTab] = useState<TortillaFlatTab>('mercantile');
   const [activeDialogueNPC, setActiveDialogueNPC] = useState<DialogueNPCInfo | null>(null);
   const [activeBuildingType, setActiveBuildingType] = useState<MineStructureType>('timber_portal');
   const [gameOverDetails, setGameOverDetails] = useState<GameOverDetails | null>(null);
@@ -491,6 +491,38 @@ export default function App() {
     });
     showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Campfire consumed ~8h of wood fuel.");
   }, [showBanner]);
+
+  const handleSleepInHotel = useCallback((paymentMethod: 'cash' | 'gold') => {
+    const cash = playerState.cashDollars || 0;
+    const gold = playerState.goldFound || 0;
+
+    if (paymentMethod === 'cash') {
+      if (cash < 2.0) {
+        showBanner("⚠️ Not enough cash to rent a room! ($2.00 required). Cash in gold at the Assayer counter.");
+        return false;
+      }
+    } else {
+      if (gold < 0.1) {
+        showBanner("⚠️ Not enough gold ore to barter for a room! (0.10 oz required).");
+        return false;
+      }
+    }
+
+    soundEngine.playHotelRest();
+    setTimeOfDay(6.0); // 6:00 AM Sunrise
+    setPlayerState((prev) => ({
+      ...prev,
+      cashDollars: paymentMethod === 'cash' ? Math.max(0, (prev.cashDollars || 0) - 2.0) : prev.cashDollars,
+      goldFound: paymentMethod === 'gold' ? Math.max(0, (prev.goldFound || 0) - 0.1) : prev.goldFound,
+      health: 100,
+      hydration: 100,
+      canteenOunces: 32,
+    }));
+
+    setIsTortillaFlatOpen(false);
+    showBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health and Hydration fully replenished.");
+    return true;
+  }, [playerState.cashDollars, playerState.goldFound, showBanner]);
 
   const handleToggleDayNight = useCallback(() => {
     setTimeOfDay((prev) => {
@@ -906,6 +938,21 @@ export default function App() {
   useEffect(() => {
     westernMusic.updateDiurnalTime(timeOfDay);
   }, [timeOfDay]);
+
+  // Tortilla Flat Nighttime Hotel Boarding Announcement Banner
+  const isNightTime = timeOfDay >= 19.5 || timeOfDay < 5.5;
+  const prevNightStateRef = useRef<boolean>(isNightTime);
+  useEffect(() => {
+    if (isNightTime && !prevNightStateRef.current) {
+      const px = playerState.position?.x ?? 0;
+      const pz = playerState.position?.z ?? -250;
+      const distToTown = Math.hypot(px - 0, pz - (-250));
+      if (distToTown < 65) {
+        showBanner("🛏️ Night has fallen over Tortilla Flat! You can rent a room at the Superstition Hotel ($2.00) or rest by the campfire until dawn.");
+      }
+    }
+    prevNightStateRef.current = isNightTime;
+  }, [isNightTime, playerState.position, showBanner]);
 
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [viewMode, setViewMode] = useState<'first' | 'third'>('first');
@@ -1778,6 +1825,8 @@ export default function App() {
         onFastTravel={handleFastTravel}
         onShowBanner={showBanner}
         registeredClaims={registeredClaims}
+        timeOfDay={timeOfDay}
+        onSleepInHotel={handleSleepInHotel}
         onOpenTownfolkDialogue={(npc) => {
           setIsTortillaFlatOpen(false);
           setActiveDialogueNPC(npc);

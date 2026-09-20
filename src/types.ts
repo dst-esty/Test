@@ -442,3 +442,5 @@ export interface MultiplayerState {
   } | null;
 }
 
+export type TortillaFlatTab = 'mercantile' | 'assayer' | 'saloon' | 'hotel' | 'stagecoach' | 'livery';
+

@@ -1228,64 +1228,6 @@ class SoundEngine {
     });
   }
 
-  /**
-   * Sound of checking into a frontier hotel room:
-   * Heavy wooden door latch, grandfather clock pendulum tick, and resonant gentle dawn chord.
-   */
-  public playHotelRest() {
-    if (this.isMuted) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const t = this.ctx.currentTime;
-
-    // 1. Heavy oak door latch click & wooden frame settle
-    const latchOsc = this.ctx.createOscillator();
-    const latchGain = this.ctx.createGain();
-    latchOsc.type = 'triangle';
-    latchOsc.frequency.setValueAtTime(160, t);
-    latchOsc.frequency.exponentialRampToValueAtTime(45, t + 0.08);
-    latchGain.gain.setValueAtTime(0.12, t);
-    latchGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-    latchOsc.connect(latchGain);
-    latchGain.connect(this.ctx.destination);
-    latchOsc.start(t);
-    latchOsc.stop(t + 0.09);
-
-    // 2. Grandfather clock pendulum tick-tock
-    [0.12, 0.32].forEach((offset, idx) => {
-      if (!this.ctx) return;
-      const tickTime = t + offset;
-      const tickOsc = this.ctx.createOscillator();
-      const tickGain = this.ctx.createGain();
-      tickOsc.type = 'sine';
-      tickOsc.frequency.setValueAtTime(idx === 0 ? 520 : 440, tickTime);
-      tickGain.gain.setValueAtTime(0.06, tickTime);
-      tickGain.gain.exponentialRampToValueAtTime(0.001, tickTime + 0.05);
-      tickOsc.connect(tickGain);
-      tickGain.connect(this.ctx.destination);
-      tickOsc.start(tickTime);
-      tickOsc.stop(tickTime + 0.06);
-    });
-
-    // 3. Gentle resonant morning bronze bell / dawn chord (C4 - G4 - E5)
-    const dawnNotes = [261.63, 392.0, 659.25];
-    dawnNotes.forEach((freq, i) => {
-      if (!this.ctx) return;
-      const bellTime = t + 0.5 + i * 0.15;
-      const bellOsc = this.ctx.createOscillator();
-      const bellGain = this.ctx.createGain();
-      bellOsc.type = 'sine';
-      bellOsc.frequency.setValueAtTime(freq, bellTime);
-      bellGain.gain.setValueAtTime(0.07, bellTime);
-      bellGain.gain.exponentialRampToValueAtTime(0.0001, bellTime + 1.2);
-      bellOsc.connect(bellGain);
-      bellGain.connect(this.ctx.destination);
-      bellOsc.start(bellTime);
-      bellOsc.stop(bellTime + 1.3);
-    });
-  }
-
   public playCampfire() {
     if (this.isMuted) return;
     this.init();
@@ -1319,6 +1261,56 @@ class SoundEngine {
       crackleGain.connect(this.ctx.destination);
       crackleOsc.start(crackleTime);
       crackleOsc.stop(crackleTime + 0.04);
+    });
+  }
+
+  public playHotelRest() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // 1. Heavy brass key turn and bolt latch lock
+    const clickOsc = this.ctx.createOscillator();
+    const clickGain = this.ctx.createGain();
+    clickOsc.type = 'triangle';
+    clickOsc.frequency.setValueAtTime(2400, t);
+    clickOsc.frequency.exponentialRampToValueAtTime(320, t + 0.08);
+    clickGain.gain.setValueAtTime(0.18, t);
+    clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    clickOsc.connect(clickGain);
+    clickGain.connect(this.ctx.destination);
+    clickOsc.start(t);
+    clickOsc.stop(t + 0.08);
+
+    // 2. Second solid latch engagement
+    const latchOsc = this.ctx.createOscillator();
+    const latchGain = this.ctx.createGain();
+    latchOsc.type = 'sine';
+    latchOsc.frequency.setValueAtTime(480, t + 0.12);
+    latchOsc.frequency.exponentialRampToValueAtTime(140, t + 0.26);
+    latchGain.gain.setValueAtTime(0.22, t + 0.12);
+    latchGain.gain.exponentialRampToValueAtTime(0.001, t + 0.26);
+    latchOsc.connect(latchGain);
+    latchGain.connect(this.ctx.destination);
+    latchOsc.start(t + 0.12);
+    latchOsc.stop(t + 0.26);
+
+    // 3. Peaceful morning dawn chime chord (E4, G#4, B4, E5)
+    const dawnNotes = [329.63, 415.30, 493.88, 659.25];
+    dawnNotes.forEach((freq, i) => {
+      if (!this.ctx) return;
+      const noteTime = t + 0.35 + i * 0.15;
+      const noteOsc = this.ctx.createOscillator();
+      const noteGain = this.ctx.createGain();
+      noteOsc.type = 'sine';
+      noteOsc.frequency.setValueAtTime(freq, noteTime);
+      noteGain.gain.setValueAtTime(0.16, noteTime);
+      noteGain.gain.exponentialRampToValueAtTime(0.0001, noteTime + 1.2);
+      noteOsc.connect(noteGain);
+      noteGain.connect(this.ctx.destination);
+      noteOsc.start(noteTime);
+      noteOsc.stop(noteTime + 1.2);
     });
   }
 

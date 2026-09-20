@@ -1036,23 +1036,22 @@ export class TownfolkManager {
         actionPrompt: 'Hear Prospector Lore & Mining Tips',
       },
 
-      // 2. Hank "Dutch" Miller - Saloon & Hotel Keeper
+      // 2. Hank "Dutch" Miller - Saloon Keeper & Barkeep
       {
         id: 'barkeep_hank',
         name: 'Hank "Dutch" Miller',
-        title: 'Superstition Saloon & Hotel Keeper',
+        title: 'Superstition Saloon Keeper',
         role: 'barkeep',
         position: new THREE.Vector3(-9.6, townY + 0.45, -243.6),
         heading: Math.PI / 2, // Facing the boardwalk entrance
         dialogues: [
-          'Welcome to the Superstition Saloon & Hotel! Ice-cold sarsaparilla, mountain whiskey, and clean second-floor rooms with goose-feather beds for weary travelers.',
-          'If you’re caught in town after sundown, take a room upstairs for two dollars to sleep through the night. The canyon cold and prowling beasts outside take no prisoners.',
-          'If you’re heading deep into the canyons tomorrow, stock up on timber planks for shaft shoring and rifle cartridges next door before sundown.',
+          'Welcome to the Superstition Saloon! Ice-cold sarsaparilla, mountain whiskey, and fresh trail rations for weary prospectors.',
+          'If you’re heading deep into the canyons, stock up on timber planks for shaft shoring and rifle cartridges next door before sundown.',
           'Had a rider from Florence come through yesterday—swore he spotted smoke signals rising over Weaver’s Needle. Don’t go into the dark without a loaded Winchester.',
           'Every dollar of gold you pull from the hills, Judge Walker at the Assay counter will cash into honest legal tender at $20.67 an ounce.',
         ],
         actionTab: 'saloon',
-        actionPrompt: 'Open Saloon & Hotel [E]',
+        actionPrompt: 'Open Saloon & Mercantile [E]',
       },
 
       // 3. Silas "Red" McCurdy - Master Hostler & Corral Master
@@ -1147,6 +1146,7 @@ export class TownfolkManager {
         },
         dialogues: [
           'Good day to you, traveler! The air off the Salt River is sweet this morning. Mind the rattlesnakes if you step off the gravel road.',
+          'If you\'re staying the night in Tortilla Flat, rent an upstairs room in the Superstition Hotel. Clean feather ticks, wool blankets, and a warm stove—much safer than sleeping on the open gravel when the desert cold sets in!',
           'Mr. Jacob Waltz used to pass by with his pack burros loaded with dried jerky and flour. A quiet, hardened man—never said where he dug his gold, God rest his soul.',
           'Be sure to keep your canteen filled at the artesian spring trough. You can’t drink gold when the desert fever takes hold!',
         ],
