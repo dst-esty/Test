@@ -2,12 +2,27 @@ import * as THREE from 'three';
 import { DesertAnimal, Vector3D } from '../types';
 import { soundEngine } from '../audio/soundEffects';
 
+export interface AnimalHarvestResult {
+  hit: boolean;
+  animal?: DesertAnimal;
+  killed?: boolean;
+  message?: string;
+  harvest?: {
+    foodType: 'rabbit_meat' | 'venison' | 'bighorn_mutton';
+    quantity: number;
+    name: string;
+    healthRestored: number;
+  };
+}
+
 interface AnimalEntity {
   data: DesertAnimal;
   mesh: THREE.Group;
   ears?: THREE.Group;
   tail?: THREE.Mesh | THREE.Group;
   head?: THREE.Group | THREE.Mesh;
+  neck?: THREE.Mesh | THREE.Group;
+  antlers?: THREE.Group;
   pincers?: THREE.Group;
   legs?: THREE.Mesh[];
   tongue?: THREE.Mesh;
@@ -33,9 +48,12 @@ export class WildlifeManager {
   private envenomSource: string = '';
 
   // Max active populations near player
-  private readonly MAX_SNAKES = 5;
-  private readonly MAX_SCORPIONS = 6;
+  private readonly MAX_SNAKES = 4;
+  private readonly MAX_SCORPIONS = 4;
   private readonly MAX_RABBITS = 6;
+  private readonly MAX_MULE_DEER = 4;
+  private readonly MAX_WHITETAIL_DEER = 4;
+  private readonly MAX_BIGHORN_SHEEP = 4;
 
   constructor(scene: THREE.Scene, getTerrainElevation: (x: number, z: number) => number) {
     this.scene = scene;
@@ -47,7 +65,7 @@ export class WildlifeManager {
     // 1. Initial Jackrabbits
     for (let i = 0; i < 6; i++) {
       const angle = (i / 6) * Math.PI * 2;
-      const dist = 25 + Math.random() * 35;
+      const dist = 22 + Math.random() * 32;
       const rx = Math.cos(angle) * dist;
       const rz = Math.sin(angle) * dist;
       const ry = getTerrainElevation(rx, rz);
@@ -82,18 +100,43 @@ export class WildlifeManager {
       this.createScorpion(scx, scy, scz);
     });
 
-    // 4. Desert Bighorn Sheep on distant crags
+    // 4. Sonoran Desert Mule Deer in desert foothills and washes
+    const muleDeerLocs = [
+      { x: 38, z: -35 },
+      { x: -55, z: 40 },
+      { x: 62, z: 58 },
+      { x: -32, z: -68 },
+    ];
+    muleDeerLocs.forEach((loc) => {
+      const dy = getTerrainElevation(loc.x, loc.z);
+      this.createMuleDeer(loc.x, dy, loc.z);
+    });
+
+    // 5. Arizona Coues Whitetail Deer in brushy draws and mountain canyons
+    const whitetailLocs = [
+      { x: -48, z: -25 },
+      { x: 45, z: 75 },
+      { x: -70, z: 80 },
+      { x: 80, z: -40 },
+    ];
+    whitetailLocs.forEach((loc) => {
+      const wy = getTerrainElevation(loc.x, loc.z);
+      this.createWhitetailDeer(loc.x, wy, loc.z);
+    });
+
+    // 6. Desert Bighorn Sheep on crags and ridges
     const sheepLocs = [
       { x: 75, z: 12 },
       { x: 88, z: 22 },
       { x: -45, z: 110 },
+      { x: -85, z: -55 },
     ];
     sheepLocs.forEach((loc) => {
       const ry = getTerrainElevation(loc.x, loc.z);
       this.createBighornSheep(loc.x, ry, loc.z);
     });
 
-    // 5. Soaring Turkey Vultures
+    // 7. Soaring Turkey Vultures
     for (let i = 0; i < 3; i++) {
       this.createVulture(i * ((Math.PI * 2) / 3), 70 + i * 12);
     }
@@ -110,16 +153,19 @@ export class WildlifeManager {
     let snakeCount = 0;
     let scorpionCount = 0;
     let rabbitCount = 0;
+    let muleDeerCount = 0;
+    let whitetailCount = 0;
+    let bighornCount = 0;
 
-    // Filter and count active nearby animals, despawning distant ones (> 75m)
+    // Filter and count active nearby animals, despawning distant ones (> 90m)
     for (let i = this.animals.length - 1; i >= 0; i--) {
       const a = this.animals[i];
-      if (a.data.type === 'vulture' || a.data.type === 'bighorn') {
-        continue; // Permanent ambient landmarks
+      if (a.data.type === 'vulture') {
+        continue; // Permanent ambient soaring birds
       }
 
       const dist = a.mesh.position.distanceTo(playerPos);
-      if (dist > 75) {
+      if (dist > 95) {
         this.removeAnimalAtIndex(i);
         continue;
       }
@@ -127,6 +173,9 @@ export class WildlifeManager {
       if (a.data.type === 'snake') snakeCount++;
       else if (a.data.type === 'scorpion') scorpionCount++;
       else if (a.data.type === 'rabbit') rabbitCount++;
+      else if (a.data.type === 'mule_deer') muleDeerCount++;
+      else if (a.data.type === 'whitetail_deer') whitetailCount++;
+      else if (a.data.type === 'bighorn') bighornCount++;
     }
 
     // Spawn new rattlesnake near player if under target count
@@ -156,12 +205,48 @@ export class WildlifeManager {
     // Spawn rabbit if sparse
     if (rabbitCount < this.MAX_RABBITS) {
       const angle = Math.random() * Math.PI * 2;
-      const dist = 22 + Math.random() * 25;
+      const dist = 22 + Math.random() * 28;
       const rx = playerPos.x + Math.cos(angle) * dist;
       const rz = playerPos.z + Math.sin(angle) * dist;
       const ry = getTerrainElevation(rx, rz);
       if (ry > 0.5) {
         this.createRabbit(rx, ry, rz);
+      }
+    }
+
+    // Spawn Sonoran Mule Deer in open flats/washes
+    if (muleDeerCount < this.MAX_MULE_DEER) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 32 + Math.random() * 38;
+      const mx = playerPos.x + Math.cos(angle) * dist;
+      const mz = playerPos.z + Math.sin(angle) * dist;
+      const my = getTerrainElevation(mx, mz);
+      if (my > 0.5) {
+        this.createMuleDeer(mx, my, mz);
+      }
+    }
+
+    // Spawn Arizona Coues Whitetail Deer in brushy canyon bottoms
+    if (whitetailCount < this.MAX_WHITETAIL_DEER) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 35 + Math.random() * 35;
+      const wx = playerPos.x + Math.cos(angle) * dist;
+      const wz = playerPos.z + Math.sin(angle) * dist;
+      const wy = getTerrainElevation(wx, wz);
+      if (wy > 0.5) {
+        this.createWhitetailDeer(wx, wy, wz);
+      }
+    }
+
+    // Spawn Desert Bighorn Sheep on crags
+    if (bighornCount < this.MAX_BIGHORN_SHEEP) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 45 + Math.random() * 40;
+      const bx = playerPos.x + Math.cos(angle) * dist;
+      const bz = playerPos.z + Math.sin(angle) * dist;
+      const by = getTerrainElevation(bx, bz);
+      if (by > 1.5) {
+        this.createBighornSheep(bx, by, bz);
       }
     }
   }
@@ -485,7 +570,321 @@ export class WildlifeManager {
     });
   }
 
-  // --- 4. BIGHORN SHEEP MODEL ---
+  // --- 4. SONORAN DESERT MULE DEER ---
+  private createMuleDeer(x: number, y: number, z: number) {
+    const group = new THREE.Group();
+    group.position.set(x, y, z);
+
+    // Warm gray-brown desert pelt
+    const coatMat = new THREE.MeshStandardMaterial({ color: 0x7a6552, roughness: 0.85 });
+    const throatMat = new THREE.MeshStandardMaterial({ color: 0xd9cebe, roughness: 0.9 });
+    const rumpMat = new THREE.MeshStandardMaterial({ color: 0xeee8dc, roughness: 0.8 });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x221c16, roughness: 0.7 });
+    const antlerMat = new THREE.MeshStandardMaterial({ color: 0xc8baa2, roughness: 0.55 });
+
+    // Torso (sturdy buck body)
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.65, 1.25), coatMat);
+    body.position.y = 0.98;
+    body.castShadow = true;
+    group.add(body);
+
+    // Pale chest & underbelly
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.45, 0.5), throatMat);
+    chest.position.set(0, 0.92, 0.32);
+    group.add(chest);
+
+    // Large distinctive White Rump Patch
+    const rump = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.55, 0.12), rumpMat);
+    rump.position.set(0, 0.98, -0.63);
+    group.add(rump);
+
+    // Mule Deer Tail: Thin pale cream with a stark black tip
+    const tailGroup = new THREE.Group();
+    tailGroup.position.set(0, 1.05, -0.65);
+    const tailBase = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.06), rumpMat);
+    tailBase.position.y = -0.09;
+    tailGroup.add(tailBase);
+    const tailTip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.07), darkMat);
+    tailTip.position.y = -0.22;
+    tailGroup.add(tailTip);
+    group.add(tailGroup);
+
+    // Graceful Upright Neck
+    const neck = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.62, 0.32), coatMat);
+    neck.position.set(0, 1.42, 0.48);
+    neck.rotation.x = -0.32;
+    neck.castShadow = true;
+    group.add(neck);
+
+    // Head
+    const headGroup = new THREE.Group();
+    headGroup.position.set(0, 1.72, 0.68);
+
+    const skull = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.28, 0.38), coatMat);
+    headGroup.add(skull);
+
+    // Tapered Muzzle with black nose
+    const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.16, 0.26), throatMat);
+    muzzle.position.set(0, -0.05, 0.26);
+    headGroup.add(muzzle);
+
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.08), darkMat);
+    nose.position.set(0, -0.02, 0.4);
+    headGroup.add(nose);
+
+    // Dark alert eyes
+    [-1, 1].forEach((side) => {
+      const eye = new THREE.Mesh(
+        new THREE.SphereGeometry(0.028, 5, 5),
+        new THREE.MeshBasicMaterial({ color: 0x111111 })
+      );
+      eye.position.set(side * 0.14, 0.04, 0.06);
+      headGroup.add(eye);
+    });
+
+    // FAMOUS MULE DEER EARS (Oversized, alert, angled backward)
+    const earsGroup = new THREE.Group();
+    [-1, 1].forEach((side) => {
+      const earGroup = new THREE.Group();
+      earGroup.position.set(side * 0.15, 0.16, -0.06);
+      earGroup.rotation.set(-0.25, side * 0.35, side * 0.45);
+
+      const earBack = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.36, 0.03), coatMat);
+      earBack.position.y = 0.16;
+      earGroup.add(earBack);
+
+      const earInside = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.015), throatMat);
+      earInside.position.set(0, 0.16, 0.015);
+      earGroup.add(earInside);
+
+      earsGroup.add(earGroup);
+    });
+    headGroup.add(earsGroup);
+
+    // BIFURCATED / FORKED ANTLERS (Diagnostic Mule Deer branching rack)
+    const antlersGroup = new THREE.Group();
+    [-1, 1].forEach((side) => {
+      // Main beam curving up and out
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.028, 0.38, 5), antlerMat);
+      beam.position.set(side * 0.14, 0.28, -0.02);
+      beam.rotation.set(0.2, side * 0.25, side * 0.5);
+      antlersGroup.add(beam);
+
+      // Forward fork
+      const fork1 = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.02, 0.24, 4), antlerMat);
+      fork1.position.set(side * 0.25, 0.46, 0.05);
+      fork1.rotation.set(0.4, side * 0.1, side * 0.2);
+      antlersGroup.add(fork1);
+
+      // Rear fork
+      const fork2 = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.22, 4), antlerMat);
+      fork2.position.set(side * 0.28, 0.48, -0.12);
+      fork2.rotation.set(-0.3, side * 0.15, side * 0.35);
+      antlersGroup.add(fork2);
+    });
+    headGroup.add(antlersGroup);
+    group.add(headGroup);
+
+    // 4 Slender Legs with black hooves
+    const legGeo = new THREE.BoxGeometry(0.11, 0.72, 0.11);
+    const hoofGeo = new THREE.BoxGeometry(0.12, 0.08, 0.13);
+    [
+      { lx: -0.19, lz: 0.42 },
+      { lx: 0.19, lz: 0.42 },
+      { lx: -0.19, lz: -0.44 },
+      { lx: 0.19, lz: -0.44 },
+    ].forEach((l) => {
+      const leg = new THREE.Mesh(legGeo, coatMat);
+      leg.position.set(l.lx, 0.38, l.lz);
+      leg.castShadow = true;
+      group.add(leg);
+
+      const hoof = new THREE.Mesh(hoofGeo, darkMat);
+      hoof.position.set(l.lx, 0.04, l.lz);
+      group.add(hoof);
+    });
+
+    this.wildlifeGroup.add(group);
+    this.animals.push({
+      data: {
+        id: `mule_deer_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'mule_deer',
+        position: { x, y, z },
+        targetPos: { x, y, z },
+        rotation: Math.random() * Math.PI * 2,
+        speed: 1.6,
+        stateTimer: Math.random() * 5,
+        fleeing: false,
+        health: 35,
+        maxHealth: 35,
+      },
+      mesh: group,
+      head: headGroup,
+      ears: earsGroup,
+      tail: tailGroup,
+      animTimer: Math.random() * 10,
+      strikeCooldown: 0,
+      warningCooldown: 0,
+      health: 35,
+      maxHealth: 35,
+    });
+  }
+
+  // --- 5. ARIZONA COUES WHITETAIL DEER ("Gray Ghost" of the Superstitions) ---
+  private createWhitetailDeer(x: number, y: number, z: number) {
+    const group = new THREE.Group();
+    group.position.set(x, y, z);
+
+    // Ashy grayish-tan desert coat (smaller, refined Coues whitetail build)
+    const coatMat = new THREE.MeshStandardMaterial({ color: 0x8c7865, roughness: 0.85 });
+    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xfbf9f5, roughness: 0.75 });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x221a14, roughness: 0.7 });
+    const antlerMat = new THREE.MeshStandardMaterial({ color: 0xd4c7b0, roughness: 0.5 });
+
+    // Sleeker, agile body
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.58, 1.1), coatMat);
+    body.position.y = 0.92;
+    body.castShadow = true;
+    group.add(body);
+
+    // Pure white underbelly and throat patch
+    const belly = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.42, 0.55), whiteMat);
+    belly.position.set(0, 0.85, 0.15);
+    group.add(belly);
+
+    // ICONIC WHITETAIL "FLAG" TAIL (Raised vertically when alert or fleeing!)
+    const tailGroup = new THREE.Group();
+    tailGroup.position.set(0, 1.05, -0.55);
+
+    // Broad bushy tail: brown top, brilliant snow-white underside
+    const tailTop = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.32, 0.05), coatMat);
+    tailTop.position.set(0, -0.12, 0.02);
+    tailGroup.add(tailTop);
+
+    const tailUnder = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.34, 0.04), whiteMat);
+    tailUnder.position.set(0, -0.12, -0.02);
+    tailGroup.add(tailUnder);
+    group.add(tailGroup);
+
+    // Slender, alert neck
+    const neck = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.56, 0.26), coatMat);
+    neck.position.set(0, 1.34, 0.42);
+    neck.rotation.x = -0.36;
+    neck.castShadow = true;
+    group.add(neck);
+
+    // Refined head with white eye-rings and white muzzle band
+    const headGroup = new THREE.Group();
+    headGroup.position.set(0, 1.62, 0.58);
+
+    const skull = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.24, 0.32), coatMat);
+    headGroup.add(skull);
+
+    const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.22), coatMat);
+    muzzle.position.set(0, -0.04, 0.22);
+    headGroup.add(muzzle);
+
+    const whiteChin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.14), whiteMat);
+    whiteChin.position.set(0, -0.1, 0.24);
+    headGroup.add(whiteChin);
+
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, 0.06), darkMat);
+    nose.position.set(0, -0.02, 0.34);
+    headGroup.add(nose);
+
+    // Dark liquid eyes with white eye-rings
+    [-1, 1].forEach((side) => {
+      const eyeRing = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.07, 0.07), whiteMat);
+      eyeRing.position.set(side * 0.115, 0.04, 0.04);
+      headGroup.add(eyeRing);
+
+      const eye = new THREE.Mesh(
+        new THREE.SphereGeometry(0.024, 5, 5),
+        new THREE.MeshBasicMaterial({ color: 0x0a0a0a })
+      );
+      eye.position.set(side * 0.12, 0.04, 0.04);
+      headGroup.add(eye);
+    });
+
+    // Alert whitetail ears
+    const earsGroup = new THREE.Group();
+    [-1, 1].forEach((side) => {
+      const ear = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.24, 0.03), coatMat);
+      ear.position.set(side * 0.12, 0.15, -0.04);
+      ear.rotation.set(-0.15, side * 0.2, side * 0.35);
+      earsGroup.add(ear);
+    });
+    headGroup.add(earsGroup);
+
+    // CLASSIC WHITETAIL ANTLERS (Forward-curving main beams with vertical tines)
+    const antlersGroup = new THREE.Group();
+    [-1, 1].forEach((side) => {
+      // Main forward-sweeping beam
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.022, 0.36, 5), antlerMat);
+      beam.position.set(side * 0.12, 0.22, 0.06);
+      beam.rotation.set(0.55, side * 0.3, side * 0.35);
+      antlersGroup.add(beam);
+
+      // Vertical tines pointing straight up (Coues deer rack)
+      const tine1 = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.015, 0.18, 4), antlerMat);
+      tine1.position.set(side * 0.18, 0.36, 0.08);
+      tine1.rotation.set(0.1, 0, side * 0.1);
+      antlersGroup.add(tine1);
+
+      const tine2 = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.014, 0.16, 4), antlerMat);
+      tine2.position.set(side * 0.22, 0.42, 0.18);
+      tine2.rotation.set(0.15, 0, side * 0.15);
+      antlersGroup.add(tine2);
+    });
+    headGroup.add(antlersGroup);
+    group.add(headGroup);
+
+    // 4 Nimble Desert Legs
+    const legGeo = new THREE.BoxGeometry(0.09, 0.68, 0.09);
+    const hoofGeo = new THREE.BoxGeometry(0.1, 0.07, 0.11);
+    [
+      { lx: -0.16, lz: 0.36 },
+      { lx: 0.16, lz: 0.36 },
+      { lx: -0.16, lz: -0.38 },
+      { lx: 0.16, lz: -0.38 },
+    ].forEach((l) => {
+      const leg = new THREE.Mesh(legGeo, coatMat);
+      leg.position.set(l.lx, 0.35, l.lz);
+      leg.castShadow = true;
+      group.add(leg);
+
+      const hoof = new THREE.Mesh(hoofGeo, darkMat);
+      hoof.position.set(l.lx, 0.035, l.lz);
+      group.add(hoof);
+    });
+
+    this.wildlifeGroup.add(group);
+    this.animals.push({
+      data: {
+        id: `whitetail_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'whitetail_deer',
+        position: { x, y, z },
+        targetPos: { x, y, z },
+        rotation: Math.random() * Math.PI * 2,
+        speed: 1.8,
+        stateTimer: Math.random() * 5,
+        fleeing: false,
+        health: 30,
+        maxHealth: 30,
+      },
+      mesh: group,
+      head: headGroup,
+      ears: earsGroup,
+      tail: tailGroup,
+      animTimer: Math.random() * 10,
+      strikeCooldown: 0,
+      warningCooldown: 0,
+      health: 30,
+      maxHealth: 30,
+    });
+  }
+
+  // --- 6. DESERT BIGHORN SHEEP MODEL ---
   private createBighornSheep(x: number, y: number, z: number) {
     const group = new THREE.Group();
     group.position.set(x, y, z);
@@ -493,43 +892,55 @@ export class WildlifeManager {
     const coatMat = new THREE.MeshStandardMaterial({ color: 0x82654c, roughness: 0.85 });
     const hornMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2d, roughness: 0.5 });
     const rumpMat = new THREE.MeshStandardMaterial({ color: 0xdfd4be });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x241d18 });
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.7, 1.1), coatMat);
+    // Muscular mountain body
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.72, 1.15), coatMat);
     body.position.y = 0.95;
     body.castShadow = true;
     group.add(body);
 
-    const rump = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.5, 0.1), rumpMat);
-    rump.position.set(0, 0.95, -0.55);
+    const rump = new THREE.Mesh(new THREE.BoxGeometry(0.69, 0.52, 0.12), rumpMat);
+    rump.position.set(0, 0.95, -0.58);
     group.add(rump);
 
-    const neck = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.55, 0.35), coatMat);
+    const neck = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.58, 0.38), coatMat);
     neck.position.set(0, 1.35, 0.45);
     neck.rotation.x = -0.3;
     group.add(neck);
 
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.35, 0.45), coatMat);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.36, 0.46), coatMat);
     head.position.set(0, 1.6, 0.65);
     group.add(head);
 
+    // White muzzle
+    const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.2, 0.2), rumpMat);
+    muzzle.position.set(0, 1.52, 0.85);
+    group.add(muzzle);
+
+    // Massive Coiled Ram Horns
     [-1, 1].forEach((side) => {
-      const horn = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.08, 6, 12, Math.PI * 1.4), hornMat);
-      horn.position.set(side * 0.24, 1.65, 0.6);
-      horn.rotation.set(0.3, side * 0.4, side * 0.8);
+      const horn = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.085, 8, 14, Math.PI * 1.45), hornMat);
+      horn.position.set(side * 0.26, 1.68, 0.62);
+      horn.rotation.set(0.3, side * 0.38, side * 0.85);
       group.add(horn);
     });
 
-    const legGeo = new THREE.BoxGeometry(0.14, 0.7, 0.14);
+    const legGeo = new THREE.BoxGeometry(0.15, 0.7, 0.15);
     [
-      { lx: -0.22, lz: 0.35 },
-      { lx: 0.22, lz: 0.35 },
-      { lx: -0.22, lz: -0.35 },
-      { lx: 0.22, lz: -0.35 },
+      { lx: -0.23, lz: 0.35 },
+      { lx: 0.23, lz: 0.35 },
+      { lx: -0.23, lz: -0.35 },
+      { lx: 0.23, lz: -0.35 },
     ].forEach((l) => {
       const leg = new THREE.Mesh(legGeo, coatMat);
       leg.position.set(l.lx, 0.35, l.lz);
       leg.castShadow = true;
       group.add(leg);
+
+      const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.16), darkMat);
+      hoof.position.set(l.lx, 0.04, l.lz);
+      group.add(hoof);
     });
 
     this.wildlifeGroup.add(group);
@@ -540,22 +951,22 @@ export class WildlifeManager {
         position: { x, y, z },
         targetPos: { x, y, z },
         rotation: Math.random() * Math.PI * 2,
-        speed: 1.2,
+        speed: 1.4,
         stateTimer: Math.random() * 5,
         fleeing: false,
-        health: 40,
-        maxHealth: 40,
+        health: 45,
+        maxHealth: 45,
       },
       mesh: group,
       animTimer: Math.random() * 5,
       strikeCooldown: 0,
       warningCooldown: 0,
-      health: 40,
-      maxHealth: 40,
+      health: 45,
+      maxHealth: 45,
     });
   }
 
-  // --- 5. SOARING TURKEY VULTURE MODEL ---
+  // --- 7. SOARING TURKEY VULTURE MODEL ---
   private createVulture(initialAngle: number, flightRadius: number) {
     const group = new THREE.Group();
     group.position.set(0, 75, 0);
@@ -598,38 +1009,118 @@ export class WildlifeManager {
     });
   }
 
-  // --- WEAPON HIT TEST (Player attacks wildlife with pickaxe, shovel, or rifle) ---
+  // --- WEAPON HIT TEST (Hunt wildlife with rifle, pickaxe, axe, or shovel) ---
   public hitTestRay(
     ray: THREE.Raycaster,
     maxDistance: number = 3.5,
     damage: number = 25
-  ): { hit: boolean; animal?: DesertAnimal; killed?: boolean; message?: string } {
+  ): AnimalHarvestResult {
     for (let i = this.animals.length - 1; i >= 0; i--) {
       const a = this.animals[i];
-      if (a.data.type === 'vulture' || a.data.type === 'bighorn') continue;
+      // Skip soaring vultures high in the stratosphere
+      if (a.data.type === 'vulture') continue;
 
       const intersects = ray.intersectObject(a.mesh, true);
       if (intersects.length > 0 && intersects[0].distance <= maxDistance) {
         a.health -= damage;
+        // Make the animal immediately start fleeing from pain/noise
+        a.data.fleeing = true;
+        a.data.stateTimer = 10;
 
         if (a.health <= 0) {
           soundEngine.playWildlifeDefeated();
+          soundEngine.playHarvestGame();
           const type = a.data.type;
           this.removeAnimalAtIndex(i);
 
-          let message = 'Struck wild animal!';
-          if (type === 'snake') {
-            message = 'Crushed Western Diamondback Rattlesnake! Preserved rattle trophy.';
+          if (type === 'rabbit') {
+            return {
+              hit: true,
+              animal: a.data,
+              killed: true,
+              message: '🏹 Hunted Desert Jackrabbit! Harvested +1 Fresh Rabbit Meat for food.',
+              harvest: {
+                foodType: 'rabbit_meat',
+                quantity: 1,
+                name: 'Fresh Desert Rabbit Meat',
+                healthRestored: 25,
+              },
+            };
+          } else if (type === 'mule_deer') {
+            return {
+              hit: true,
+              animal: a.data,
+              killed: true,
+              message: '🦌 Harvested Sonoran Mule Deer! Field-dressed +3 Prime Venison Steaks for food.',
+              harvest: {
+                foodType: 'venison',
+                quantity: 3,
+                name: 'Prime Mule Deer Venison',
+                healthRestored: 35,
+              },
+            };
+          } else if (type === 'whitetail_deer') {
+            return {
+              hit: true,
+              animal: a.data,
+              killed: true,
+              message: '🦌 Harvested Arizona Coues Whitetail Deer! Field-dressed +2 Coues Venison for food.',
+              harvest: {
+                foodType: 'venison',
+                quantity: 2,
+                name: 'Coues Whitetail Venison',
+                healthRestored: 35,
+              },
+            };
+          } else if (type === 'bighorn') {
+            return {
+              hit: true,
+              animal: a.data,
+              killed: true,
+              message: '🐏 Hunted Desert Bighorn Sheep! Harvested +3 Mountain Bighorn Mutton for food.',
+              harvest: {
+                foodType: 'bighorn_mutton',
+                quantity: 3,
+                name: 'Desert Bighorn Mountain Mutton',
+                healthRestored: 45,
+              },
+            };
+          } else if (type === 'snake') {
+            return {
+              hit: true,
+              animal: a.data,
+              killed: true,
+              message: 'Crushed Western Diamondback Rattlesnake! Area safe from venom strikes.',
+            };
           } else if (type === 'scorpion') {
-            message = 'Neutralized Sonoran Bark Scorpion! Area clear of stinging threats.';
-          } else if (type === 'rabbit') {
-            message = 'Caught desert jackrabbit!';
+            return {
+              hit: true,
+              animal: a.data,
+              killed: true,
+              message: 'Neutralized Sonoran Bark Scorpion! Area clear of stinging threats.',
+            };
           }
 
-          return { hit: true, animal: a.data, killed: true, message };
+          return { hit: true, animal: a.data, killed: true, message: 'Hunted desert game!' };
         } else {
           soundEngine.playPickaxe();
-          return { hit: true, animal: a.data, killed: false, message: 'Wounded desert creature!' };
+          const typeName =
+            a.data.type === 'mule_deer'
+              ? 'Sonoran Mule Deer'
+              : a.data.type === 'whitetail_deer'
+              ? 'Coues Whitetail Deer'
+              : a.data.type === 'bighorn'
+              ? 'Desert Bighorn Sheep'
+              : a.data.type === 'rabbit'
+              ? 'Desert Jackrabbit'
+              : 'wild creature';
+
+          return {
+            hit: true,
+            animal: a.data,
+            killed: false,
+            message: `Wounded ${typeName}! (Remaining Health: ${Math.round(a.health)} HP) — Creature is fleeing!`,
+          };
         }
       }
     }
@@ -863,16 +1354,23 @@ export class WildlifeManager {
       // --- 3. JACKRABBIT AI ---
       else if (a.data.type === 'rabbit') {
         a.animTimer += delta;
-        if (distToPlayer < 9) {
+        const isFleeing = a.data.fleeing || distToPlayer < 10;
+        if (isFleeing) {
           const dirX = a.mesh.position.x - playerPos.x;
           const dirZ = a.mesh.position.z - playerPos.z;
           const len = Math.hypot(dirX, dirZ) || 1;
-          a.mesh.position.x += (dirX / len) * 8 * delta;
-          a.mesh.position.z += (dirZ / len) * 8 * delta;
+          const fleeSpeed = 8.5;
+          a.mesh.position.x += (dirX / len) * fleeSpeed * delta;
+          a.mesh.position.z += (dirZ / len) * fleeSpeed * delta;
           a.mesh.rotation.y = Math.atan2(dirX, dirZ);
           a.mesh.position.y =
             getTerrainElevation(a.mesh.position.x, a.mesh.position.z) +
-            Math.abs(Math.sin(a.animTimer * 12)) * 0.35;
+            Math.abs(Math.sin(a.animTimer * 14)) * 0.35;
+
+          if (a.data.stateTimer > 0) {
+            a.data.stateTimer -= delta;
+            if (a.data.stateTimer <= 0) a.data.fleeing = false;
+          }
         } else {
           if (a.ears) {
             a.ears.rotation.y = Math.sin(a.animTimer * 3) * 0.25;
@@ -886,13 +1384,137 @@ export class WildlifeManager {
         }
       }
 
-      // --- 4. BIGHORN SHEEP AI ---
-      else if (a.data.type === 'bighorn') {
+      // --- 4. SONORAN DESERT MULE DEER AI ---
+      else if (a.data.type === 'mule_deer') {
         a.animTimer += delta;
-        a.mesh.rotation.y += Math.sin(a.animTimer * 0.5) * 0.005;
+        const isFleeing = a.data.fleeing || distToPlayer < 24;
+
+        if (isFleeing) {
+          // Rapid Mule Deer Stotting (4-legged bounding jump escape)
+          const dirX = a.mesh.position.x - playerPos.x;
+          const dirZ = a.mesh.position.z - playerPos.z;
+          const len = Math.hypot(dirX, dirZ) || 1;
+          const sprintSpeed = 8.2;
+          a.mesh.position.x += (dirX / len) * sprintSpeed * delta;
+          a.mesh.position.z += (dirZ / len) * sprintSpeed * delta;
+
+          // Face escape direction
+          const targetRot = Math.atan2(dirX, dirZ);
+          a.mesh.rotation.y = THREE.MathUtils.lerp(a.mesh.rotation.y, targetRot, delta * 5.0);
+
+          // Stotting vertical bounce
+          const stottBounce = Math.abs(Math.sin(a.animTimer * 8.5)) * 0.45;
+          a.mesh.position.y = getTerrainElevation(a.mesh.position.x, a.mesh.position.z) + stottBounce;
+
+          // Head tossed back in flight
+          if (a.head) {
+            a.head.rotation.x = -0.15 + Math.sin(a.animTimer * 8.5) * 0.1;
+          }
+
+          if (a.data.stateTimer > 0) {
+            a.data.stateTimer -= delta;
+            if (a.data.stateTimer <= 0) a.data.fleeing = false;
+          }
+        } else {
+          // Calm grazing / browsing in desert wash
+          a.mesh.position.y = getTerrainElevation(a.mesh.position.x, a.mesh.position.z);
+
+          // Slow casual wander
+          const wanderSpeed = 0.5;
+          a.mesh.position.x += Math.cos(a.animTimer * 0.25) * wanderSpeed * delta;
+          a.mesh.position.z += Math.sin(a.animTimer * 0.25) * wanderSpeed * delta;
+          a.mesh.rotation.y += Math.sin(a.animTimer * 0.3) * 0.006;
+
+          // Swiveling mule ears and grazing head bobs
+          if (a.ears) {
+            a.ears.rotation.y = Math.sin(a.animTimer * 2.2) * 0.35;
+          }
+          if (a.head) {
+            a.head.rotation.x = 0.2 + Math.sin(a.animTimer * 1.2) * 0.18;
+          }
+        }
       }
 
-      // --- 5. SOARING TURKEY VULTURE AI ---
+      // --- 5. ARIZONA COUES WHITETAIL DEER AI ---
+      else if (a.data.type === 'whitetail_deer') {
+        a.animTimer += delta;
+        const isFleeing = a.data.fleeing || distToPlayer < 22;
+
+        if (isFleeing) {
+          // Swift agile bounding escape
+          const dirX = a.mesh.position.x - playerPos.x;
+          const dirZ = a.mesh.position.z - playerPos.z;
+          const len = Math.hypot(dirX, dirZ) || 1;
+          const gallopSpeed = 9.0;
+          a.mesh.position.x += (dirX / len) * gallopSpeed * delta;
+          a.mesh.position.z += (dirZ / len) * gallopSpeed * delta;
+
+          const targetRot = Math.atan2(dirX, dirZ);
+          a.mesh.rotation.y = THREE.MathUtils.lerp(a.mesh.rotation.y, targetRot, delta * 6.0);
+
+          // Graceful bounding leaps
+          const leapBounce = Math.abs(Math.sin(a.animTimer * 10)) * 0.5;
+          a.mesh.position.y = getTerrainElevation(a.mesh.position.x, a.mesh.position.z) + leapBounce;
+
+          // RAISE WHITE FLAG TAIL (Diagnostic Coues Whitetail defense flag)
+          if (a.tail) {
+            a.tail.rotation.x = 1.45; // Tail held straight up in alarm!
+          }
+
+          if (a.data.stateTimer > 0) {
+            a.data.stateTimer -= delta;
+            if (a.data.stateTimer <= 0) a.data.fleeing = false;
+          }
+        } else {
+          // Tail lowered in calm state
+          if (a.tail) {
+            a.tail.rotation.x = 0;
+          }
+
+          a.mesh.position.y = getTerrainElevation(a.mesh.position.x, a.mesh.position.z);
+          // Gentle walk
+          a.mesh.position.x += Math.cos(a.animTimer * 0.2) * 0.4 * delta;
+          a.mesh.position.z += Math.sin(a.animTimer * 0.2) * 0.4 * delta;
+          a.mesh.rotation.y += Math.sin(a.animTimer * 0.2) * 0.004;
+
+          if (a.head) {
+            a.head.rotation.x = 0.15 + Math.sin(a.animTimer * 1.4) * 0.15;
+          }
+        }
+      }
+
+      // --- 6. DESERT BIGHORN SHEEP AI ---
+      else if (a.data.type === 'bighorn') {
+        a.animTimer += delta;
+        const isFleeing = a.data.fleeing || distToPlayer < 18;
+
+        if (isFleeing) {
+          // Sprints away up rocky slopes
+          const dirX = a.mesh.position.x - playerPos.x;
+          const dirZ = a.mesh.position.z - playerPos.z;
+          const len = Math.hypot(dirX, dirZ) || 1;
+          const runSpeed = 7.0;
+          a.mesh.position.x += (dirX / len) * runSpeed * delta;
+          a.mesh.position.z += (dirZ / len) * runSpeed * delta;
+
+          const targetRot = Math.atan2(dirX, dirZ);
+          a.mesh.rotation.y = THREE.MathUtils.lerp(a.mesh.rotation.y, targetRot, delta * 4.0);
+
+          const gallopBounce = Math.abs(Math.sin(a.animTimer * 8)) * 0.3;
+          a.mesh.position.y = getTerrainElevation(a.mesh.position.x, a.mesh.position.z) + gallopBounce;
+
+          if (a.data.stateTimer > 0) {
+            a.data.stateTimer -= delta;
+            if (a.data.stateTimer <= 0) a.data.fleeing = false;
+          }
+        } else {
+          // Stately mountain overlook stance
+          a.mesh.position.y = getTerrainElevation(a.mesh.position.x, a.mesh.position.z);
+          a.mesh.rotation.y += Math.sin(a.animTimer * 0.4) * 0.004;
+        }
+      }
+
+      // --- 7. SOARING TURKEY VULTURE AI ---
       else if (a.data.type === 'vulture') {
         a.animTimer += a.data.speed * delta;
         const radius = a.data.targetPos.x;

@@ -744,6 +744,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         playerStateRef.current.activeClaim.size
       );
     }
+    const localOwnerId = territoryClaims.getOrCreateProspectorId();
+    const existingClaims = territoryClaims.getAllClaims();
+    mineBuilding.syncTerritoryClaims(existingClaims, localOwnerId);
+
     if (playerStateRef.current.builtStructures?.length) {
       playerStateRef.current.builtStructures.forEach((s) => {
         mineBuilding.buildStructure(s.type, s.position, s.rotationY);
@@ -1114,12 +1118,21 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
-      // Wildlife strike check (pickaxe defends against rattlesnakes and scorpions)
+      // Wildlife strike check (pickaxe defends against dangerous beasts or harvests close game)
       if (wildlifeManagerRef.current) {
         const wildlifeRay = new THREE.Raycaster(origin, dir, 0.1, 4.0);
         const wRes = wildlifeManagerRef.current.hitTestRay(wildlifeRay, 3.8, 25);
         if (wRes.hit) {
           if (onTriggerHitMarker) onTriggerHitMarker();
+          if (wRes.harvest) {
+            const h = wRes.harvest;
+            setPlayerState((prev) => ({
+              ...prev,
+              venisonMeat: h.foodType === 'venison' ? (prev.venisonMeat || 0) + h.quantity : (prev.venisonMeat || 0),
+              rabbitMeat: h.foodType === 'rabbit_meat' ? (prev.rabbitMeat || 0) + h.quantity : (prev.rabbitMeat || 0),
+              bighornMutton: h.foodType === 'bighorn_mutton' ? (prev.bighornMutton || 0) + h.quantity : (prev.bighornMutton || 0),
+            }));
+          }
           if (wRes.message && onShowBanner) onShowBanner(wRes.message);
           return;
         }
@@ -1356,13 +1369,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
-      // First check if shovel strikes aggressive wildlife (rattlesnake, scorpion)
+      // First check if shovel strikes wildlife (defensive strike or catching small game)
       if (wildlifeManagerRef.current) {
         const origin = cam ? cam.position.clone() : playerPos.current.clone().add(new THREE.Vector3(0, 1.4, 0));
         const shovelRay = new THREE.Raycaster(origin, lookDir, 0.1, 4.2);
         const wRes = wildlifeManagerRef.current.hitTestRay(shovelRay, 3.8, 25);
         if (wRes.hit) {
           if (onTriggerHitMarker) onTriggerHitMarker();
+          if (wRes.harvest) {
+            const h = wRes.harvest;
+            setPlayerState((prev) => ({
+              ...prev,
+              venisonMeat: h.foodType === 'venison' ? (prev.venisonMeat || 0) + h.quantity : (prev.venisonMeat || 0),
+              rabbitMeat: h.foodType === 'rabbit_meat' ? (prev.rabbitMeat || 0) + h.quantity : (prev.rabbitMeat || 0),
+              bighornMutton: h.foodType === 'bighorn_mutton' ? (prev.bighornMutton || 0) + h.quantity : (prev.bighornMutton || 0),
+            }));
+          }
           if (wRes.message && onShowBanner) onShowBanner(wRes.message);
           return;
         }
@@ -2233,13 +2255,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         });
         if (hitCombat) bulletHitTarget = true;
 
-        // 2. High-caliber bullet strike against dangerous wildlife (rattlesnakes, scorpions)
+        // 2. High-caliber bullet strike against wildlife & hunting game (deer, sheep, rabbits, snakes)
         if (wildlifeManagerRef.current) {
           const wRay = new THREE.Raycaster(cam.position, lookDir, 0.5, 65.0);
           const wRes = wildlifeManagerRef.current.hitTestRay(wRay, 60.0, 50);
           if (wRes.hit) {
             bulletHitTarget = true;
             if (onTriggerHitMarker) onTriggerHitMarker();
+            if (wRes.harvest) {
+              const h = wRes.harvest;
+              setPlayerState((prev) => ({
+                ...prev,
+                venisonMeat: h.foodType === 'venison' ? (prev.venisonMeat || 0) + h.quantity : (prev.venisonMeat || 0),
+                rabbitMeat: h.foodType === 'rabbit_meat' ? (prev.rabbitMeat || 0) + h.quantity : (prev.rabbitMeat || 0),
+                bighornMutton: h.foodType === 'bighorn_mutton' ? (prev.bighornMutton || 0) + h.quantity : (prev.bighornMutton || 0),
+              }));
+            }
             if (wRes.message && onShowBanner) onShowBanner(wRes.message);
           }
         }
@@ -5527,6 +5558,78 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       tortillaFlatLightingRef.current(timeOfDay, 0.016);
     }
   }, [timeOfDay, weather]);
+
+  // Synchronize 3D territory claims whenever Firestore/local claim registry changes
+  useEffect(() => {
+    const localOwnerId = territoryClaims.getOrCreateProspectorId();
+    const unsub = territoryClaims.subscribe((allClaims) => {
+      if (mineBuildingRef.current) {
+        const merged = [...allClaims];
+        if (playerStateRef.current.activeClaim?.isClaimed) {
+          const act = playerStateRef.current.activeClaim;
+          const exists = merged.some(
+            (c) => c.ownerId === localOwnerId || (Math.abs(c.x - act.position.x) < 2 && Math.abs(c.z - act.position.z) < 2)
+          );
+          if (!exists) {
+            merged.push({
+              id: `claim_local_${Math.round(act.position.x)}_${Math.round(act.position.z)}`,
+              name: act.name,
+              ownerId: localOwnerId,
+              ownerName: act.ownerName || 'Canyon Jack',
+              x: act.position.x,
+              z: act.position.z,
+              radius: act.size || 40,
+              stakedAt: act.stakedAt || Date.now(),
+              extractedGold: act.extractedGold || 0,
+              blocksDug: act.blocksDug || 0,
+              isWildcatOrigin: false,
+              forSale: false,
+            });
+          }
+        }
+        mineBuildingRef.current.syncTerritoryClaims(merged, localOwnerId);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Update 3D claim visualization when player's activeClaim changes
+  useEffect(() => {
+    if (mineBuildingRef.current && playerState.activeClaim?.isClaimed) {
+      const localOwnerId = territoryClaims.getOrCreateProspectorId();
+      const allClaims = territoryClaims.getAllClaims();
+      const merged = [...allClaims];
+      const act = playerState.activeClaim;
+      const idx = merged.findIndex(
+        (c) => c.ownerId === localOwnerId || (Math.abs(c.x - act.position.x) < 2 && Math.abs(c.z - act.position.z) < 2)
+      );
+      if (idx >= 0) {
+        merged[idx] = {
+          ...merged[idx],
+          name: act.name,
+          x: act.position.x,
+          z: act.position.z,
+          radius: act.size || 40,
+        };
+      } else {
+        merged.push({
+          id: `claim_local_${Math.round(act.position.x)}_${Math.round(act.position.z)}`,
+          name: act.name,
+          ownerId: localOwnerId,
+          ownerName: act.ownerName || 'Canyon Jack',
+          x: act.position.x,
+          z: act.position.z,
+          radius: act.size || 40,
+          stakedAt: act.stakedAt || Date.now(),
+          extractedGold: act.extractedGold || 0,
+          blocksDug: act.blocksDug || 0,
+          isWildcatOrigin: false,
+          forSale: false,
+        });
+      }
+      mineBuildingRef.current.syncTerritoryClaims(merged, localOwnerId);
+    }
+  }, [playerState.activeClaim]);
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-stone-900">

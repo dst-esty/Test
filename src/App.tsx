@@ -38,6 +38,65 @@ export default function App() {
   // Player State
   const [playerState, setPlayerState] = useState<PlayerState>(() => {
     const startY = getTerrainHeight(0, -246) + 1.7;
+
+    // Restore active claim from local persistence or territory registry
+    let initialClaim: ClaimInfo | null = null;
+    try {
+      const savedClaimStr = safeLocalStorage.getItem('superstition_active_claim');
+      if (savedClaimStr) {
+        const parsed = JSON.parse(savedClaimStr);
+        if (parsed && parsed.isClaimed && parsed.position) {
+          initialClaim = parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse saved claim from storage:', e);
+    }
+
+    if (!initialClaim) {
+      const pClaim = territoryClaims.getPlayerClaim();
+      if (pClaim) {
+        initialClaim = {
+          name: pClaim.name,
+          position: { x: pClaim.x, y: getTerrainHeight(pClaim.x, pClaim.z), z: pClaim.z },
+          size: pClaim.radius || 40,
+          isClaimed: true,
+          extractedGold: pClaim.extractedGold || 0,
+          blocksDug: pClaim.blocksDug || 0,
+          ownerId: pClaim.ownerId,
+          ownerName: pClaim.ownerName,
+          stakedAt: pClaim.stakedAt,
+          forSale: pClaim.forSale,
+        };
+      }
+    }
+
+    // Restore stats and harvested meats
+    let savedGold = 2.0;
+    let savedCash = 45.0;
+    let savedBlocks = 0;
+    let savedVenison = 0;
+    let savedRabbit = 0;
+    let savedMutton = 0;
+    let savedProvisions = 2;
+
+    try {
+      const sg = safeLocalStorage.getItem('superstition_gold_found');
+      if (sg !== null) savedGold = parseFloat(sg) || 2.0;
+      const sc = safeLocalStorage.getItem('superstition_cash_dollars');
+      if (sc !== null) savedCash = parseFloat(sc) || 45.0;
+      const sb = safeLocalStorage.getItem('superstition_blocks_dug');
+      if (sb !== null) savedBlocks = parseInt(sb, 10) || 0;
+      const sv = safeLocalStorage.getItem('superstition_venison_meat');
+      if (sv !== null) savedVenison = parseInt(sv, 10) || 0;
+      const sr = safeLocalStorage.getItem('superstition_rabbit_meat');
+      if (sr !== null) savedRabbit = parseInt(sr, 10) || 0;
+      const sm = safeLocalStorage.getItem('superstition_bighorn_mutton');
+      if (sm !== null) savedMutton = parseInt(sm, 10) || 0;
+      const sp = safeLocalStorage.getItem('superstition_provisions_rations');
+      if (sp !== null) savedProvisions = parseInt(sp, 10) || 2;
+    } catch {}
+
     return {
       position: { x: 0, y: startY, z: -246 },
       rotation: { yaw: 0, pitch: 0 },
@@ -50,16 +109,23 @@ export default function App() {
       ammo: 24,
       dynamite: 6,
       woodPlanks: 6, // Starting seasoned timber stakes & firewood
-      goldFound: 2.0, // 2 oz starting gold from prospecting
-      cashDollars: 45.0, // Starting territorial currency ($) for provisions and claim deeds
-      blocksDug: 0,
+      goldFound: savedGold, // Starting gold from prospecting
+      cashDollars: savedCash, // Starting territorial currency ($) for provisions and claim deeds
+      blocksDug: savedBlocks,
       bullionBars: 0,
-      activeClaim: null,
+      activeClaim: initialClaim,
       builtStructures: [],
       discoveredLandmarks: ['tortilla_flat'],
       collectedClues: ['clue_tortilla_flat'],
+      venisonMeat: savedVenison,
+      rabbitMeat: savedRabbit,
+      bighornMutton: savedMutton,
+      provisionsRations: savedProvisions,
     };
   });
+
+  // Territorial Registry Claims
+  const [registeredClaims, setRegisteredClaims] = useState<TerritoryClaim[]>(() => territoryClaims.getAllClaims());
 
   // Multiplayer State
   const [onlinePlayers, setOnlinePlayers] = useState<Record<string, MultiplayerPlayer>>({});
@@ -141,6 +207,72 @@ export default function App() {
   useEffect(() => {
     playerStateRef.current = playerState;
   }, [playerState]);
+
+  // Synchronize registered claims from territory service and update player's active claim
+  useEffect(() => {
+    const myProspectorId = territoryClaims.getOrCreateProspectorId();
+    const unsub = territoryClaims.subscribe((claims) => {
+      setRegisteredClaims(claims);
+      const myClaim = claims.find((c) => c.ownerId === myProspectorId);
+      if (myClaim) {
+        setPlayerState((prev) => {
+          if (
+            !prev.activeClaim ||
+            prev.activeClaim.name !== myClaim.name ||
+            prev.activeClaim.extractedGold !== myClaim.extractedGold ||
+            prev.activeClaim.blocksDug !== myClaim.blocksDug ||
+            prev.activeClaim.forSale !== myClaim.forSale
+          ) {
+            const updatedClaim: ClaimInfo = {
+              name: myClaim.name,
+              position: { x: myClaim.x, y: getTerrainHeight(myClaim.x, myClaim.z), z: myClaim.z },
+              size: myClaim.radius || 40,
+              isClaimed: true,
+              extractedGold: myClaim.extractedGold || 0,
+              blocksDug: myClaim.blocksDug || 0,
+              ownerId: myClaim.ownerId,
+              ownerName: myClaim.ownerName,
+              stakedAt: myClaim.stakedAt,
+              forSale: myClaim.forSale,
+            };
+            safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(updatedClaim));
+            return {
+              ...prev,
+              activeClaim: updatedClaim,
+            };
+          }
+          return prev;
+        });
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Save active claim to local storage whenever it changes
+  useEffect(() => {
+    if (playerState.activeClaim?.isClaimed) {
+      safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(playerState.activeClaim));
+    }
+  }, [playerState.activeClaim]);
+
+  // Persist currency, gold, blocks excavated, and harvested meats
+  useEffect(() => {
+    safeLocalStorage.setItem('superstition_gold_found', String(playerState.goldFound));
+    safeLocalStorage.setItem('superstition_cash_dollars', String(playerState.cashDollars));
+    safeLocalStorage.setItem('superstition_blocks_dug', String(playerState.blocksDug));
+    safeLocalStorage.setItem('superstition_venison_meat', String(playerState.venisonMeat || 0));
+    safeLocalStorage.setItem('superstition_rabbit_meat', String(playerState.rabbitMeat || 0));
+    safeLocalStorage.setItem('superstition_bighorn_mutton', String(playerState.bighornMutton || 0));
+    safeLocalStorage.setItem('superstition_provisions_rations', String(playerState.provisionsRations || 0));
+  }, [
+    playerState.goldFound,
+    playerState.cashDollars,
+    playerState.blocksDug,
+    playerState.venisonMeat,
+    playerState.rabbitMeat,
+    playerState.bighornMutton,
+    playerState.provisionsRations,
+  ]);
 
   const handleMobileMove = useCallback((move: { forward: number; right: number }) => {
     if (mobileMoveHandlerRef.current) mobileMoveHandlerRef.current(move);
@@ -449,6 +581,71 @@ export default function App() {
         ...prev,
         goldFound: Math.max(0, currentGold - goldCost),
         woodPlanks: currentWood + woodAmount,
+      };
+    });
+  }, [showBanner]);
+
+  const handleConsumeFood = useCallback((foodType: 'venison' | 'bighorn' | 'rabbit' | 'provisions') => {
+    setPlayerState((prev) => {
+      let healthBonus = 0;
+      let hydrationBonus = 0;
+      let foodName = '';
+      let hasFood = false;
+
+      const nextState = { ...prev };
+
+      if (foodType === 'venison' && (prev.venisonMeat || 0) > 0) {
+        nextState.venisonMeat = (prev.venisonMeat || 0) - 1;
+        healthBonus = 35;
+        hydrationBonus = 20;
+        foodName = 'Prime Venison Steak';
+        hasFood = true;
+      } else if (foodType === 'bighorn' && (prev.bighornMutton || 0) > 0) {
+        nextState.bighornMutton = (prev.bighornMutton || 0) - 1;
+        healthBonus = 45;
+        hydrationBonus = 25;
+        foodName = 'Mountain Bighorn Mutton';
+        hasFood = true;
+      } else if (foodType === 'rabbit' && (prev.rabbitMeat || 0) > 0) {
+        nextState.rabbitMeat = (prev.rabbitMeat || 0) - 1;
+        healthBonus = 25;
+        hydrationBonus = 15;
+        foodName = 'Roasted Desert Jackrabbit';
+        hasFood = true;
+      } else if (foodType === 'provisions' && (prev.provisionsRations || 0) > 0) {
+        nextState.provisionsRations = (prev.provisionsRations || 0) - 1;
+        healthBonus = 20;
+        hydrationBonus = 10;
+        foodName = 'Trail Hardtack Rations';
+        hasFood = true;
+      }
+
+      if (!hasFood) {
+        showBanner(`⚠️ No ${foodType} available in saddlebag! Hunt wild game or buy trail rations.`);
+        return prev;
+      }
+
+      soundEngine.playEatFood();
+      nextState.health = Math.min(100, (prev.health || 100) + healthBonus);
+      nextState.hydration = Math.min(100, (prev.hydration || 100) + hydrationBonus);
+      showBanner(`🍖 Consumed ${foodName}! Restored +${healthBonus}% Health & +${hydrationBonus}% Hydration.`);
+      return nextState;
+    });
+  }, [showBanner]);
+
+  const handlePurchaseProvisions = useCallback((amount: number, goldCost: number) => {
+    setPlayerState((prev) => {
+      const currentGold = typeof prev.goldFound === 'number' && !isNaN(prev.goldFound) ? prev.goldFound : 0;
+      if (currentGold < goldCost) {
+        showBanner(`Need ${goldCost.toFixed(1)} oz Gold to purchase ${amount} trail provisions!`);
+        return prev;
+      }
+      soundEngine.playCashRegister();
+      showBanner(`🥫 Purchased ${amount} Trail Provisions for ${goldCost.toFixed(1)} oz Gold!`);
+      return {
+        ...prev,
+        goldFound: Math.max(0, currentGold - goldCost),
+        provisionsRations: (prev.provisionsRations || 0) + amount,
       };
     });
   }, [showBanner]);
@@ -1007,26 +1204,28 @@ export default function App() {
           setPayDirtAlert(null);
           const ownerId = territoryClaims.getOrCreateProspectorId();
           const ownerName = territoryClaims.getProspectorName();
+          const claimObj: ClaimInfo = {
+            name,
+            position: pos,
+            size: 40,
+            isClaimed: true,
+            extractedGold: playerStateRef.current.activeClaim?.extractedGold || 0,
+            blocksDug: playerStateRef.current.activeClaim?.blocksDug || 0,
+            ownerId,
+            ownerName,
+            stakedAt: Date.now(),
+          };
+          safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(claimObj));
+          setPlayerState((prev) => ({
+            ...prev,
+            activeClaim: claimObj,
+          }));
           await territoryClaims.stakeClaim({
             name,
             position: pos,
             ownerId,
             ownerName,
           });
-          setPlayerState((prev) => ({
-            ...prev,
-            activeClaim: {
-              name,
-              position: pos,
-              size: 40,
-              isClaimed: true,
-              extractedGold: prev.activeClaim?.extractedGold || 0,
-              blocksDug: prev.activeClaim?.blocksDug || 0,
-              ownerId,
-              ownerName,
-              stakedAt: Date.now(),
-            },
-          }));
           showBanner(`Claim "${name}" Legally Staked and Registered!`);
           setClaimPrompt({ name, position: pos });
         }}
@@ -1208,6 +1407,8 @@ export default function App() {
         onStartPortalExcavation={handleStartExcavation}
         onPurchaseRocks={handlePurchaseRocks}
         onPurchaseWood={handlePurchaseWood}
+        onConsumeFood={handleConsumeFood}
+        onPurchaseProvisions={handlePurchaseProvisions}
         onToggleAutoRedeem={handleToggleAutoRedeem}
         onRedeemAllGold={handleRedeemAllGold}
         payDirtAlert={payDirtAlert}
@@ -1362,6 +1563,8 @@ export default function App() {
         playerYaw={playerState.rotation.yaw}
         landmarks={landmarks}
         onFastTravel={handleFastTravel}
+        activeClaim={playerState.activeClaim}
+        territoryClaims={registeredClaims}
       />
 
       {/* Field Journal & Clues Modal */}
@@ -1500,10 +1703,15 @@ export default function App() {
         goldCount={playerState.goldFound}
         blocksDug={playerState.blocksDug}
         onRenameClaim={(newName) => {
-          setPlayerState((prev) => ({
-            ...prev,
-            activeClaim: prev.activeClaim ? { ...prev.activeClaim, name: newName } : null,
-          }));
+          setPlayerState((prev) => {
+            if (!prev.activeClaim) return prev;
+            const updated = { ...prev.activeClaim, name: newName };
+            safeLocalStorage.setItem('superstition_active_claim', JSON.stringify(updated));
+            return {
+              ...prev,
+              activeClaim: updated,
+            };
+          });
           showBanner(`Claim title recorded as: "${newName}"`);
         }}
         onOpenBuilder={() => {

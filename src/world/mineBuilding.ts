@@ -587,6 +587,16 @@ export class MineBuildingSystem {
 
     claims.forEach((claim) => {
       const isOwner = localProspectorId && claim.ownerId === localProspectorId;
+      if (isOwner) {
+        this.currentClaim = {
+          isClaimed: true,
+          name: claim.name,
+          position: { x: claim.x, y: this.getTerrainHeight(claim.x, claim.z), z: claim.z },
+          size: claim.radius || 40,
+          extractedGold: claim.extractedGold || 0,
+          blocksDug: claim.blocksDug || 0,
+        };
+      }
       const ribbonColor = isOwner ? 0xffd23f : 0xef4444; // Yellow for player, red warning for rival prospector
       const ribbonMat = new THREE.MeshStandardMaterial({
         color: ribbonColor,

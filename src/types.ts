@@ -113,7 +113,7 @@ export interface MiningOreDrop {
 
 export interface DesertAnimal {
   id: string;
-  type: 'rabbit' | 'snake' | 'scorpion' | 'bighorn' | 'vulture';
+  type: 'rabbit' | 'snake' | 'scorpion' | 'bighorn' | 'vulture' | 'mule_deer' | 'whitetail_deer';
   position: Vector3D;
   targetPos: Vector3D;
   rotation: number;
@@ -264,6 +264,11 @@ export interface PlayerState {
   cornishPumpActive?: boolean;
   excavatedRoomsCount?: number;
   canteenOunces?: number; // 0 to 32 oz for desert hydration
+  // Wild Game Provisions & Hunting Harvests
+  provisionsRations?: number; // General trail jerky rations
+  venisonMeat?: number; // Harvested Sonoran Mule Deer & Coues Whitetail Venison
+  rabbitMeat?: number; // Harvested Desert Jackrabbit Meat
+  bighornMutton?: number; // Harvested Desert Bighorn Mountain Mutton
   // Pack Animal & Mount Companion (Burro / Mountain Pony)
   ownedMount?: 'burro' | 'pony' | null;
   mountName?: string;

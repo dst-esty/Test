@@ -13,8 +13,11 @@ import { db, OperationType, handleFirestoreError } from '../firebase';
 import { TerritoryClaim, ClaimInfringement, ClaimTradeOffer, Vector3D } from '../types';
 import { safeLocalStorage } from '../utils/storage';
 
+export type { TerritoryClaim, ClaimInfringement, ClaimTradeOffer };
+
 export class TerritoryClaimService {
   private static instance: TerritoryClaimService;
+  private static STORAGE_KEY = 'superstition_cached_claims';
   private claimsCache: Map<string, TerritoryClaim> = new Map();
   private subscribers = new Set<(claims: TerritoryClaim[]) => void>();
   private infringementSubscribers = new Set<(infringements: ClaimInfringement[]) => void>();
@@ -108,11 +111,42 @@ export class TerritoryClaimService {
   ];
 
   constructor() {
-    // Pre-populate cache with initial starter patents so exchange board is never empty
+    // 1. Attempt to load locally cached claims first for instantaneous reload restoration
+    try {
+      const cachedRaw = safeLocalStorage.getItem(TerritoryClaimService.STORAGE_KEY);
+      if (cachedRaw) {
+        const parsed: TerritoryClaim[] = JSON.parse(cachedRaw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((c) => {
+            if (c && c.id) this.claimsCache.set(c.id, c);
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[TerritoryClaimService] Failed to parse local cached claims:', e);
+    }
+
+    // 2. Pre-populate cache with initial starter patents if missing
     for (const c of TerritoryClaimService.STARTER_CLAIMS) {
-      this.claimsCache.set(c.id, c);
+      if (!this.claimsCache.has(c.id)) {
+        this.claimsCache.set(c.id, c);
+      }
     }
     this.initRealtimeListeners();
+  }
+
+  private saveToLocalStorage(list: TerritoryClaim[]): void {
+    try {
+      safeLocalStorage.setItem(TerritoryClaimService.STORAGE_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.warn('[TerritoryClaimService] Failed to cache claims locally:', e);
+    }
+  }
+
+  private notifyClaimsSubscribers(): void {
+    const list = Array.from(this.claimsCache.values());
+    this.saveToLocalStorage(list);
+    this.subscribers.forEach((cb) => cb(list));
   }
 
   // Get or persist a steady local prospector UUID for claim deeds
@@ -135,25 +169,33 @@ export class TerritoryClaimService {
       this.unsubscribeClaims = onSnapshot(
         collection(db, claimsPath),
         (snapshot) => {
-          this.claimsCache.clear();
+          const remoteMap = new Map<string, TerritoryClaim>();
           snapshot.forEach((d) => {
             const data = d.data() as TerritoryClaim;
-            this.claimsCache.set(data.id, data);
+            remoteMap.set(data.id, data);
           });
+
+          // Retain local player claims if Firestore has not synced them yet
+          const localOwnerId = this.getOrCreateProspectorId();
+          this.claimsCache.forEach((localClaim, id) => {
+            if (localClaim.ownerId === localOwnerId && !remoteMap.has(id)) {
+              remoteMap.set(id, localClaim);
+            }
+          });
+
+          this.claimsCache = remoteMap;
+
           // If no claims exist in database, seed historic frontier claims so market is lively
           if (this.claimsCache.size === 0) {
             this.seedHistoricMarketClaims();
           }
-          const list = Array.from(this.claimsCache.values());
-          this.subscribers.forEach((cb) => cb(list));
+
+          this.notifyClaimsSubscribers();
         },
         (error) => {
-          console.warn('[TerritoryClaimService] Realtime listener notice:', error.message);
-          try {
-            handleFirestoreError(error, OperationType.LIST, claimsPath);
-          } catch (e) {
-            console.warn('[TerritoryClaimService] Handled firestore claims error non-fatally:', e);
-          }
+          console.warn('[TerritoryClaimService] Realtime listener notice (operating with local cache):', error.message);
+          // Non-fatal fallback: notify subscribers with cached items
+          this.notifyClaimsSubscribers();
         }
       );
     } catch (err) {
@@ -252,6 +294,25 @@ export class TerritoryClaimService {
     return this.claimsCache.get(id);
   }
 
+  // Get active claim owned by the local prospector
+  public getPlayerClaim(prospectorId?: string): TerritoryClaim | undefined {
+    const pId = prospectorId || this.getOrCreateProspectorId();
+    return Array.from(this.claimsCache.values()).find((c) => c.ownerId === pId);
+  }
+
+  // Delete/abandon a claim
+  public async deleteClaim(claimId: string): Promise<boolean> {
+    this.claimsCache.delete(claimId);
+    this.notifyClaimsSubscribers();
+    try {
+      await deleteDoc(doc(db, 'territory_claims', claimId));
+      return true;
+    } catch (err) {
+      console.warn('[TerritoryClaimService] Non-fatal delete claim notice:', err);
+      return false;
+    }
+  }
+
   // Calculate official territorial appraisal value for a claim
   public calculateAppraisedValue(claim: {
     extractedGold?: number;
@@ -278,22 +339,24 @@ export class TerritoryClaimService {
     const claim = this.claimsCache.get(params.claimId);
     if (!claim) return { success: false, message: 'Claim deed not found.' };
 
+    const updateData = {
+      forSale: true,
+      priceDollars: Math.max(10, Math.round(params.priceDollars)),
+      priceGoldOunces: Math.max(0.5, Math.round(params.priceGoldOunces * 10) / 10),
+      listedAt: Date.now(),
+      description: (params.description || claim.description || '').substring(0, 256),
+    };
+    const updated = { ...claim, ...updateData };
+    this.claimsCache.set(params.claimId, updated);
+    this.notifyClaimsSubscribers();
+
     const path = `territory_claims/${params.claimId}`;
     try {
-      const updateData = {
-        forSale: true,
-        priceDollars: Math.max(10, Math.round(params.priceDollars)),
-        priceGoldOunces: Math.max(0.5, Math.round(params.priceGoldOunces * 10) / 10),
-        listedAt: Date.now(),
-        description: (params.description || claim.description || '').substring(0, 256),
-      };
       await updateDoc(doc(db, 'territory_claims', params.claimId), updateData);
-      const updated = { ...claim, ...updateData };
-      this.claimsCache.set(params.claimId, updated);
       return { success: true };
     } catch (err) {
-      console.error('[TerritoryClaimService] Failed to list claim:', err);
-      handleFirestoreError(err, OperationType.UPDATE, path);
+      console.warn('[TerritoryClaimService] Non-fatal notice listing claim on Firestore:', err);
+      return { success: true };
     }
   }
 
@@ -302,17 +365,19 @@ export class TerritoryClaimService {
     const claim = this.claimsCache.get(claimId);
     if (!claim) return { success: false };
 
+    const updated = { ...claim, forSale: false };
+    this.claimsCache.set(claimId, updated);
+    this.notifyClaimsSubscribers();
+
     const path = `territory_claims/${claimId}`;
     try {
       await updateDoc(doc(db, 'territory_claims', claimId), {
         forSale: false,
       });
-      const updated = { ...claim, forSale: false };
-      this.claimsCache.set(claimId, updated);
       return { success: true };
     } catch (err) {
-      console.error('[TerritoryClaimService] Failed to delist claim:', err);
-      handleFirestoreError(err, OperationType.UPDATE, path);
+      console.warn('[TerritoryClaimService] Non-fatal notice delisting claim on Firestore:', err);
+      return { success: true };
     }
   }
 
@@ -331,23 +396,25 @@ export class TerritoryClaimService {
     const previousOwner = claim.ownerName;
     const finalPrice = params.paidDollars ?? claim.priceDollars ?? 150;
 
-    try {
-      const updateData = {
-        ownerId: params.buyerId,
-        ownerName: params.buyerName,
-        forSale: false,
-        lastTransferPrice: finalPrice,
-        lastTransferAt: Date.now(),
-        previousOwnerName: previousOwner,
-      };
+    const updateData = {
+      ownerId: params.buyerId,
+      ownerName: params.buyerName,
+      forSale: false,
+      lastTransferPrice: finalPrice,
+      lastTransferAt: Date.now(),
+      previousOwnerName: previousOwner,
+    };
 
+    const updated: TerritoryClaim = { ...claim, ...updateData };
+    this.claimsCache.set(params.claimId, updated);
+    this.notifyClaimsSubscribers();
+
+    try {
       await updateDoc(doc(db, 'territory_claims', params.claimId), updateData);
-      const updated: TerritoryClaim = { ...claim, ...updateData };
-      this.claimsCache.set(params.claimId, updated);
       return { success: true, claim: updated };
     } catch (err) {
-      console.error('[TerritoryClaimService] Failed to buy claim:', err);
-      handleFirestoreError(err, OperationType.UPDATE, path);
+      console.warn('[TerritoryClaimService] Non-fatal notice writing claim transfer to Firestore:', err);
+      return { success: true, claim: updated };
     }
   }
 
@@ -552,15 +619,17 @@ export class TerritoryClaimService {
       forSale: false,
     };
 
+    // Immediately cache in memory and localStorage and notify all subscribers
+    this.claimsCache.set(claimId, newClaim);
+    this.notifyClaimsSubscribers();
+
     const path = `territory_claims/${claimId}`;
     try {
       await setDoc(doc(db, 'territory_claims', claimId), newClaim);
-      this.claimsCache.set(claimId, newClaim);
-      return { success: true, claim: newClaim };
     } catch (err) {
-      console.error('[TerritoryClaimService] Failed to write claim:', err);
-      handleFirestoreError(err, OperationType.CREATE, path);
+      console.warn('[TerritoryClaimService] Non-fatal note: local claim preserved, Firestore write note:', err);
     }
+    return { success: true, claim: newClaim };
   }
 
   // Update yield and excavation statistics for an active claim
@@ -573,16 +642,16 @@ export class TerritoryClaimService {
     if (!claim) return;
     const nextGold = Math.round(((claim.extractedGold || 0) + goldDelta) * 10) / 10;
     const nextBlocks = (claim.blocksDug || 0) + blocksDelta;
+    const updated = { ...claim, extractedGold: nextGold, blocksDug: nextBlocks };
+    this.claimsCache.set(claimId, updated);
+    this.notifyClaimsSubscribers();
+
     const path = `territory_claims/${claimId}`;
     try {
       await updateDoc(doc(db, 'territory_claims', claimId), {
         extractedGold: nextGold,
         blocksDug: nextBlocks,
       });
-      const updated = { ...claim, extractedGold: nextGold, blocksDug: nextBlocks };
-      this.claimsCache.set(claimId, updated);
-      const list = Array.from(this.claimsCache.values());
-      this.subscribers.forEach((cb) => cb(list));
     } catch (e) {
       console.warn('[TerritoryClaimService] Non-fatal yield update notice:', e);
     }

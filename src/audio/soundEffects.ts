@@ -418,6 +418,68 @@ class SoundEngine {
     osc.stop(t + 0.22);
   }
 
+  public playEatFood() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    // Satisfying two-crunch chewing sound
+    const t = this.ctx.currentTime;
+    [0, 0.12, 0.24].forEach((offset, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(320 - idx * 40, t + offset);
+      osc.frequency.exponentialRampToValueAtTime(140, t + offset + 0.08);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(800, t + offset);
+
+      gain.gain.setValueAtTime(0.18, t + offset);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + offset + 0.09);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(t + offset);
+      osc.stop(t + offset + 0.095);
+    });
+  }
+
+  public playHarvestGame() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Field dressing knife slide & leather rustle
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(440, t);
+    osc.frequency.exponentialRampToValueAtTime(280, t + 0.18);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1100, t);
+    filter.Q.setValueAtTime(3.0, t);
+
+    gain.gain.setValueAtTime(0.15, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.22);
+  }
+
   public playPickaxe() {
     if (this.isMuted) return;
     this.init();

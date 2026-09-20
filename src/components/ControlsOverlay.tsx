@@ -115,6 +115,8 @@ interface ControlsOverlayProps {
   onToggleAimRifle?: () => void;
   onZoomInScope?: () => void;
   onZoomOutScope?: () => void;
+  onConsumeFood?: (type: 'venison' | 'bighorn' | 'rabbit' | 'provisions') => void;
+  onPurchaseProvisions?: (amount: number, goldCost: number) => void;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
@@ -174,6 +176,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onToggleAimRifle,
   onZoomInScope,
   onZoomOutScope,
+  onConsumeFood,
+  onPurchaseProvisions,
 }) => {
   const [musicPlaying, setMusicPlaying] = useState(westernMusic.getIsPlaying());
   const [musicMuted, setMusicMuted] = useState(westernMusic.getIsMuted());
@@ -1580,6 +1584,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         onPurchaseWood={onPurchaseWood}
         onOpenRockDepot={onOpenRockDepot}
         onSelectTool={onSelectTool}
+        onConsumeFood={onConsumeFood}
+        onPurchaseProvisions={onPurchaseProvisions}
       />
 
       {/* On-Screen Mobile Virtual Controls (Joystick & Action Buttons) */}
