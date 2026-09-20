@@ -3493,8 +3493,12 @@ class SoundEngine {
    * Authentic US Cavalry Brass Bugle Call (Fort McDowell 6th/8th Cavalry).
    * Generates traditional military bugle harmonic notes (C4, G4, C5, E5, G5)
    * with brass tube formant filtering, bell flare resonances, and outdoor mountain echo.
+   * Scaled down to gentle, distant, atmospheric levels.
    */
-  public playCavalryBugleCall(pattern: 'assembly' | 'boots_and_saddles' | 'charge' = 'boots_and_saddles') {
+  public playCavalryBugleCall(
+    pattern: 'assembly' | 'boots_and_saddles' | 'charge' = 'boots_and_saddles',
+    volumeScale: number = 0.12
+  ) {
     if (this.isMuted) return;
     this.init();
     if (!this.ctx) return;
@@ -3516,32 +3520,34 @@ class SoundEngine {
     if (pattern === 'boots_and_saddles') {
       // Classic "Boots and Saddles" cavalry mount call
       sequence = [
-        { note: Bb_BUGLE.mid, time: 0.0, dur: 0.22, vol: 0.22 },
-        { note: Bb_BUGLE.high, time: 0.26, dur: 0.20, vol: 0.24 },
-        { note: Bb_BUGLE.mid, time: 0.48, dur: 0.18, vol: 0.22 },
-        { note: Bb_BUGLE.high, time: 0.68, dur: 0.35, vol: 0.28 },
-        { note: Bb_BUGLE.third, time: 1.08, dur: 0.22, vol: 0.26 },
-        { note: Bb_BUGLE.high, time: 1.34, dur: 0.20, vol: 0.24 },
-        { note: Bb_BUGLE.mid, time: 1.56, dur: 0.45, vol: 0.20 },
+        { note: Bb_BUGLE.mid, time: 0.0, dur: 0.22, vol: 0.20 },
+        { note: Bb_BUGLE.high, time: 0.26, dur: 0.20, vol: 0.22 },
+        { note: Bb_BUGLE.mid, time: 0.48, dur: 0.18, vol: 0.20 },
+        { note: Bb_BUGLE.high, time: 0.68, dur: 0.35, vol: 0.25 },
+        { note: Bb_BUGLE.third, time: 1.08, dur: 0.22, vol: 0.22 },
+        { note: Bb_BUGLE.high, time: 1.34, dur: 0.20, vol: 0.20 },
+        { note: Bb_BUGLE.mid, time: 1.56, dur: 0.45, vol: 0.18 },
       ];
     } else if (pattern === 'charge') {
       // Gallop / Charge fanfare
       sequence = [
-        { note: Bb_BUGLE.mid, time: 0.0, dur: 0.12, vol: 0.26 },
-        { note: Bb_BUGLE.high, time: 0.14, dur: 0.12, vol: 0.28 },
-        { note: Bb_BUGLE.third, time: 0.28, dur: 0.14, vol: 0.30 },
-        { note: Bb_BUGLE.top, time: 0.44, dur: 0.60, vol: 0.35 },
+        { note: Bb_BUGLE.mid, time: 0.0, dur: 0.12, vol: 0.22 },
+        { note: Bb_BUGLE.high, time: 0.14, dur: 0.12, vol: 0.24 },
+        { note: Bb_BUGLE.third, time: 0.28, dur: 0.14, vol: 0.26 },
+        { note: Bb_BUGLE.top, time: 0.44, dur: 0.60, vol: 0.28 },
       ];
     } else {
       // Assembly / Routine Trail Patrol
       sequence = [
-        { note: Bb_BUGLE.mid, time: 0.0, dur: 0.18, vol: 0.22 },
-        { note: Bb_BUGLE.mid, time: 0.22, dur: 0.18, vol: 0.22 },
-        { note: Bb_BUGLE.high, time: 0.44, dur: 0.32, vol: 0.26 },
-        { note: Bb_BUGLE.third, time: 0.80, dur: 0.24, vol: 0.28 },
-        { note: Bb_BUGLE.high, time: 1.08, dur: 0.50, vol: 0.24 },
+        { note: Bb_BUGLE.mid, time: 0.0, dur: 0.18, vol: 0.20 },
+        { note: Bb_BUGLE.mid, time: 0.22, dur: 0.18, vol: 0.20 },
+        { note: Bb_BUGLE.high, time: 0.44, dur: 0.32, vol: 0.22 },
+        { note: Bb_BUGLE.third, time: 0.80, dur: 0.24, vol: 0.24 },
+        { note: Bb_BUGLE.high, time: 1.08, dur: 0.50, vol: 0.20 },
       ];
     }
+
+    const safeVolScale = Math.max(0.01, Math.min(1.0, volumeScale));
 
     sequence.forEach(({ note, time: noteTime, dur, vol }) => {
       if (!this.ctx) return;
@@ -3561,22 +3567,23 @@ class SoundEngine {
       brassFilter.frequency.setValueAtTime(note * 1.8, startTime);
       brassFilter.Q.setValueAtTime(3.2, startTime);
 
-      // 3. High-cut warming to simulate open-air canyon acoustic propagation
+      // 3. Warm low-pass filter to simulate open-air canyon acoustic distance
       const distanceFilter = this.ctx.createBiquadFilter();
       distanceFilter.type = 'lowpass';
-      distanceFilter.frequency.setValueAtTime(2400, startTime);
+      distanceFilter.frequency.setValueAtTime(1200, startTime);
 
       // 4. Amplitude envelope with brass tonguing attack and smooth decay
       const gainNode = this.ctx.createGain();
-      gainNode.gain.setValueAtTime(0.001, startTime);
-      gainNode.gain.exponentialRampToValueAtTime(vol * 0.45, startTime + 0.04);
-      gainNode.gain.setValueAtTime(vol * 0.42, startTime + dur - 0.04);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + dur + 0.08);
+      const targetGain = vol * safeVolScale * 0.35;
+      gainNode.gain.setValueAtTime(0.0001, startTime);
+      gainNode.gain.exponentialRampToValueAtTime(targetGain, startTime + 0.04);
+      gainNode.gain.setValueAtTime(targetGain * 0.9, startTime + dur - 0.04);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + dur + 0.12);
 
       // Reverb / Mountain canyon delay simulation
       const echoGain = this.ctx.createGain();
-      echoGain.gain.setValueAtTime(0.12 * vol, startTime + 0.22);
-      echoGain.gain.exponentialRampToValueAtTime(0.001, startTime + dur + 0.5);
+      echoGain.gain.setValueAtTime(targetGain * 0.2, startTime + 0.22);
+      echoGain.gain.exponentialRampToValueAtTime(0.0001, startTime + dur + 0.6);
 
       osc1.connect(brassFilter);
       osc2.connect(brassFilter);
@@ -3589,22 +3596,25 @@ class SoundEngine {
 
       osc1.start(startTime);
       osc2.start(startTime);
-      osc1.stop(startTime + dur + 0.6);
-      osc2.stop(startTime + dur + 0.6);
+      osc1.stop(startTime + dur + 0.7);
+      osc2.stop(startTime + dur + 0.7);
     });
   }
 
   /**
-   * Sound of multiple mounted cavalry horses trotting together with leather tack and sabre jingle.
+   * Sound of mounted cavalry horses trotting together with leather tack and sabre jingle.
+   * Gentle, quiet, realistic earthen stride.
    */
-  public playCavalryTroopHooves() {
+  public playCavalryTroopHooves(volumeScale: number = 0.2) {
     if (this.isMuted) return;
     this.init();
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
+    const safeScale = Math.max(0, Math.min(1.0, volumeScale));
+    if (safeScale <= 0.01) return;
 
-    // Troop of 3 horses galloping/trotting slightly out of phase
-    const offsets = [0, 0.06, 0.14, 0.22, 0.28, 0.36];
+    // Troop of horses trotting slightly out of phase
+    const offsets = [0, 0.08, 0.18, 0.26];
     offsets.forEach((dt, i) => {
       if (!this.ctx) return;
       const osc = this.ctx.createOscillator();
@@ -3612,37 +3622,38 @@ class SoundEngine {
       const filter = this.ctx.createBiquadFilter();
 
       osc.type = 'triangle';
-      const basePitch = (i % 2 === 0 ? 115 : 90) + (Math.random() * 12 - 6);
+      const basePitch = (i % 2 === 0 ? 100 : 85) + (Math.random() * 8 - 4);
       osc.frequency.setValueAtTime(basePitch, t + dt);
-      osc.frequency.exponentialRampToValueAtTime(40, t + dt + 0.05);
+      osc.frequency.exponentialRampToValueAtTime(35, t + dt + 0.06);
 
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(380, t + dt);
+      filter.frequency.setValueAtTime(280, t + dt);
 
-      gain.gain.setValueAtTime(0.09, t + dt);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + dt + 0.05);
+      // Soft muted earthen hooves
+      gain.gain.setValueAtTime(0.015 * safeScale, t + dt);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.06);
 
       osc.connect(filter);
       filter.connect(gain);
       gain.connect(this.ctx.destination);
 
       osc.start(t + dt);
-      osc.stop(t + dt + 0.06);
+      osc.stop(t + dt + 0.07);
     });
 
-    // Subtle metallic sabre scabbard / bit chain jingle
+    // Extremely faint metallic scabbard / bit chain jingle
     const jingleOsc = this.ctx.createOscillator();
     const jingleGain = this.ctx.createGain();
     const jingleFilter = this.ctx.createBiquadFilter();
 
     jingleOsc.type = 'sine';
-    jingleOsc.frequency.setValueAtTime(3200 + Math.random() * 800, t);
+    jingleOsc.frequency.setValueAtTime(2800 + Math.random() * 600, t);
     jingleFilter.type = 'bandpass';
-    jingleFilter.frequency.setValueAtTime(3400, t);
-    jingleFilter.Q.setValueAtTime(8, t);
+    jingleFilter.frequency.setValueAtTime(3000, t);
+    jingleFilter.Q.setValueAtTime(6, t);
 
-    jingleGain.gain.setValueAtTime(0.02, t);
-    jingleGain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    jingleGain.gain.setValueAtTime(0.002 * safeScale, t);
+    jingleGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
 
     jingleOsc.connect(jingleFilter);
     jingleFilter.connect(jingleGain);

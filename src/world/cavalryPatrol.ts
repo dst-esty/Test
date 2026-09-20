@@ -61,7 +61,7 @@ export class CavalryPatrolManager {
   private pauseTimer: number = 0;
   private hoofSoundTimer: number = 0;
   private bannerTriggeredForArrival: boolean = false;
-  private patrolCycleTimer: number = 35; // Initial cooldown before first patrol rides through
+  private patrolCycleTimer: number = 600; // Rare historic event: 10 min cooldown before first patrol
 
   // Patrol waypoints: Starts from Fort McDowell approach (North-West across Salt River Canyon),
   // rides along Tortilla Flat Stage road, surveys Apache Trail wash, passes Mountain Bluffs, and returns.
@@ -575,11 +575,11 @@ export class CavalryPatrolManager {
     getTerrainElevation: (x: number, z: number) => number,
     onShowBanner?: (msg: string) => void
   ) {
-    // 1. Patrol Cycle Spawning (rides through every few minutes or during active wilderness exploration)
+    // 1. Patrol Cycle Spawning (rides through very rarely as an authentic historic event)
     if (!this.isActive) {
       this.patrolCycleTimer -= delta;
       if (this.patrolCycleTimer <= 0) {
-        this.startPatrol(getTerrainElevation, onShowBanner);
+        this.startPatrol(getTerrainElevation, onShowBanner, playerPos);
       }
       return;
     }
@@ -603,22 +603,26 @@ export class CavalryPatrolManager {
       if (targetWp.pauseSeconds && targetWp.pauseSeconds > 0) {
         this.pauseTimer = targetWp.pauseSeconds;
 
-        // Play bugle call when stopping at Tortilla Flat or key trail junction
+        // Play gentle bugle call ONLY when stopping at Tortilla Flat AND player is physically close by (< 35m)
         if (targetWp.name.includes('Tortilla Flat') && !this.bannerTriggeredForArrival) {
           this.bannerTriggeredForArrival = true;
-          soundEngine.playCavalryBugleCall('assembly');
-          if (onShowBanner) {
-            onShowBanner('🎺 6th U.S. Cavalry Detachment from Fort McDowell arrived at Tortilla Flat on frontier patrol!');
+          const playerDistToTF = Math.hypot(playerPos.x - targetWp.x, playerPos.z - targetWp.z);
+          if (playerDistToTF < 35) {
+            const volScale = (1 - playerDistToTF / 35) * 0.08;
+            soundEngine.playCavalryBugleCall('assembly', volScale);
+            if (onShowBanner) {
+              onShowBanner('🎖️ 6th U.S. Cavalry Detachment arrived at Tortilla Flat hitching rails.');
+            }
           }
         }
       }
 
       this.currentWaypointIndex++;
       if (this.currentWaypointIndex >= this.waypoints.length) {
-        // Patrol finished round trip; rest at garrison before next sweep
+        // Patrol finished round trip; rest at garrison before next rare sweep
         this.isActive = false;
         this.patrolGroup.visible = false;
-        this.patrolCycleTimer = 180 + Math.random() * 120; // 3 - 5 minutes between patrols
+        this.patrolCycleTimer = 1200 + Math.random() * 600; // 20 - 30 minutes between rare patrols
         this.currentWaypointIndex = 0;
         this.bannerTriggeredForArrival = false;
         return;
@@ -643,13 +647,14 @@ export class CavalryPatrolManager {
       // Animate trotting legs, body bounce, and fluttering guidon flag
       this.animateTrottingTroop(delta);
 
-      // Sound: Periodic cavalry hooves clattering on rocky trail
+      // Sound: Very occasional soft hooves clattering only when player is physically close (< 28m)
       this.hoofSoundTimer += delta;
-      if (this.hoofSoundTimer > 0.42) {
+      if (this.hoofSoundTimer > 1.6) {
         this.hoofSoundTimer = 0;
         const playerDist = Math.hypot(playerPos.x - this.columnPosition.x, playerPos.z - this.columnPosition.z);
-        if (playerDist < 90) {
-          soundEngine.playCavalryTroopHooves();
+        if (playerDist < 28) {
+          const volumeFactor = Math.max(0, 1 - (playerDist / 28)) * 0.25;
+          soundEngine.playCavalryTroopHooves(volumeFactor);
         }
       }
     }
@@ -660,7 +665,8 @@ export class CavalryPatrolManager {
    */
   public startPatrol(
     getTerrainElevation: (x: number, z: number) => number,
-    onShowBanner?: (msg: string) => void
+    onShowBanner?: (msg: string) => void,
+    playerPos?: Vector3D
   ) {
     this.isActive = true;
     this.currentWaypointIndex = 0;
@@ -671,10 +677,16 @@ export class CavalryPatrolManager {
     this.pauseTimer = 0;
     this.bannerTriggeredForArrival = false;
 
-    // Distant bugle call echoing down the canyon when patrol mounts up
-    soundEngine.playCavalryBugleCall('boots_and_saddles');
-    if (onShowBanner) {
-      onShowBanner('🎺 Fort McDowell Cavalry Patrol dispatched along the Salt River & Tortilla Flat trail!');
+    // Distant faint bugle call only if player is near Fort McDowell river crossing (< 50m)
+    if (playerPos) {
+      const dist = Math.hypot(playerPos.x - startWp.x, playerPos.z - startWp.z);
+      if (dist < 50) {
+        const volScale = (1 - dist / 50) * 0.08;
+        soundEngine.playCavalryBugleCall('boots_and_saddles', volScale);
+        if (onShowBanner) {
+          onShowBanner('🎺 Fort McDowell Cavalry Patrol dispatched along the Salt River trail.');
+        }
+      }
     }
   }
 
