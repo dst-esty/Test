@@ -228,6 +228,11 @@ export interface PlayerState {
   health: number; // 0 - 100
   maxHealth: number;
   hydration: number; // 0 - 100
+  vigour: number; // 0 - 100 stamina/vigour
+  maxVigour?: number; // default 100
+  isInShade?: boolean; // whether player is resting in desert shade
+  isExhausted?: boolean; // whether player is out of vigour/breath
+  shadeReason?: string; // descriptive source of shade (canopy, canyon wall, mine portal, etc.)
   isSprinting: boolean;
   isInsideMine: boolean;
   equippedTool:

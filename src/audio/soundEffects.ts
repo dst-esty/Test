@@ -649,6 +649,176 @@ class SoundEngine {
     tapOsc.stop(tapTime + 0.15);
   }
 
+  /**
+   * Heavy panting breath played when player's vigour is exhausted from sprinting or jumping.
+   * Dual-phase organic breath exhalation & inhalation with vocal strain.
+   */
+  public playExhaustedPanting(intensity: number = 1.0) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const gainVal = Math.min(0.26, 0.18 * intensity);
+
+    // Phase 1: Heavy exhalation (0.35s)
+    const exhDuration = 0.35;
+    const exhSamples = Math.floor(this.ctx.sampleRate * exhDuration);
+    const exhBuffer = this.ctx.createBuffer(1, exhSamples, this.ctx.sampleRate);
+    const exhData = exhBuffer.getChannelData(0);
+
+    let b0 = 0, b1 = 0;
+    for (let i = 0; i < exhSamples; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.992 * b0 + white * 0.08;
+      b1 = 0.985 * b1 + white * 0.12;
+      const tNorm = i / exhSamples;
+      const env = Math.sin(tNorm * Math.PI);
+      exhData[i] = (b0 + b1) * env * 0.35;
+    }
+
+    const exhSource = this.ctx.createBufferSource();
+    exhSource.buffer = exhBuffer;
+
+    const exhFilter = this.ctx.createBiquadFilter();
+    exhFilter.type = 'bandpass';
+    exhFilter.frequency.setValueAtTime(600, t);
+    exhFilter.frequency.exponentialRampToValueAtTime(380, t + exhDuration);
+    exhFilter.Q.setValueAtTime(1.8, t);
+
+    const exhGain = this.ctx.createGain();
+    exhGain.gain.setValueAtTime(0.001, t);
+    exhGain.gain.linearRampToValueAtTime(gainVal, t + 0.08);
+    exhGain.gain.exponentialRampToValueAtTime(0.001, t + exhDuration);
+
+    exhSource.connect(exhFilter);
+    exhFilter.connect(exhGain);
+    exhGain.connect(this.ctx.destination);
+    exhSource.start(t);
+    exhSource.stop(t + exhDuration);
+
+    // Phase 2: Sharp catch of breath / inhalation at t + 0.38s
+    const inhTime = t + 0.38;
+    const inhDuration = 0.28;
+    const inhSamples = Math.floor(this.ctx.sampleRate * inhDuration);
+    const inhBuffer = this.ctx.createBuffer(1, inhSamples, this.ctx.sampleRate);
+    const inhData = inhBuffer.getChannelData(0);
+
+    let i0 = 0;
+    for (let i = 0; i < inhSamples; i++) {
+      const white = Math.random() * 2 - 1;
+      i0 = 0.988 * i0 + white * 0.1;
+      const tNorm = i / inhSamples;
+      const env = Math.sin(tNorm * Math.PI);
+      inhData[i] = i0 * env * 0.3;
+    }
+
+    const inhSource = this.ctx.createBufferSource();
+    inhSource.buffer = inhBuffer;
+
+    const inhFilter = this.ctx.createBiquadFilter();
+    inhFilter.type = 'bandpass';
+    inhFilter.frequency.setValueAtTime(500, inhTime);
+    inhFilter.frequency.exponentialRampToValueAtTime(950, inhTime + inhDuration);
+    inhFilter.Q.setValueAtTime(2.2, inhTime);
+
+    const inhGain = this.ctx.createGain();
+    inhGain.gain.setValueAtTime(0.001, inhTime);
+    inhGain.gain.linearRampToValueAtTime(gainVal * 0.85, inhTime + 0.06);
+    inhGain.gain.exponentialRampToValueAtTime(0.001, inhTime + inhDuration);
+
+    inhSource.connect(inhFilter);
+    inhFilter.connect(inhGain);
+    inhGain.connect(this.ctx.destination);
+    inhSource.start(inhTime);
+    inhSource.stop(inhTime + inhDuration);
+  }
+
+  /**
+   * Soothing breath and gentle cooling resonance when entering desert shade.
+   */
+  public playShadeRelief() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Soothing gentle exhalation sigh
+    const dur = 0.65;
+    const samples = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, samples, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+
+    let f = 0;
+    for (let i = 0; i < samples; i++) {
+      const white = Math.random() * 2 - 1;
+      f = 0.994 * f + white * 0.06;
+      const tNorm = i / samples;
+      const env = Math.sin(tNorm * Math.PI);
+      data[i] = f * env * 0.25;
+    }
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(800, t);
+    filter.frequency.exponentialRampToValueAtTime(300, t + dur);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.12, t + 0.15);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    src.start(t);
+    src.stop(t + dur);
+
+    // Subtle cooling harmonic chime
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(520, t + 0.1);
+    osc.frequency.exponentialRampToValueAtTime(390, t + 0.6);
+
+    const oscGain = this.ctx.createGain();
+    oscGain.gain.setValueAtTime(0.001, t + 0.1);
+    oscGain.gain.linearRampToValueAtTime(0.04, t + 0.2);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+
+    osc.connect(oscGain);
+    oscGain.connect(this.ctx.destination);
+    osc.start(t + 0.1);
+    osc.stop(t + 0.75);
+  }
+
+  /**
+   * Subtle vitality chime when vigour has fully replenished.
+   */
+  public playVigourRestored() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, t);
+    osc.frequency.exponentialRampToValueAtTime(660, t + 0.22);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.08, t + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.38);
+  }
+
   public playDrink() {
     if (this.isMuted) return;
     this.init();

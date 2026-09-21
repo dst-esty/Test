@@ -45,6 +45,7 @@ import {
   Wind,
   AlertTriangle,
   Film,
+  Zap,
 } from 'lucide-react';
 import { MineStructureType, PlayerState, GraphicsQuality, ClaimInfo, TerritoryClaim } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
@@ -428,6 +429,17 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         </div>
       )}
 
+      {/* Exhaustion breath vignette pulse when out of vigour */}
+      {((playerState.vigour ?? 100) < 15 || playerState.isExhausted) && (playerState.health || 0) > 0 && (
+        <div
+          id="hud-exhaustion-vignette"
+          className="fixed inset-0 pointer-events-none z-10 transition-opacity duration-300 animate-pulse"
+          style={{
+            boxShadow: 'inset 0 0 80px 24px rgba(220, 38, 38, 0.38)',
+          }}
+        />
+      )}
+
       {/* Turn Phone Sideways (Landscape) Tip for Mobile Viewers */}
       {isPortraitMobile && !dismissRotatePrompt && (
         <div className="fixed inset-x-3 bottom-24 sm:bottom-28 z-50 pointer-events-auto flex justify-center animate-in fade-in slide-in-from-bottom-3 duration-300">
@@ -532,18 +544,24 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       {/* Top Left: Player Survival & Mine Statistics */}
       {hudVisible && (
         <div className="pointer-events-auto flex flex-col gap-2 max-w-sm items-start">
-          {/* Collapsible Vitals & Survival Pill - Collapsed to Just the Red Heart */}
+          {/* Collapsible Vitals & Survival Pill - Collapsed to Just the Red Heart / Alert Icon */}
           {isVitalsCollapsed ? (
             <button
               onClick={() => setIsVitalsCollapsed(false)}
               className={`group flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-stone-900/90 hover:bg-stone-850 backdrop-blur-md rounded-full border shadow-lg transition-all transform hover:scale-110 active:scale-95 cursor-pointer ${
-                playerState.hydration < 20
+                playerState.isExhausted || (playerState.vigour ?? 100) < 20
+                  ? 'border-red-500/90 shadow-red-950/70 ring-2 ring-red-500/60 animate-pulse'
+                  : playerState.hydration < 20
                   ? 'border-amber-500/90 shadow-amber-950/60 ring-2 ring-amber-500/60 animate-pulse'
                   : 'border-red-500/40 hover:border-red-400 shadow-red-950/50'
               }`}
-              title={`Health: ${Math.round(playerState.health)}% | Hydration: ${Math.round(playerState.hydration)}%${playerState.hydration < 20 ? ' (THIRST CRITICAL - Click to expand)' : ' (Click to view full vitals)'}`}
+              title={`Health: ${Math.round(playerState.health)}% | Hydration: ${Math.round(playerState.hydration)}% | Vigour: ${Math.round(playerState.vigour ?? 100)}%${
+                playerState.isExhausted ? ' (EXHAUSTED - Rest in shade!)' : playerState.hydration < 20 ? ' (THIRST CRITICAL)' : ' (Click to view full vitals)'
+              }`}
             >
-              {playerState.hydration < 20 && playerState.health >= 30 ? (
+              {playerState.isExhausted || (playerState.vigour ?? 100) < 20 ? (
+                <Zap className="w-4 h-4 text-red-400 fill-red-400 animate-bounce" />
+              ) : playerState.hydration < 20 && playerState.health >= 30 ? (
                 <Droplets className="w-4 h-4 text-amber-400 fill-amber-400 animate-bounce" />
               ) : (
                 <Heart
@@ -559,10 +577,14 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             </button>
           ) : (
             <div className="flex items-center gap-2 animate-fade-in">
-              {/* Streamlined Health & Hydration Pill */}
+              {/* Streamlined Health, Hydration & Vigour Pill */}
               <div className={`flex items-center gap-2.5 bg-stone-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border shadow-lg text-[10px] font-mono transition-all ${
-                playerState.hydration < 20
+                playerState.isExhausted || (playerState.vigour ?? 100) < 20
+                  ? 'border-red-500/80 ring-2 ring-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.35)]'
+                  : playerState.hydration < 20
                   ? 'border-amber-500/80 ring-2 ring-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.35)]'
+                  : playerState.isInShade
+                  ? 'border-emerald-500/60 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
                   : 'border-stone-700/60'
               }`}>
                 {/* Health - Clicking heart collapses back down */}
@@ -643,6 +665,61 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   </span>
                 </div>
 
+                <div className="w-px h-3 bg-stone-700/60" />
+
+                {/* Vigour (Stamina) with Desert Shade indicator */}
+                <div
+                  className="flex items-center gap-1.5 group transition-all"
+                  title={`Vigour (Stamina): ${Math.round(playerState.vigour ?? 100)}% | Depletes when sprinting or jumping. ${
+                    playerState.isInShade
+                      ? '🌿 Resting in Desert Shade: Vigour recovers rapidly (+22/s)!'
+                      : '☀️ Under Scorching Sun: Rest under trees, canyon cliffs, or mine portals to recover!'
+                  }`}
+                >
+                  <Zap
+                    className={`w-3.5 h-3.5 transition-transform group-hover:scale-110 ${
+                      playerState.isExhausted || (playerState.vigour ?? 100) < 20
+                        ? 'text-red-400 fill-red-400 animate-bounce'
+                        : playerState.isInShade
+                        ? 'text-emerald-400 fill-emerald-400/40 animate-pulse'
+                        : 'text-amber-400 fill-amber-400/30'
+                    }`}
+                  />
+                  <div
+                    className={`w-12 bg-stone-800 h-2 rounded-full overflow-hidden border transition-all ${
+                      playerState.isExhausted || (playerState.vigour ?? 100) < 20
+                        ? 'border-red-500/90 ring-1 ring-red-500/60 shadow-[0_0_8px_rgba(239,68,68,0.4)]'
+                        : playerState.isInShade
+                        ? 'border-emerald-500/80 ring-1 ring-emerald-500/50 shadow-[0_0_6px_rgba(16,185,129,0.3)]'
+                        : 'border-stone-700/50'
+                    }`}
+                  >
+                    <div
+                      className={`h-full transition-all duration-200 ${
+                        playerState.isExhausted || (playerState.vigour ?? 100) < 20
+                          ? 'bg-red-500 animate-pulse'
+                          : (playerState.vigour ?? 100) < 40
+                          ? 'bg-amber-500'
+                          : playerState.isInShade
+                          ? 'bg-gradient-to-r from-amber-400 to-emerald-400'
+                          : 'bg-amber-400'
+                      }`}
+                      style={{ width: `${Math.max(0, Math.min(100, playerState.vigour ?? 100))}%` }}
+                    />
+                  </div>
+                  <span
+                    className={`font-mono transition-colors ${
+                      playerState.isExhausted || (playerState.vigour ?? 100) < 20
+                        ? 'text-red-400 font-bold animate-pulse'
+                        : playerState.isInShade
+                        ? 'text-emerald-300 font-medium'
+                        : 'text-stone-300'
+                    }`}
+                  >
+                    {Math.round(playerState.vigour ?? 100)}%
+                  </span>
+                </div>
+
                 {/* Collapse Button */}
                 <button
                   onClick={() => setIsVitalsCollapsed(true)}
@@ -652,6 +729,37 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   <ChevronLeft className="w-3 h-3" />
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Critical Vigour Exhaustion Alert Pill */}
+          {(playerState.isExhausted || (playerState.vigour ?? 100) < 20) && (playerState.health || 0) > 0 && (
+            <div
+              id="hud-vigour-exhaustion-alert"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-950/90 border border-red-500/80 shadow-[0_0_14px_rgba(239,68,68,0.5)] backdrop-blur-md text-[10px] font-mono text-red-200 animate-pulse select-none"
+              title="You are panting with exhaustion! Sprinting is disabled. Seek shade under cottonwood trees, canyon cliffs, or mine timbering."
+            >
+              <Wind className="w-3.5 h-3.5 text-red-400 animate-spin shrink-0" />
+              <span className="font-bold tracking-wide">
+                EXHAUSTED • REST IN SHADE ({Math.round(playerState.vigour ?? 0)}%)
+              </span>
+            </div>
+          )}
+
+          {/* Desert Shade Recovery Badge Pill */}
+          {playerState.isInShade && !playerState.isExhausted && (playerState.vigour ?? 100) >= 20 && (playerState.health || 0) > 0 && (
+            <div
+              id="hud-desert-shade-badge"
+              className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-950/85 border border-emerald-500/50 shadow-sm backdrop-blur-md text-[9px] font-mono text-emerald-200 select-none animate-fade-in"
+              title={`Sheltered in Desert Shade: ${playerState.shadeReason || 'Cool canopy or cliff'}. Vigour recovers rapidly!`}
+            >
+              <TreePine className="w-3 h-3 text-emerald-400 shrink-0" />
+              <span className="font-semibold tracking-wide">
+                DESERT SHADE • {playerState.shadeReason || 'Cooling Shelter'}
+              </span>
+              {(playerState.vigour ?? 100) < 99 && (
+                <span className="text-[8px] text-emerald-300/80 font-normal ml-0.5">RESTING +22/s</span>
+              )}
             </div>
           )}
 

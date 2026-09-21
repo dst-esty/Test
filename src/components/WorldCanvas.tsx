@@ -74,6 +74,7 @@ import { WorldScaleMode } from '../world/superstitionTopography';
 import { Skull } from 'lucide-react';
 import { isScatteredSkullClue } from '../services/curseNarrativeEngine';
 import { enterFullscreen } from '../utils/fullscreen';
+import { desertShadeService } from '../services/desertShadeService';
 
 /**
  * Authentic Historic & Forensic Locations of Scattered Skulls & Headless Remains
@@ -391,6 +392,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         lastSentPos.current.set(0, townY, -246);
         currentHydrationRef.current = 100;
         currentHealthRef.current = 100;
+        currentVigourRef.current = 100;
+        isExhaustedRef.current = false;
+        isInShadeRef.current = false;
         playerYaw.current = 0;
         playerPitch.current = 0;
         verticalVelocity.current = 0;
@@ -510,6 +514,12 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     if (typeof playerState.health === 'number' && Math.abs(currentHealthRef.current - playerState.health) > 2) {
       currentHealthRef.current = playerState.health;
     }
+    if (typeof playerState.vigour === 'number' && Math.abs(currentVigourRef.current - playerState.vigour) > 2) {
+      currentVigourRef.current = playerState.vigour;
+      if (playerState.vigour >= 20) {
+        isExhaustedRef.current = false;
+      }
+    }
     // Update ghost preview when tool changes
     if (mineBuildingRef.current) {
       if (playerState.equippedTool === 'stake') {
@@ -578,6 +588,12 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   const lastSentPitch = useRef<number>(playerState.rotation?.pitch || 0);
   const currentHydrationRef = useRef<number>(playerState.hydration ?? 100);
   const currentHealthRef = useRef<number>(playerState.health ?? 100);
+  const currentVigourRef = useRef<number>(playerState.vigour ?? 100);
+  const isExhaustedRef = useRef<boolean>(false);
+  const isInShadeRef = useRef<boolean>(false);
+  const currentShadeReasonRef = useRef<string>('Scorching Desert Sun');
+  const lastPantSoundTimeRef = useRef<number>(0);
+  const lastShadeTransitionNoticeRef = useRef<number>(0);
   const hasTriggeredLowHydrationWarningRef = useRef<boolean>(false);
   const lastMultiplayerSyncTime = useRef<number>(0);
   const interactionCheckTick = useRef<number>(0);
@@ -2923,9 +2939,23 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           isClimbingLadderRef.current = true;
           isGrounded.current = false;
         } else if (isGrounded.current) {
-          verticalVelocity.current = 7.5;
-          isGrounded.current = false;
-          soundEngine.playJump();
+          // Vigour requirement to jump
+          if (currentVigourRef.current < 12.0) {
+            soundEngine.playExhaustedPanting();
+            if (onShowBanner && Date.now() - lastPantSoundTimeRef.current > 3000) {
+              lastPantSoundTimeRef.current = Date.now();
+              onShowBanner("⚠️ Too exhausted to jump! Rest in the desert shade to recover vigour.");
+            }
+          } else {
+            currentVigourRef.current = Math.max(0, currentVigourRef.current - 14.0);
+            if (currentVigourRef.current <= 0) {
+              isExhaustedRef.current = true;
+              soundEngine.playExhaustedPanting();
+            }
+            verticalVelocity.current = 7.5;
+            isGrounded.current = false;
+            soundEngine.playJump();
+          }
         }
       }
       if (e.code === 'KeyR') {
@@ -3257,6 +3287,19 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     const executeJumpAction = () => {
       if (isGameOverRef.current) return;
       if (isGrounded.current) {
+        if (currentVigourRef.current < 12.0) {
+          soundEngine.playExhaustedPanting();
+          if (onShowBanner && Date.now() - lastPantSoundTimeRef.current > 3000) {
+            lastPantSoundTimeRef.current = Date.now();
+            onShowBanner("⚠️ Too exhausted to jump! Rest in the desert shade to recover vigour.");
+          }
+          return;
+        }
+        currentVigourRef.current = Math.max(0, currentVigourRef.current - 14.0);
+        if (currentVigourRef.current <= 0) {
+          isExhaustedRef.current = true;
+          soundEngine.playExhaustedPanting();
+        }
         verticalVelocity.current = 7.5;
         isGrounded.current = false;
         soundEngine.playJump();
@@ -4192,11 +4235,15 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       if (distToTownFire < 4.5) {
         const handleRestFire = () => {
           soundEngine.playCampfire();
+          currentVigourRef.current = 100;
+          isExhaustedRef.current = false;
           setPlayerState((prev) => ({
             ...prev,
             health: Math.min(100, (prev.health || 0) + 25),
+            vigour: 100,
+            isExhausted: false,
           }));
-          if (onShowBanner) onShowBanner('Rested by the Tortilla Flat campfire (+25 Health)!');
+          if (onShowBanner) onShowBanner('🔥 Rested by the Tortilla Flat campfire (+25 Health, Vigour fully restored)!');
         };
         if (executeAction) {
           handleRestFire();
@@ -4212,12 +4259,16 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         const handleTrough = () => {
           soundEngine.playWaterSplash();
           soundEngine.playWaterRefill();
+          currentVigourRef.current = 100;
+          isExhaustedRef.current = false;
           setPlayerState((prev) => ({
             ...prev,
             health: Math.min(100, (prev.health || 0) + 20),
             hydration: 100,
+            vigour: 100,
+            isExhausted: false,
           }));
-          if (onShowBanner) onShowBanner('Drank pure mountain water from the Tortilla Flat Artesian Trough!');
+          if (onShowBanner) onShowBanner('💧 Drank pure mountain water from the Tortilla Flat Artesian Trough (Hydration & Vigour 100%)!');
         };
         if (executeAction) {
           handleTrough();
@@ -4490,13 +4541,17 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
               const handleRest = () => {
                 soundEngine.playCampfire();
                 soundEngine.playWaterRefill();
+                currentVigourRef.current = 100;
+                isExhaustedRef.current = false;
                 setPlayerState((prev) => ({
                   ...prev,
                   health: Math.min(100, (prev.health || 0) + 35),
                   hydration: Math.min(100, (prev.hydration || 0) + 30),
+                  vigour: 100,
+                  isExhausted: false,
                   canteenOunces: 32,
                 }));
-                if (onShowBanner) onShowBanner(`🔥 Rested by ${s.name}! Coffee brewed & canteen filled (${fuel.toFixed(1)}h fuel remaining).`);
+                if (onShowBanner) onShowBanner(`🔥 Rested by ${s.name}! Coffee brewed, canteen filled, and vigour fully restored (${fuel.toFixed(1)}h fuel remaining).`);
               };
 
               if (executeAction) {
@@ -4784,7 +4839,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       const keys = keysPressed.current;
       const carried = playerStateRef.current.carriedObject;
       let encumbranceFactor = 1.0;
-      let allowSprint = true;
+      let allowSprint = !isExhaustedRef.current;
 
       // Pack Burro perk: Faithful burro carries the heavy ore and rocks, negating encumbrance!
       const ownsBurro = playerStateRef.current.ownedMount === 'burro';
@@ -5148,6 +5203,93 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
 
       // Vertical Gravity, Ladder Climbing, and Ground Clamping
       const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
+
+      // 1b. Desert Shade & Vigour (Stamina) System
+      const shadeResult = desertShadeService.queryShade({
+        position: playerPos.current,
+        timeOfDay: timeOfDayRef.current,
+        weather: weatherRef.current,
+        isUnderground: isUnderground,
+        currentMineLevel: undergroundLayersRef.current?.currentLevel || 0,
+        springTrees: foliageManagerRef.current?.springTrees,
+        builtStructures: playerStateRef.current.builtStructures,
+      });
+
+      isInShadeRef.current = shadeResult.isInShade;
+      currentShadeReasonRef.current = shadeResult.shadeReason;
+
+      if (!isGameOverRef.current) {
+        if (isSprinting && isMoving) {
+          // Sprinting consumes vigour
+          const ridingSprintDiscount = isRiding ? 0.5 : 1.0;
+          const sprintVigourDrain = 18.0 * ridingSprintDiscount * delta;
+          currentVigourRef.current = Math.max(0, currentVigourRef.current - sprintVigourDrain);
+
+          if (currentVigourRef.current <= 0) {
+            if (!isExhaustedRef.current) {
+              isExhaustedRef.current = true;
+              soundEngine.playExhaustedPanting();
+              if (onShowBanner && Date.now() - lastPantSoundTimeRef.current > 4000) {
+                lastPantSoundTimeRef.current = Date.now();
+                onShowBanner("⚠️ Drained of vigour! Rest in the desert shade under cliffs, trees, or mine timbers.");
+              }
+            }
+          }
+        } else {
+          // Not sprinting: vigour recovers!
+          if (shadeResult.isInShade) {
+            // Resting in desert shade: Rapid, refreshing recovery!
+            // Stationary in shade: +22.0/s (full recovery from 0 to 100 in ~4.5 seconds)
+            // Walking in shade: +12.0/s
+            const recoveryRate = (isMoving ? 12.0 : 22.0) * Math.max(0.65, shadeResult.shadeFactor);
+            const prevVigour = currentVigourRef.current;
+            currentVigourRef.current = Math.min(100, currentVigourRef.current + recoveryRate * delta);
+
+            // Play relief audio cue when entering shade while low on stamina
+            if (prevVigour < 35 && Date.now() - lastShadeTransitionNoticeRef.current > 10000) {
+              lastShadeTransitionNoticeRef.current = Date.now();
+              soundEngine.playShadeRelief();
+              if (onShowBanner) {
+                onShowBanner(`🌿 In Desert Shade (${shadeResult.shadeReason})! Vigour recovering rapidly.`);
+              }
+            }
+
+            // If player was exhausted and recovered past 25%, clear exhaustion
+            if (isExhaustedRef.current && currentVigourRef.current >= 25) {
+              isExhaustedRef.current = false;
+              soundEngine.playVigourRestored();
+              if (onShowBanner) {
+                onShowBanner("⚡ Vigour restored! You can sprint again.");
+              }
+            }
+          } else {
+            // Out under the blazing direct desert sun
+            if (!isMoving) {
+              // Stationary in sun: labored, sluggish recovery (+3.5/s)
+              currentVigourRef.current = Math.min(100, currentVigourRef.current + 3.5 * delta);
+              if (isExhaustedRef.current && currentVigourRef.current >= 40) {
+                isExhaustedRef.current = false;
+                soundEngine.playVigourRestored();
+              }
+            } else {
+              // Walking under scorching sun: minimal recovery (+0.8/s), or 0 during midday baking heat (11am-3pm)
+              const middayBake = (timeOfDayRef.current >= 10.5 && timeOfDayRef.current <= 15.5) ? 0.0 : 0.9;
+              currentVigourRef.current = Math.min(100, currentVigourRef.current + middayBake * delta);
+            }
+          }
+        }
+
+        // Periodic panting sound if exhausted and player tries to sprint
+        if (isExhaustedRef.current && (keys['ShiftLeft'] || keys['ShiftRight'])) {
+          if (Date.now() - lastPantSoundTimeRef.current > 3500) {
+            lastPantSoundTimeRef.current = Date.now();
+            soundEngine.playExhaustedPanting();
+            if (onShowBanner) {
+              onShowBanner("⚠️ Panting with exhaustion! Rest in the desert shade to restore vigour.");
+            }
+          }
+        }
+      }
       const uLayers = undergroundLayersRef.current;
       const activeHoleMgr = isUnderground ? uLayers?.holeManager : foliageManagerRef.current?.mountainHoleManager;
       const nearShaftLadder = !!(uLayers && uLayers.isNearShaftLadder(playerPos.current, 1.45));
@@ -6407,6 +6549,11 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           },
           hydration: Math.round(currentHydrationRef.current * 10) / 10,
           health: Math.round(currentHealthRef.current * 10) / 10,
+          vigour: Math.round(currentVigourRef.current * 10) / 10,
+          maxVigour: 100,
+          isExhausted: isExhaustedRef.current,
+          isInShade: isInShadeRef.current,
+          shadeReason: currentShadeReasonRef.current,
           isSprinting: currentSprint,
         }));
       }

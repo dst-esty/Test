@@ -109,6 +109,10 @@ export default function App() {
       health: 100,
       maxHealth: 100,
       hydration: 100,
+      vigour: 100,
+      maxVigour: 100,
+      isInShade: false,
+      isExhausted: false,
       isSprinting: false,
       isInsideMine: false,
       equippedTool: 'hands',
@@ -514,9 +518,11 @@ export default function App() {
       ...prev,
       health: Math.min(100, (prev.health || 0) + 35),
       hydration: Math.min(100, (prev.hydration || 0) + 30),
+      vigour: 100,
+      isExhausted: false,
       canteenOunces: 32,
     }));
-    showBanner("🔥 Rested by the fire! Warm coffee brewed and canteen filled (+35 Health, +30 Hydration).");
+    showBanner("🔥 Rested by the fire! Warm coffee brewed, canteen filled, and vigour fully restored.");
   }, [showBanner]);
 
   const handleSleepUntilDawn = useCallback(() => {
@@ -538,11 +544,13 @@ export default function App() {
         ...prev,
         health: 100,
         hydration: 100,
+        vigour: 100,
+        isExhausted: false,
         canteenOunces: 32,
         builtStructures: updatedStructures,
       };
     });
-    showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Campfire consumed ~8h of wood fuel.");
+    showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Vigour, health, and hydration fully restored.");
   }, [showBanner]);
 
   const handleSleepInHotel = useCallback((paymentMethod: 'cash' | 'gold') => {
@@ -569,11 +577,13 @@ export default function App() {
       goldFound: paymentMethod === 'gold' ? Math.max(0, (prev.goldFound || 0) - 0.1) : prev.goldFound,
       health: 100,
       hydration: 100,
+      vigour: 100,
+      isExhausted: false,
       canteenOunces: 32,
     }));
 
     setIsTortillaFlatOpen(false);
-    showBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health and Hydration fully replenished.");
+    showBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Vigour and vitals fully replenished.");
     return true;
   }, [playerState.cashDollars, playerState.goldFound, showBanner]);
 
@@ -1088,10 +1098,13 @@ export default function App() {
       const hydrationGain = ozToDrink * 4.5; // 8 oz = +36% hydration
       soundEngine.playDrink();
       const newHydration = Math.min(100, (prev.hydration || 0) + hydrationGain);
-      showBanner(`💧 Took a swig from canteen (+${Math.round(hydrationGain)}% Hydration). ${remainingOz} oz left.`);
+      const newVigour = Math.min(100, (prev.vigour ?? 100) + 35);
+      showBanner(`💧 Took a swig from canteen (+${Math.round(hydrationGain)}% Hydration, +35% Vigour). ${remainingOz} oz left.`);
       return {
         ...prev,
         hydration: newHydration,
+        vigour: newVigour,
+        isExhausted: false,
         canteenOunces: remainingOz,
       };
     });
@@ -1168,13 +1181,15 @@ export default function App() {
     setPlayerState((prev) => ({
       ...prev,
       hydration: 100,
+      vigour: 100,
+      isExhausted: false,
     }));
     setActiveClueDialog({
       isWater: true,
       landmark: {
         id: 'water_point',
         name: 'Fresh Mountain Water',
-        shortDesc: 'Cold natural spring water bubbling from the rocks. Canteen fully replenished!',
+        shortDesc: 'Cold natural spring water bubbling from the rocks. Canteen and vigour fully replenished!',
         position: playerState.position,
         radius: 5,
         discovered: true,
@@ -1277,6 +1292,10 @@ export default function App() {
       health: 100,
       maxHealth: 100,
       hydration: 100,
+      vigour: 100,
+      maxVigour: 100,
+      isInShade: false,
+      isExhausted: false,
       isSprinting: false,
       isInsideMine: false,
       equippedTool: 'hands',
