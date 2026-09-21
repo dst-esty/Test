@@ -73,6 +73,7 @@ import { ProspectorGogglesOverlay } from './ProspectorGogglesOverlay';
 import { WorldScaleMode } from '../world/superstitionTopography';
 import { Skull } from 'lucide-react';
 import { isScatteredSkullClue } from '../services/curseNarrativeEngine';
+import { enterFullscreen } from '../utils/fullscreen';
 
 /**
  * Authentic Historic & Forensic Locations of Scattered Skulls & Headless Remains
@@ -3147,6 +3148,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
 
     const safeRequestPointerLock = () => {
       if (isUIOpenRef.current || isGameOverRef.current) return;
+      // Also ensure total fullscreen on user pointer engagement
+      enterFullscreen().catch(() => {});
       if (document.pointerLockElement === renderer.domElement) {
         isPointerLocked.current = true;
         return;

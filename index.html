@@ -54,8 +54,15 @@
         margin: 0;
         padding: 0;
         overflow: hidden;
+        position: fixed;
+        inset: 0;
         background-color: #0c0a09;
         -webkit-font-smoothing: antialiased;
+      }
+      :fullscreen, :-webkit-full-screen, :-moz-full-screen {
+        width: 100% !important;
+        height: 100% !important;
+        overflow: hidden !important;
       }
       canvas {
         display: block;
@@ -91,6 +98,34 @@
         </style>
       </div>
     </div>
+    <script>
+      (function() {
+        // Immediate Fullscreen Bootstrapper: Attempts fullscreen on load, with first-gesture fallback
+        function tryImmediateFullscreen() {
+          try {
+            var docEl = document.documentElement;
+            var req = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
+            if (req && !document.fullscreenElement && !document.webkitFullscreenElement) {
+              var p = req.call(docEl, { navigationUI: 'hide' });
+              if (p && p.catch) p.catch(function() {});
+            }
+          } catch (e) {}
+        }
+        // Try immediately
+        tryImmediateFullscreen();
+        window.addEventListener('load', tryImmediateFullscreen);
+        // And on the very first touch / click / key
+        function onEarlyGesture() {
+          tryImmediateFullscreen();
+          window.removeEventListener('pointerdown', onEarlyGesture, true);
+          window.removeEventListener('keydown', onEarlyGesture, true);
+          window.removeEventListener('touchstart', onEarlyGesture, true);
+        }
+        window.addEventListener('pointerdown', onEarlyGesture, { capture: true, once: true });
+        window.addEventListener('keydown', onEarlyGesture, { capture: true, once: true });
+        window.addEventListener('touchstart', onEarlyGesture, { capture: true, once: true });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

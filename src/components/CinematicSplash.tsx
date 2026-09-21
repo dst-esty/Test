@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Play, SkipForward, Compass, Sparkles, Shield, Skull, MapPin } from 'lucide-react';
+import { Play, SkipForward, Compass, Sparkles, Shield, Skull, MapPin, Maximize, Minimize } from 'lucide-react';
 import { soundEngine } from '../audio/soundEffects';
+import { enterFullscreen, toggleFullscreen, isCurrentlyFullscreen } from '../utils/fullscreen';
 
 interface CinematicSplashProps {
   onEnterGame: () => void;
@@ -9,8 +10,22 @@ interface CinematicSplashProps {
 export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame }) => {
   const [phase, setPhase] = useState<'studio' | 'title' | 'menu'>('studio');
   const [hasInteracted, setHasInteracted] = useState<boolean>(false);
+  const [isFull, setIsFull] = useState<boolean>(() => isCurrentlyFullscreen());
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // Synchronize fullscreen state
+  useEffect(() => {
+    const onFsChange = () => setIsFull(isCurrentlyFullscreen());
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    // Attempt fullscreen immediately on mount
+    enterFullscreen().catch(() => {});
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
 
   // Play deep cinematic orchestral brass / brass chord & wind upon user interaction or start
   const playCinematicSting = useCallback(() => {
@@ -208,20 +223,32 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
 
   // Quick Skip or Direct Enter
   const handleStartGame = useCallback(() => {
+    enterFullscreen().catch(() => {});
     soundEngine.startAmbiance();
     soundEngine.playGogglesClick(true);
     onEnterGame();
   }, [onEnterGame]);
 
   const handleSkipToMenu = useCallback(() => {
+    enterFullscreen().catch(() => {});
     setPhase('menu');
     setHasInteracted(true);
     playCinematicSting();
   }, [playCinematicSting]);
 
+  const handleBackgroundClick = useCallback(() => {
+    enterFullscreen().catch(() => {});
+    if (phase === 'studio') {
+      handleSkipToMenu();
+    } else if (phase === 'title') {
+      handleSkipToMenu();
+    }
+  }, [phase, handleSkipToMenu]);
+
   // Key shortcuts: Space or Enter to proceed, Esc to skip straight to game
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      enterFullscreen().catch(() => {});
       if (e.code === 'Space' || e.code === 'Enter') {
         if (phase !== 'menu') {
           handleSkipToMenu();
@@ -239,7 +266,8 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
   return (
     <div
       id="cinematic-splash-root"
-      className="fixed inset-0 z-[100] select-none overflow-hidden bg-black text-stone-100 flex flex-col justify-between p-6 sm:p-12 font-serif"
+      onClick={handleBackgroundClick}
+      className="fixed inset-0 z-[100] select-none overflow-hidden bg-black text-stone-100 flex flex-col justify-between p-6 sm:p-12 font-serif cursor-pointer"
     >
       {/* Background Canvas (Desert Ridge + Embers + Starfield) */}
       <canvas
@@ -252,7 +280,7 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
       <div className="absolute inset-0 pointer-events-none z-10 opacity-[0.03] bg-[linear-gradient(rgba(255,255,255,0)_50%,rgba(0,0,0,0.8)_50%)] bg-[length:100%_4px]" />
 
       {/* Top Header / Cinematic Status Bar */}
-      <div className="relative z-20 flex items-center justify-between w-full max-w-7xl mx-auto">
+      <div className="relative z-20 flex items-center justify-between w-full max-w-7xl mx-auto pointer-events-auto">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 backdrop-blur-sm">
             <Compass className="w-4 h-4 animate-[spin_12s_linear_infinite]" />
@@ -267,12 +295,28 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
           </div>
         </div>
 
-        {/* Skip controls */}
+        {/* Fullscreen & Skip controls */}
         <div className="flex items-center gap-3 font-sans">
+          <button
+            id="btn-splash-toggle-fullscreen"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFullscreen();
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-stone-900/80 hover:bg-amber-950/60 text-amber-300 hover:text-amber-200 border border-amber-600/50 hover:border-amber-500 text-xs font-mono tracking-wider uppercase backdrop-blur-md transition-all cursor-pointer"
+            title={isFull ? 'Exit Fullscreen' : 'Enter Total Fullscreen'}
+          >
+            {isFull ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{isFull ? 'Windowed' : 'Fullscreen'}</span>
+          </button>
+
           {phase !== 'menu' && (
             <button
               id="splash-skip-btn"
-              onClick={handleSkipToMenu}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSkipToMenu();
+              }}
               className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-stone-900/80 hover:bg-amber-950/60 text-stone-300 hover:text-amber-300 border border-stone-700/70 hover:border-amber-600/60 text-xs font-mono tracking-wider uppercase backdrop-blur-md transition-all cursor-pointer"
             >
               <span>Skip</span>
@@ -348,7 +392,7 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
               >
                 <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 ease-in-out" />
                 <Play className="w-5 h-5 fill-stone-950 text-stone-950 transition-transform group-hover:translate-x-0.5" />
-                <span>Begin Expedition</span>
+                <span>Begin Fullscreen Expedition</span>
                 <span className="text-xs font-mono px-2 py-0.5 rounded bg-stone-950/20 text-stone-900 border border-stone-950/20 ml-2">
                   [Space / Enter]
                 </span>

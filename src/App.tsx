@@ -37,6 +37,7 @@ import { safeLocalStorage } from './utils/storage';
 import { VigilanceStatus } from './services/apacheVigilanceService';
 import { WorldScaleMode, formatUsgsDistance } from './world/superstitionTopography';
 import { isScatteredSkullClue } from './services/curseNarrativeEngine';
+import { armImmediateFullscreenOnFirstGesture, enterFullscreen } from './utils/fullscreen';
 
 export default function App() {
   // Player State
@@ -300,11 +301,16 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Ensure music is turned off on load, and sound engine is primed on user interaction
+  // Ensure music is turned off on load, arm immediate fullscreen, and sound engine is primed on user interaction
   useEffect(() => {
     westernMusic.stop();
+    // Arm immediate fullscreen so the game loads / triggers total fullscreen on the earliest possible user interaction or load
+    armImmediateFullscreenOnFirstGesture();
+    enterFullscreen().catch(() => {});
+
     const resumeAudioOnGesture = () => {
       soundEngine.startAmbiance();
+      enterFullscreen().catch(() => {});
       window.removeEventListener('pointerdown', resumeAudioOnGesture);
       window.removeEventListener('keydown', resumeAudioOnGesture);
     };

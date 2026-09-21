@@ -54,6 +54,7 @@ import { territoryClaims } from '../services/territoryClaimService';
 import { VirtualJoystick } from './VirtualJoystick';
 import { isMobileDevice } from '../utils/device';
 import { VigilanceStatus, SACRED_ZONES } from '../services/apacheVigilanceService';
+import { toggleFullscreen, isCurrentlyFullscreen } from '../utils/fullscreen';
 
 interface ControlsOverlayProps {
   playerState: PlayerState;
@@ -203,16 +204,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   const [showTouchControls, setShowTouchControls] = useState<boolean>(() => isMobileDevice());
 
   // Fullscreen Detection & Mobile Immersive View Handler
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
-    if (typeof document === 'undefined') return false;
-    const doc = document as any;
-    return !!(
-      doc.fullscreenElement ||
-      doc.webkitFullscreenElement ||
-      doc.mozFullScreenElement ||
-      doc.msFullscreenElement
-    );
-  });
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => isCurrentlyFullscreen());
 
   // Mobile Orientation Detection (Portrait vs Landscape) for genuine mobile devices
   const [isPortraitMobile, setIsPortraitMobile] = useState<boolean>(() => {
@@ -309,52 +301,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   }, []);
 
   const handleToggleFullscreen = useCallback(() => {
-    const doc = document as any;
-    const docEl = document.documentElement as any;
-
-    const isFull = !!(
-      doc.fullscreenElement ||
-      doc.webkitFullscreenElement ||
-      doc.mozFullScreenElement ||
-      doc.msFullscreenElement
-    );
-
-    if (!isFull) {
-      if (docEl.requestFullscreen) {
-        docEl.requestFullscreen().catch(() => {});
-      } else if (docEl.webkitRequestFullscreen) {
-        docEl.webkitRequestFullscreen();
-      } else if (docEl.mozRequestFullScreen) {
-        docEl.mozRequestFullScreen();
-      } else if (docEl.msRequestFullscreen) {
-        docEl.msRequestFullscreen();
-      }
-      // Attempt orientation lock if on mobile device (best-effort, gracefully ignored if unsupported)
-      if (screen?.orientation && typeof (screen.orientation as any).lock === 'function') {
-        try {
-          (screen.orientation as any).lock('landscape').catch(() => {});
-        } catch {
-          // ignore orientation lock rejection
-        }
-      }
-    } else {
-      if (doc.exitFullscreen) {
-        doc.exitFullscreen().catch(() => {});
-      } else if (doc.webkitExitFullscreen) {
-        doc.webkitExitFullscreen();
-      } else if (doc.mozCancelFullScreen) {
-        doc.mozCancelFullScreen();
-      } else if (doc.msExitFullscreen) {
-        doc.msExitFullscreen();
-      }
-      if (screen?.orientation && typeof (screen.orientation as any).unlock === 'function') {
-        try {
-          (screen.orientation as any).unlock();
-        } catch {
-          // ignore
-        }
-      }
-    }
+    toggleFullscreen();
   }, []);
 
   const handleEnterLandscapeFullscreen = useCallback(() => {
