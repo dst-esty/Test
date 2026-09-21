@@ -798,38 +798,6 @@ async function startServer() {
             break;
           }
 
-          case 'time:change': {
-            if (typeof msg.timeOfDay === 'number' && !isNaN(msg.timeOfDay)) {
-              universalTimeOfDay = ((msg.timeOfDay % 24) + 24) % 24;
-              broadcast({
-                type: 'weather:sync',
-                weather: universalWeather,
-                timeOfDay: universalTimeOfDay,
-                label: currentWeatherLabel,
-              });
-              const p = players.get(playerId);
-              const name = p?.name || 'A prospector';
-              if (msg.reason === 'hotel_rest') {
-                addChatMessage({
-                  senderId: 'system_town',
-                  senderName: 'Tortilla Flat Hotel',
-                  senderColor: '#f59e0b',
-                  text: `🌅 ${name} rested peacefully at the Superstition Hotel. Dawn breaks over the mountains at 6:00 AM!`,
-                  type: 'system',
-                });
-              } else if (msg.reason === 'camp_rest') {
-                addChatMessage({
-                  senderId: 'system_camp',
-                  senderName: 'Wilderness Camp',
-                  senderColor: '#f59e0b',
-                  text: `🌅 ${name} stoke the fire and slept until dawn.`,
-                  type: 'system',
-                });
-              }
-            }
-            break;
-          }
-
           case 'event:discovery': {
             const p = players.get(playerId);
             addChatMessage({

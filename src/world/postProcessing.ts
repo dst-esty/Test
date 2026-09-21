@@ -221,7 +221,7 @@ export function createPostProcessingPipeline(
   const bloomThreshold = 0.88; // Only hot desert highlights, sun disk, and campfire/gold glints bloom
 
   const bloomPass = new UnrealBloomPass(bloomResolution, bloomStrength, bloomRadius, bloomThreshold);
-  bloomPass.enabled = initialQuality !== 'performance'; // disabled on strict performance mode for high FPS
+  bloomPass.enabled = initialQuality === 'high'; // Only active on explicit high quality mode for peak performance
   composer.addPass(bloomPass);
 
   // 3. Cinematic RDR Color Grading, Vignette & 35mm Grain Pass
@@ -256,18 +256,17 @@ export function createPostProcessingPipeline(
       if (quality === 'performance') {
         bloomPass.enabled = false;
         colorGradePass.uniforms.uGrainIntensity.value = 0.0;
-        colorGradePass.uniforms.uVignetteIntensity.value = 0.25;
+        colorGradePass.uniforms.uVignetteIntensity.value = 0.20;
       } else if (quality === 'balanced') {
-        bloomPass.enabled = true;
-        bloomPass.strength = 0.32;
-        colorGradePass.uniforms.uGrainIntensity.value = 0.015;
-        colorGradePass.uniforms.uVignetteIntensity.value = 0.30;
+        bloomPass.enabled = false; // Keep bloom off on balanced to prevent GPU stall
+        colorGradePass.uniforms.uGrainIntensity.value = 0.008;
+        colorGradePass.uniforms.uVignetteIntensity.value = 0.25;
       } else {
         // High quality: full cinematic bloom + rich grain
         bloomPass.enabled = true;
-        bloomPass.strength = 0.42;
-        colorGradePass.uniforms.uGrainIntensity.value = 0.024;
-        colorGradePass.uniforms.uVignetteIntensity.value = 0.35;
+        bloomPass.strength = 0.32;
+        colorGradePass.uniforms.uGrainIntensity.value = 0.020;
+        colorGradePass.uniforms.uVignetteIntensity.value = 0.32;
       }
     },
     dispose: () => {

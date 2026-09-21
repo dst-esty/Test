@@ -67,7 +67,7 @@ export interface DugHole {
 }
 
 export const WORLD_SIZE = 700;
-export const TERRAIN_SEGMENTS = 240;
+export const TERRAIN_SEGMENTS = 280;
 export const TERRAIN_VERTICES_PER_ROW = TERRAIN_SEGMENTS + 1;
 export const HALF_WORLD_SIZE = WORLD_SIZE / 2;
 export const TERRAIN_SEG_SIZE = WORLD_SIZE / TERRAIN_SEGMENTS;
@@ -78,6 +78,45 @@ let activeTerrainHoleListener: ((hole: DugHole) => void) | null = null;
 
 export function setTerrainHoleListener(listener: ((hole: DugHole) => void) | null) {
   activeTerrainHoleListener = listener;
+}
+
+/**
+ * Computes a continuous, realistic U-shaped / box canyon cross-section with:
+ * - A flat, traversable wash floor (alluvial sand and gravel) of width `floorHalfWidth * 2`
+ * - Smooth, continuous sidewalls with zero derivative at both the floor and the rim (eliminates mesh polygon stretching/tearing)
+ * - Continuous longitudinal entry and exit tapers at the mouth and headwall (eliminates abrupt vertical step walls across the ravine)
+ */
+export function computeCanyonCarve(
+  distFromAxis: number,
+  longitudinalPos: number,
+  floorHalfWidth: number,
+  rimHalfWidth: number,
+  startLong: number,
+  endLong: number,
+  taperLength: number,
+  maxDepth: number
+): number {
+  if (distFromAxis >= rimHalfWidth || longitudinalPos < startLong || longitudinalPos > endLong) {
+    return 0;
+  }
+
+  // Cross-sectional profile: flat floor inside floorHalfWidth, smooth Hermite transition to rim
+  let crossFactor = 0;
+  if (distFromAxis <= floorHalfWidth) {
+    crossFactor = 1.0;
+  } else {
+    const t = (distFromAxis - floorHalfWidth) / (rimHalfWidth - floorHalfWidth);
+    // Smooth Hermite blend (zero derivative at both floor and rim)
+    crossFactor = 1.0 - t * t * (3.0 - 2.0 * t);
+  }
+
+  // Longitudinal taper at mouth and head (smooth entrance and exit ramps)
+  const startDist = longitudinalPos - startLong;
+  const endDist = endLong - longitudinalPos;
+  const rawTaper = Math.min(1.0, Math.max(0.0, Math.min(startDist, endDist) / taperLength));
+  const longFactor = rawTaper * rawTaper * (3.0 - 2.0 * rawTaper);
+
+  return -crossFactor * longFactor * maxDepth;
 }
 
 /**
@@ -112,81 +151,85 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   // Winding canyon pass from Peralta Trailhead (-120, -120) through Hieroglyphic Spring (-70, -20) to Massacre Grounds (-40, 90)
   const peraltaCanyonX = -74 + Math.sin(z * 0.018 - 0.4) * 28 + Math.cos(z * 0.009) * 14;
   const distToPeralta = Math.abs(x - peraltaCanyonX);
-  let peraltaCarve = 0;
-  if (distToPeralta < 28 && z > -150 && z < 140 && x < 15) {
-    const factor = 1.0 - distToPeralta / 28;
-    peraltaCarve = -Math.pow(factor, 0.48) * 15.0;
-  }
+  const peraltaCarve = computeCanyonCarve(distToPeralta, z, 4.5, 26.0, -155, 145, 22.0, 15.0);
 
   // Canyon B: Needle Canyon Gorge & East Chasm (East of Weaver's Needle towards Mine)
   // Sweeps east of Weaver's Needle (80, 15) and winds between Eye Bluff and Lost Dutchman approach
   const needleCanyonX = 118 + Math.sin(z * 0.024 + 0.6) * 30 + Math.cos(z * 0.01) * 16;
   const distToNeedleCanyon = Math.abs(x - needleCanyonX);
-  let needleCanyonCarve = 0;
-  if (distToNeedleCanyon < 28 && z > -90 && z < 155 && x > 35) {
-    const factor = 1.0 - distToNeedleCanyon / 28;
-    needleCanyonCarve = -Math.pow(factor, 0.52) * 16.5;
-  }
+  const needleCanyonCarve = computeCanyonCarve(distToNeedleCanyon, z, 4.2, 26.0, -95, 160, 20.0, 16.5);
 
   // Canyon C: Rattlesnake Slot Canyon (Central Narrows)
   // A tight, deep winding slot canyon cutting across the central red-rock ridge
   const slotCanyonZ = -54 + Math.sin(x * 0.038 + 0.8) * 16 + Math.cos(x * 0.018) * 8;
   const distToSlot = Math.abs(z - slotCanyonZ);
-  let slotCarve = 0;
-  if (distToSlot < 16 && x > -45 && x < 55) {
-    const factor = 1.0 - distToSlot / 16;
-    slotCarve = -Math.pow(factor, 0.4) * 13.0;
-  }
+  const slotCarve = computeCanyonCarve(distToSlot, x, 3.2, 16.0, -48, 58, 14.0, 13.0);
 
   // Canyon D: Historic Box Canyon & East Gulch (Main Central-North Gorge)
   const canyonCurve = Math.sin(x * 0.013 + 0.9) * 38 + Math.cos(x * 0.006) * 20;
   const distToCanyon = Math.abs(z - canyonCurve);
-  let centralCanyonCarve = 0;
-  if (distToCanyon < 26 && Math.abs(x) < 210 && z > -165) {
-    const cFactor = 1.0 - distToCanyon / 26;
-    centralCanyonCarve = -Math.pow(cFactor, 0.55) * 13.5;
-  }
+  const centralCanyonCarve = computeCanyonCarve(distToCanyon, x, 4.5, 26.0, -215, 215, 24.0, 13.5);
 
   // Canyon E: Black Cross Box Canyon Amphitheater (Southeast Cleft, near Mine)
   const distToAmphitheater = Math.hypot(x - 165, z - 145);
   let amphitheaterCarve = 0;
   if (distToAmphitheater < 34) {
-    const factor = 1.0 - distToAmphitheater / 34;
-    amphitheaterCarve = -Math.pow(factor, 0.6) * 14.5;
+    const floorRadius = 5.0;
+    if (distToAmphitheater <= floorRadius) {
+      amphitheaterCarve = -14.5;
+    } else {
+      const t = (distToAmphitheater - floorRadius) / (34 - floorRadius);
+      amphitheaterCarve = -(1.0 - t * t * (3.0 - 2.0 * t)) * 14.5;
+    }
   }
 
   // Canyon F: Fish Creek Canyon Tributary (Northwest Gorge cutting toward Salt River)
   const fishCreekCurve = -200 + Math.sin(x * 0.02 + 1.2) * 24 + (x + 90) * 0.65;
   const distToFishCreek = Math.abs(z - fishCreekCurve);
-  let fishCreekCarve = 0;
-  if (distToFishCreek < 24 && x < -45 && z < -170 && z > -290) {
-    const factor = 1.0 - distToFishCreek / 24;
-    fishCreekCarve = -Math.pow(factor, 0.55) * 15.0;
-  }
+  const fishCreekCarve = computeCanyonCarve(distToFishCreek, z, 4.0, 24.0, -295, -165, 22.0, 15.0);
 
   // Canyon G: Pistol Canyon (Historic box canyon tributary between Peters Mesa & Malapais Mountain)
   // Famous site where Dutch Hunter Roy Bradford lost his revolver in the 1920s while searching for the Lost Dutchman Mine
   const pistolCanyonX = -46 + Math.sin(z * 0.026 - 1.1) * 20 + Math.cos(z * 0.012) * 9;
   const distToPistolCanyon = Math.abs(x - pistolCanyonX);
-  let pistolCanyonCarve = 0;
-  if (distToPistolCanyon < 25 && z <= -58 && z >= -192) {
-    // Smooth cross-sectional profile with zero derivative at canyon rim (dist = 25) and flat wash floor in center
-    const u = distToPistolCanyon / 25;
-    const crossProfile = 0.5 * (1.0 + Math.cos(u * Math.PI));
+  const pistolCanyonCarve = computeCanyonCarve(distToPistolCanyon, z, 4.2, 25.0, -196, -55, 18.0, 15.5);
 
-    // Smooth longitudinal fade at both ends (head of canyon at -58 and mouth at -192)
-    const headTaper = z > -74 ? ((-58 - z) / 16) : 1.0;
-    const mouthTaper = z < -176 ? ((z - (-192)) / 16) : 1.0;
-    const rawFade = Math.max(0, Math.min(headTaper, mouthTaper));
-    const zFade = rawFade * rawFade * (3.0 - 2.0 * rawFade);
+  // Canyon H1: La Barge Canyon & Upper Box (Central Superstitions Primary Waterway)
+  // Originates in the southern highlands (z: 40, x: 80), flows north right past Charlebois Spring (z: -75, x: 65),
+  // receives Squaw Box Canyon from Peters Mesa (z: -135, x: 60), cuts through the sheer Upper La Barge Box (z: -180, x: 35),
+  // sweeps around Battleship Mountain (z: -250, x: -20), and empties north into Canyon Lake / Salt River (z: -295, x: -65).
+  const tLaBarge = Math.max(0, Math.min(1, (40 - z) / 335));
+  const laBargeBaseX = 80 - 22 * Math.pow(tLaBarge, 0.75) - 123 * Math.pow(tLaBarge, 2.1);
+  const laBargeMeander = Math.sin(z * 0.032) * 5.5 + Math.cos(z * 0.016) * 3.0;
+  const laBargeAxisX = laBargeBaseX + laBargeMeander;
+  const distToLaBarge = Math.abs(x - laBargeAxisX);
+  const laBargeCanyonCarve = computeCanyonCarve(distToLaBarge, z, 4.5, 24.0, -295, 40, 20.0, 16.5);
 
-    pistolCanyonCarve = -crossProfile * zFade * 15.5;
-  }
+  // Canyon H2: Squaw Canyon (Squaw Box Canyon)
+  // Dramatic box canyon descending from the northwest rim of Peters Mesa (x: 125, z: -131)
+  // westward down into La Barge Canyon (x: 60, z: -135). Site of Crazy Jake's camp & cliff trail.
+  const tSquaw = Math.max(0, Math.min(1, (x - 58) / 68));
+  const squawBaseZ = -135 + tSquaw * 4.0;
+  const squawMeander = Math.sin((x - 58) * 0.09) * 4.5;
+  const squawAxisZ = squawBaseZ + squawMeander;
+  const distToSquaw = Math.abs(z - squawAxisZ);
+  const squawCanyonCarve = computeCanyonCarve(distToSquaw, x, 3.5, 17.0, 56, 126, 14.0, 16.0);
+
+  // Canyon H3: Peters Canyon (Pete's Canyon - USGS Mormon Flat Dam 7.5' Quad)
+  // Rugged canyon centered right at (X: 243, Z: -267), draining the northeastern wilderness
+  // down from the high ridges (z: -175, x: 212) past Peters Cave & Box Canyon (z: -267, x: 243)
+  // toward the northern canyon wash (z: -330, x: 265).
+  const tPeters = Math.max(0, Math.min(1, (-175 - z) / 155));
+  const petersBaseX = 243 + (z - (-267)) * -0.34;
+  const petersMeander = Math.sin((z - (-267)) * 0.04) * 4.5;
+  const petersAxisX = petersBaseX + petersMeander;
+  const distToPetersCanyon = Math.abs(x - petersAxisX);
+  const petersCanyonCarve = computeCanyonCarve(distToPetersCanyon, z, 4.5, 22.0, -330, -175, 16.0, 16.5);
 
   // Combined Canyon Carving
   const totalCanyonCarve = Math.min(
     0,
-    peraltaCarve + needleCanyonCarve + slotCarve + centralCanyonCarve + amphitheaterCarve + fishCreekCarve + pistolCanyonCarve
+    peraltaCarve + needleCanyonCarve + slotCarve + centralCanyonCarve + amphitheaterCarve + fishCreekCarve + pistolCanyonCarve + laBargeCanyonCarve + squawCanyonCarve + petersCanyonCarve
   );
 
   // 5. Wash / arroyo carving: dry riverbeds, alluvial fans, and gravel drainage
@@ -215,10 +258,12 @@ export function getBaseTerrainHeight(x: number, z: number): number {
       mesaElev = mesaTop * 38.0 + Math.sin(x * 0.025 + z * 0.025) * 1.5;
     }
 
-    // Archetype 2: Knife-Edge Volcanic Arêtes & Serrated Spires (South / Southeast)
-    const sharpArête = Math.pow(1.0 - Math.abs(fbm(x * 0.018 + 75, z * 0.018 + 75, 4) * 2.0 - 1.0), 1.6) * 44;
-    const jaggedTeeth = Math.pow(fbm(x * 0.032 + 180, z * 0.032 + 180, 4), 2.1) * 38;
-    const serratedElev = sharpArête * 0.65 + jaggedTeeth * 0.55 + 16.0;
+    // Archetype 2: Rounded Weathered Volcanic Ridges & Terraced Benches (South / Southeast)
+    // Avoid sharp pointy spikes: use rounded crest profile with smooth capping
+    const rawArête = 1.0 - Math.abs(fbm(x * 0.018 + 75, z * 0.018 + 75, 4) * 2.0 - 1.0);
+    const roundedArête = Math.sin(Math.min(1.0, Math.max(0, rawArête)) * Math.PI * 0.5) * 38;
+    const weatheredTeeth = Math.sin(Math.min(1.0, Math.max(0, fbm(x * 0.032 + 180, z * 0.032 + 180, 4) * 1.4)) * Math.PI * 0.5) * 32;
+    const serratedElev = roundedArête * 0.65 + weatheredTeeth * 0.55 + 16.0;
 
     // Archetype 3: Asymmetric Fault-Block Monoclines & Cuestas (East)
     const dipRamp = Math.sin((x - 140) * 0.018 - z * 0.008);
@@ -239,8 +284,9 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     const blendedMountainArchetype =
       (mesaElev * wNW + serratedElev * wS + faultScarp * wE + steppedDome * wW) / totalW;
 
-    // Endless procedural mountain chains & broad desert passes
-    const mountainChains = Math.pow(fbm(x * 0.005 + 12.3, z * 0.005 + 87.1, 4), 1.7) * 44;
+    // Endless procedural mountain chains & broad desert passes (smooth rounded crests rather than sharp spikes)
+    const rawChains = fbm(x * 0.005 + 12.3, z * 0.005 + 87.1, 4);
+    const mountainChains = Math.sin(Math.min(1.0, Math.max(0, rawChains * 1.5)) * Math.PI * 0.5) * 40;
     const valleyPasses = Math.min(1.0, Math.max(0.15, fbm(x * 0.003 - 45.2, z * 0.003 + 33.8, 3) * 1.5));
 
     if (distFromCenter <= 340) {
@@ -290,12 +336,12 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     perimeterMountains *= passCarveFactor;
 
     // Accessible Mountain Summit Trail Ramps & Plateau Saddles:
-    // 1. Peters Mesa Summit Pack Trail (NW): Gentle switchback ramp from Peralta Pass (x: -160, z: 120)
-    //    climbing up onto the broad, flat basalt tableland (x: -210, z: 170)
-    const distToPetersTrail = Math.hypot(x - (-185), z - 145);
-    if (distToPetersTrail < 32) {
-      const trailT = 1.0 - distToPetersTrail / 32;
-      const targetElev = 16.0 + (-(x - (-160)) * 0.42 + (z - 120) * 0.38);
+    // 1. Peters Mesa Summit Pack Trail: Switchback ramp ascending from Squaw Box Canyon / south saddle (x: 120, z: -105)
+    //    climbing up onto the broad, flat basalt tableland (x: 135, z: -125)
+    const distToPetersTrail = Math.hypot(x - 128, z - (-112));
+    if (distToPetersTrail < 28) {
+      const trailT = 1.0 - distToPetersTrail / 28;
+      const targetElev = 18.0 + (-(z - (-98)) * 0.58);
       perimeterMountains = perimeterMountains * (1.0 - trailT * 0.72) + Math.min(38, targetElev) * (trailT * 0.72);
     }
 
@@ -345,11 +391,19 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   }
 
   // Special landmark features:
-  // 1. Weaver's Needle base hill (prominent volcanic plug pedestal)
+  // 1. Weaver's Needle base hill (broad volcanic scree pedestal cone)
   const distToNeedle = Math.hypot(x - 80, z - 15);
   let needleBase = 0;
-  if (distToNeedle < 55) {
-    needleBase = Math.pow((55 - distToNeedle) / 55, 1.6) * 28;
+  if (distToNeedle < 65) {
+    const coneRadius = 65.0;
+    const flatRadius = 8.0;
+    if (distToNeedle <= flatRadius) {
+      needleBase = 27.5;
+    } else {
+      const t = (distToNeedle - flatRadius) / (coneRadius - flatRadius);
+      const smoothFactor = 1.0 - (t * t * (3.0 - 2.0 * t));
+      needleBase = smoothFactor * 27.5;
+    }
   }
 
   // 2. Hieroglyphic canyon wash (oasis depression with pool)
@@ -391,7 +445,7 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     northCanyonWall = wallDist * (26 + wallNoise);
   }
 
-  // 6. Historic Town of Tortilla Flat level river terrace on the south bank of the Salt River
+  // 6. Historic Town of Tortilla Flat level creek terrace along Tortilla Creek
   // Encompasses Saloon, Mercantile, Jail, Livery Barn, Water Tower, Campfire, Street & Boardwalks.
   // Core flat box: X: [-27, +27], Z: [-275, -225]. Entire core is strictly 7.5m with zero mountain slope.
   let tortillaFlatBlend = 0;
@@ -401,7 +455,7 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   if (z >= -275 && z <= -225 && Math.abs(x) <= 27) {
     tortillaFlatBlend = 1.0;
   } else if (z < -275 && z >= -306 && Math.abs(x) <= 16) {
-    // Gentle scenic wagon trail sloping down from town (7.5m) to Salt River Pier (2.8m)
+    // Gentle scenic wagon trail sloping down from town (7.5m) to Tortilla Creek Pier (2.8m)
     isRiverTrail = true;
     const trailT = Math.min(1.0, ((-275) - z) / 30);
     riverTrailTarget = 7.5 * (1.0 - trailT) + 2.8 * trailT;
@@ -423,42 +477,154 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   }
 
   // 7. Malapais Mountain Massif (USGS Elev. 4,229 ft / 1,289m - Historic "Black Mountain")
-  // Prominent towering volcanic basalt/dacite mountain north of Weaver's Needle (80, 15) & east of Pistol Canyon (-46, -130)
-  // Perfectly matches the USGS Weavers Needle 7.5-minute topographic quadrangle!
-  const distToMalapais = Math.hypot(x - 95, z - (-155));
+  // Prominent volcanic basalt massif north of Weaver's Needle (80, 15) & east of Pistol Canyon (-46, -130).
+  // Matches USGS Weavers Needle 7.5-minute topographic quadrangle & authentic geological surveys:
+  // - Main South Peak (USGS 4,229 ft) basalt mesa tableland at (95, -205)
+  // - North Peak (USGS 4,159 ft) volcanic dome at (96, -242) separated by North Col saddle (95.5, -223)
+  // - Ancillary Volcanic Humps (West Rim Hump at 64, -188; Southwest Hump at 74, -228; Peak 3509 Foothill Hump at 44, -182; Northwest Hump at 68, -252)
+  // - West Side Canyon (Deep Basalt Chasm): A steep, narrow 22-meter deep gorge cutting into the western basalt rockface between (84, -206) and (22, -206)
+  const malapaisEllipDist = Math.hypot((x - 78) / 58, (z - (-216)) / 66);
   let malapaisElevation = 0;
-  if (distToMalapais < 75) {
-    const mFrac = 1.0 - distToMalapais / 75;
-    // Base mountain dome slope (smooth Hermite curve)
-    const baseDome = Math.pow(mFrac, 1.4) * 38.0;
-    // Stepped volcanic caprock (Malpaís black basalt plateau cap, elev. up to ~62m)
-    const capNoise = fbm(x * 0.024 + 115, z * 0.024 + 115, 3);
-    let caprock = 0;
-    if (mFrac > 0.32) {
-      const capFrac = (mFrac - 0.32) / 0.68;
-      caprock = Math.pow(capFrac, 0.62) * (22.0 + capNoise * 5.0);
-    }
-    // Southwest volcanic ridgeline trail (natural walkable ramp from the pass allowing scrambling to summit plateau)
-    const ridgeDist = Math.hypot(x - (95 - (1.0 - mFrac) * 38), z - (-155 + (1.0 - mFrac) * 28));
-    const ridgeRamp = Math.max(0, 1.0 - ridgeDist / 20.0) * 8.5;
+  if (malapaisEllipDist < 1.25) {
+    // Massif basement foundation rising smoothly from the surrounding desert tableland
+    const baseT = Math.max(0, 1.0 - malapaisEllipDist);
+    let elev = baseT * baseT * (3.0 - 2.0 * baseT) * 38.0;
 
-    malapaisElevation = baseDome + caprock + ridgeRamp;
+    // Distances to summits and ancillary humps
+    const distSouthPeak = Math.hypot(x - 95, z - (-205));
+    const distNorthPeak = Math.hypot(x - 96, z - (-242));
+    const distWestRimHump = Math.hypot(x - 64, z - (-188));
+    const distSouthwestHump = Math.hypot(x - 74, z - (-228));
+    const distPeak3509 = Math.hypot(x - 44, z - (-182));
+    const distNorthwestHump = Math.hypot(x - 68, z - (-252));
+
+    // A. Main South Peak (USGS 4,229 ft / 1,289m) - Broad basalt caprock tableland
+    if (distSouthPeak < 52.0) {
+      const flatRadius = 14.0;
+      const rimRadius = 24.0;
+      const baseRadius = 52.0;
+      if (distSouthPeak <= flatRadius) {
+        const basaltTexture = fbm(x * 0.06 + 115, z * 0.06 + 115, 2) * 0.6;
+        elev = Math.max(elev, 58.5 + basaltTexture);
+      } else if (distSouthPeak <= rimRadius) {
+        const tCliff = (distSouthPeak - flatRadius) / (rimRadius - flatRadius);
+        const rimDrop = Math.pow(tCliff, 1.4) * 14.0;
+        const ledgeNoise = Math.sin(distSouthPeak * 0.8) * 1.0;
+        elev = Math.max(elev, 58.5 - rimDrop + ledgeNoise);
+      } else {
+        const tSlope = (distSouthPeak - rimRadius) / (baseRadius - rimRadius);
+        const smoothDrop = 1.0 - tSlope * tSlope * (3.0 - 2.0 * tSlope);
+        elev = Math.max(elev, 44.5 * smoothDrop);
+      }
+    }
+
+    // B. North Peak (USGS 4,159 ft / 1,268m) - Rounded secondary basalt dome
+    if (distNorthPeak < 48.0) {
+      const northFlatRadius = 11.0;
+      const northRimRadius = 20.0;
+      const northBaseRadius = 48.0;
+      if (distNorthPeak <= northFlatRadius) {
+        const northTexture = fbm(x * 0.06 + 210, z * 0.06 + 210, 2) * 0.5;
+        elev = Math.max(elev, 53.5 + northTexture);
+      } else if (distNorthPeak <= northRimRadius) {
+        const tNorth = (distNorthPeak - northFlatRadius) / (northRimRadius - northFlatRadius);
+        elev = Math.max(elev, 53.5 - Math.pow(tNorth, 1.4) * 12.0);
+      } else {
+        const tNorthSlope = (distNorthPeak - northRimRadius) / (northBaseRadius - northRimRadius);
+        const smoothDrop = 1.0 - tNorthSlope * tNorthSlope * (3.0 - 2.0 * tNorthSlope);
+        elev = Math.max(elev, 41.5 * smoothDrop);
+      }
+    }
+
+    // C. Ancillary Volcanic Humps
+    // 1. West Rim Ancillary Hump (Elev. ~3,850 ft / 1,173m) - Towers over the north rim of West Side Canyon
+    if (distWestRimHump < 22.0) {
+      const tHump = distWestRimHump / 22.0;
+      const humpFactor = 1.0 - tHump * tHump * (3.0 - 2.0 * tHump);
+      elev = Math.max(elev, 46.5 * humpFactor);
+    }
+
+    // 2. Southwest Ancillary Hump (Elev. ~3,920 ft / 1,195m) - Guards the south rim of West Side Canyon
+    if (distSouthwestHump < 22.0) {
+      const tHumpSW = distSouthwestHump / 22.0;
+      const humpSWFactor = 1.0 - tHumpSW * tHumpSW * (3.0 - 2.0 * tHumpSW);
+      elev = Math.max(elev, 48.0 * humpSWFactor);
+    }
+
+    // 3. Peak 3509 Foothill Hump (Elev. ~3,509 ft / 1,070m) - Stepped volcanic knoll along west approach
+    if (distPeak3509 < 18.0) {
+      const t3509 = distPeak3509 / 18.0;
+      const f3509 = 1.0 - t3509 * t3509 * (3.0 - 2.0 * t3509);
+      elev = Math.max(elev, 35.0 * f3509);
+    }
+
+    // 4. Northwest Shoulder Hump (Elev. ~3,740 ft / 1,140m) - Overlook above Boulder Canyon
+    if (distNorthwestHump < 19.0) {
+      const tNW = distNorthwestHump / 19.0;
+      const fNW = 1.0 - tNW * tNW * (3.0 - 2.0 * tNW);
+      elev = Math.max(elev, 41.5 * fNW);
+    }
+
+    // D. North Col Saddle & Scramble Ramp (Between South Peak 95, -205 and North Peak 96, -242)
+    // Saddle center at (95.5, -223.5) connecting the dual summits
+    const distNorthCol = Math.hypot(x - 95.5, z - (-223.5));
+    if (distNorthCol < 22.0) {
+      const saddleT = distNorthCol / 22.0;
+      const saddleElev = 42.0 * (1.0 - saddleT * saddleT * (3.0 - 2.0 * saddleT));
+      elev = Math.max(elev, saddleElev);
+    }
+
+    // E. Malapais West Side Canyon (Fully Traversable Ravine Wash & Scramble Route)
+    // Deep, sheer-walled side canyon cutting from western desert plain (x = 16, z = -206)
+    // up through the columnar basalt cliffs into the North Col saddle (x = 88, z = -220)
+    const canyonProg = Math.max(0.0, Math.min(1.0, (x - 16.0) / 72.0));
+    const canyonCenterZ = -206 + Math.sin(x * 0.12) * 2.8 - canyonProg * 12.0;
+    const distFromCanyonAxis = Math.abs(z - canyonCenterZ);
+    const floorHalfWidth = 4.2; // 8.4m wide flat, walkable gravel wash bed
+    const rimHalfWidth = 16.5;
+
+    if (x >= 16.0 && x <= 88.0 && distFromCanyonAxis < rimHalfWidth) {
+      // Wash bed elevation: gentle, traversable ascent from western wash (~8m) to saddle chute (~40m)
+      // Overall slope = (40 - 8) / (88 - 16) = 32 / 72 = 0.44 (~24 degrees) -> fully walkable scramble grade!
+      const washBed = 8.0 + (x - 16.0) * 0.44;
+
+      let crossFactor = 0;
+      if (distFromCanyonAxis <= floorHalfWidth) {
+        crossFactor = 1.0;
+      } else {
+        const t = (distFromCanyonAxis - floorHalfWidth) / (rimHalfWidth - floorHalfWidth);
+        crossFactor = 1.0 - t * t * (3.0 - 2.0 * t);
+      }
+
+      // Longitudinal entry from west (mouth ramp) and exit into saddle (head chute)
+      const mouthFade = Math.min(1.0, Math.max(0.0, (x - 16.0) / 8.0));
+      const headFade = Math.min(1.0, Math.max(0.0, (88.0 - x) / 6.0));
+      const longFade = mouthFade * headFade;
+
+      const maxCut = Math.max(0, elev - washBed);
+      elev = elev - crossFactor * longFade * maxCut;
+    }
+
+    malapaisElevation = elev;
   }
 
   // 8. Black Top Mesa (USGS Elev. 3,650 ft / 1,113m - Spanish Arrastra & Basalt Tableland)
-  // Flat basalt caprock tableland situated between Boulder Canyon and Needle Canyon
-  const distToBlackTop = Math.hypot(x - 35, z - 75);
+  // Flat basalt caprock tableland situated between Boulder Canyon and Needle Canyon, north of Weaver's Needle
+  const distToBlackTop = Math.hypot(x - 25, z - (-45));
   let blackTopMesaElev = 0;
-  if (distToBlackTop < 36) {
-    const bFrac = 1.0 - distToBlackTop / 36;
-    // Stepped tableland profile with flat top
-    const capTransition = Math.min(1.0, Math.max(0, (bFrac - 0.28) / 0.72));
-    const flatTop = Math.pow(capTransition, 0.35) * 38.5;
-    const basaltLedge = fbm(x * 0.03 + 80, z * 0.03 + 80, 2) * 2.5;
-    blackTopMesaElev = flatTop + basaltLedge * capTransition;
+  if (distToBlackTop < 38) {
+    const flatRadius = 20.0;
+    if (distToBlackTop <= flatRadius) {
+      const basaltLedge = fbm(x * 0.03 + 80, z * 0.03 + 80, 2) * 0.8;
+      blackTopMesaElev = 38.5 + basaltLedge;
+    } else {
+      const t = (distToBlackTop - flatRadius) / (38 - flatRadius);
+      const smoothFactor = 1.0 - (t * t * (3.0 - 2.0 * t));
+      blackTopMesaElev = smoothFactor * 38.5;
+    }
   }
 
-  // 9. Battleship Mountain (USGS Elev. 3,240 ft / 988m - Knife-Edge Dacite Keel)
+  // 9. Battleship Mountain (USGS Elev. 3,240 ft / 988m - Rounded Dacite Keel)
   // Elongated NW-SE keel-ridge between Boulder Canyon and Willow Springs
   const distToBattleshipCenter = Math.hypot(x - (-85), z - (-80));
   let battleshipMtnElev = 0;
@@ -468,8 +634,8 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     const axisV = ((x - (-85)) + (z - (-80))) * 0.7071;  // across keel
     if (Math.abs(axisU) < 32 && Math.abs(axisV) < 14) {
       const uFactor = 1.0 - Math.abs(axisU) / 32;
-      const vFactor = Math.pow(1.0 - Math.abs(axisV) / 14, 1.6);
-      // Sharp knife-edge arête prow
+      // Rounded keel crest rather than a razor spike
+      const vFactor = Math.cos((Math.abs(axisV) / 14) * (Math.PI * 0.5));
       battleshipMtnElev = vFactor * uFactor * 32.0;
     }
   }
@@ -477,18 +643,50 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   // 10. Miners Needle (USGS Elev. 3,680 ft / 1,122m - Pinnacled Dacite Crags)
   const distToMinersNeedle = Math.hypot(x - 135, z - 180);
   let minersNeedleElev = 0;
-  if (distToMinersNeedle < 32) {
-    const mFactor = 1.0 - distToMinersNeedle / 32;
-    const spireNoise = Math.sin(Math.atan2(z - 180, x - 135) * 3) * 4.5;
-    minersNeedleElev = Math.pow(mFactor, 1.8) * (36.0 + spireNoise);
+  if (distToMinersNeedle < 34) {
+    const flatRadius = 10.0;
+    if (distToMinersNeedle <= flatRadius) {
+      const spireNoise = Math.sin(Math.atan2(z - 180, x - 135) * 2) * 1.5;
+      minersNeedleElev = 34.0 + spireNoise;
+    } else {
+      const t = (distToMinersNeedle - flatRadius) / (34 - flatRadius);
+      const smoothFactor = 1.0 - (t * t * (3.0 - 2.0 * t));
+      minersNeedleElev = smoothFactor * 34.0;
+    }
   }
 
   // 11. Superstition Peak Caldera Summit (USGS Elev. 5,057 ft / 1,541m - Highest Point)
   const distToSuperstitionPeak = Math.hypot(x - (-180), z - 65);
   let superstitionPeakElev = 0;
   if (distToSuperstitionPeak < 55) {
-    const pFactor = 1.0 - distToSuperstitionPeak / 55;
-    superstitionPeakElev = Math.pow(pFactor, 1.3) * 48.0;
+    // Broad, rounded caldera summit ridge with flat/gently domed crest (not a pointy spike)
+    const flatRadius = 16.0;
+    if (distToSuperstitionPeak <= flatRadius) {
+      // Broad summit crest tableland / caldera rim bench
+      const crestNoise = fbm(x * 0.04 + 50, z * 0.04 + 50, 2) * 0.8;
+      superstitionPeakElev = 48.0 + crestNoise;
+    } else {
+      const t = (distToSuperstitionPeak - flatRadius) / (55 - flatRadius);
+      // Smooth Hermite S-curve: derivative is 0 at both crest and base!
+      const smoothFactor = 1.0 - (t * t * (3.0 - 2.0 * t));
+      superstitionPeakElev = smoothFactor * 48.0;
+    }
+  }
+
+  // 12. Peters Mesa Tableland (USGS Elev. 3,500 ft / 1,067m - Flat Basalt Tableland & Historic Pasture)
+  // Large flat-topped volcanic mesa east of La Barge Canyon & Charlebois Spring, bounded by Squaw Box Canyon to the NW and Peters Canyon to the NE
+  const distToPetersMesa = Math.hypot(x - 135, z - (-125));
+  let petersMesaElev = 0;
+  if (distToPetersMesa < 44) {
+    const flatRadius = 24.0;
+    if (distToPetersMesa <= flatRadius) {
+      const mesaTexture = fbm(x * 0.05 + 35, z * 0.05 + 35, 2) * 0.7;
+      petersMesaElev = 37.0 + mesaTexture;
+    } else {
+      const t = (distToPetersMesa - flatRadius) / (44 - flatRadius);
+      const smoothFactor = 1.0 - (t * t * (3.0 - 2.0 * t));
+      petersMesaElev = smoothFactor * 37.0;
+    }
   }
 
   let rawHeight =
@@ -500,7 +698,63 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     blackTopMesaElev +
     battleshipMtnElev +
     minersNeedleElev +
-    superstitionPeakElev;
+    superstitionPeakElev +
+    petersMesaElev;
+
+  // 13. Traversable Canyon Wash Bed Guarantees:
+  // 13A. La Barge Canyon & Upper Box Wash Bed Gradient
+  if (z <= 40.0 && z >= -295.0 && distToLaBarge < 24.0) {
+    const laBargeWashBed = 18.5 - tLaBarge * 11.0;
+    let crossFactor = 0;
+    const floorW = 4.5;
+    const rimW = 24.0;
+    if (distToLaBarge <= floorW) {
+      crossFactor = 1.0;
+    } else {
+      const t = (distToLaBarge - floorW) / (rimW - floorW);
+      crossFactor = 1.0 - t * t * (3.0 - 2.0 * t);
+    }
+    const southFade = Math.min(1.0, Math.max(0.0, (40.0 - z) / 16.0));
+    const northFade = Math.min(1.0, Math.max(0.0, (z - (-295.0)) / 14.0));
+    const maxCut = Math.max(0, rawHeight - laBargeWashBed);
+    rawHeight = rawHeight - crossFactor * southFade * northFade * maxCut;
+  }
+
+  // 13B. Squaw Box Canyon Floor Gradient (Ascends eastward up to Peters Mesa)
+  if (x >= 56.0 && x <= 126.0 && distToSquaw < 17.0) {
+    const squawWashBed = 14.0 + tSquaw * 14.0;
+    let crossFactor = 0;
+    const floorW = 3.5;
+    const rimW = 17.0;
+    if (distToSquaw <= floorW) {
+      crossFactor = 1.0;
+    } else {
+      const t = (distToSquaw - floorW) / (rimW - floorW);
+      crossFactor = 1.0 - t * t * (3.0 - 2.0 * t);
+    }
+    const mouthFade = Math.min(1.0, Math.max(0.0, (x - 56.0) / 10.0));
+    const headFade = Math.min(1.0, Math.max(0.0, (126.0 - x) / 10.0));
+    const maxCut = Math.max(0, rawHeight - squawWashBed);
+    rawHeight = rawHeight - crossFactor * mouthFade * headFade * maxCut;
+  }
+
+  // 13C. Peters Canyon (Pete's Canyon) Wash Bed Gradient
+  if (z <= -175.0 && z >= -330.0 && distToPetersCanyon < 22.0) {
+    const petersWashBed = 21.0 - tPeters * 12.0;
+    let crossFactor = 0;
+    const floorW = 4.5;
+    const rimW = 22.0;
+    if (distToPetersCanyon <= floorW) {
+      crossFactor = 1.0;
+    } else {
+      const t = (distToPetersCanyon - floorW) / (rimW - floorW);
+      crossFactor = 1.0 - t * t * (3.0 - 2.0 * t);
+    }
+    const southFade = Math.min(1.0, Math.max(0.0, (-175.0 - z) / 12.0));
+    const northFade = Math.min(1.0, Math.max(0.0, (z - (-330.0)) / 10.0));
+    const maxCut = Math.max(0, rawHeight - petersWashBed);
+    rawHeight = rawHeight - crossFactor * southFade * northFade * maxCut;
+  }
 
   // Level out the Tortilla Flat town terrace smoothly to an elevated, dry 7.5m (or sloping river trail)
   if (tortillaFlatBlend > 0) {
@@ -508,7 +762,74 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     rawHeight = rawHeight * (1.0 - tortillaFlatBlend) + targetH * tortillaFlatBlend;
   }
 
+  // Ensure peaks round off smoothly into broad crowns and walkable crests rather than sharp points
+  rawHeight = roundMountainPeak(rawHeight, 42.0, 62.5);
+
   return Math.max(0.6, rawHeight);
+}
+
+/**
+ * Rounds off high mountain peaks so summits are broad, walkable domes,
+ * stepped mesas, or rounded crests rather than sharp pointy spikes.
+ */
+export function roundMountainPeak(rawH: number, roundThreshold = 38.0, capHeight = 62.0): number {
+  if (rawH <= roundThreshold) return rawH;
+  const excess = rawH - roundThreshold;
+  const maxExcess = capHeight - roundThreshold;
+  const roundedExcess = maxExcess * Math.tanh(excess / maxExcess);
+  return roundThreshold + roundedExcess;
+}
+
+/**
+ * Detects whether a coordinate is located on high mountain points, peaks, summits,
+ * massifs, or sheer cliff edges where vegetation/trees cannot grow or should be removed.
+ *
+ * Specifically excludes:
+ * - Malapais Mountain Massif (elev. 4,229 ft basalt caprock tableland)
+ * - Superstition Peak Caldera Summit & amphitheater
+ * - Weaver's Needle Volcanic Plug pedestal
+ * - Black Top Mesa basalt caprock
+ * - Battleship Mountain knife-edge ridge
+ * - Miners Needle crags
+ * - Any summit or high mountain slope (y > 33.0 or steep slope > 0.38)
+ */
+export function isHighPointOrPeak(x: number, z: number, y?: number, slope?: number): boolean {
+  // 1. Malapais Mountain Massif & Ancillary Humps (Broad volcanic basalt massif, north peak, and side canyon)
+  const distMalapais = Math.hypot((x - 78) / 58, (z - (-216)) / 66);
+  if (distMalapais < 1.2) return true;
+
+  // 2. Black Top Mesa (x: 25, z: -45) - Flat basalt tableland
+  const distBlackTop = Math.hypot(x - 25, z - (-45));
+  if (distBlackTop < 38) return true;
+
+  // 3. Weaver's Needle Base Pedestal (x: 80, z: 15)
+  const distNeedle = Math.hypot(x - 80, z - 15);
+  if (distNeedle < 48) return true;
+
+  // 4. Superstition Peak Caldera Massif (x: -180, z: 65)
+  const distSuperstition = Math.hypot(x - (-180), z - 65);
+  if (distSuperstition < 55) return true;
+
+  // 5. Battleship Mountain (x: -85, z: -80)
+  const distBattleship = Math.hypot(x - (-85), z - (-80));
+  if (distBattleship < 38) return true;
+
+  // 6. Miners Needle (x: 135, z: 180)
+  const distMiners = Math.hypot(x - 135, z - 180);
+  if (distMiners < 32) return true;
+
+  // 6b. Peters Mesa Tableland (x: 135, z: -125)
+  const distPetersMesa = Math.hypot(x - 135, z - (-125));
+  if (distPetersMesa < 34) return true;
+
+  // 7. General elevation check: elevations > 33m represent high mountain slopes and ridges
+  const elev = y !== undefined ? y : getTerrainHeight(x, z);
+  if (elev > 33.0) return true;
+
+  // 8. General slope check: Steep rocky canyon walls & cliff faces (slope > 0.38)
+  if (slope !== undefined && slope > 0.38) return true;
+
+  return false;
 }
 
 /**
@@ -2233,7 +2554,7 @@ export function createTerrainMesh(): THREE.Mesh {
 
     // Color computation
     const distToSpring = Math.hypot(vx - (-70), vz - (-20));
-    const distToMalapais = Math.hypot(vx - 95, vz - (-155));
+    const distToMalapais = Math.hypot(vx - 95, vz - (-205));
     const pistolCanyonX = -46 + Math.sin(vz * 0.026 - 1.1) * 20 + Math.cos(vz * 0.012) * 9;
     const distToPistol = Math.abs(vx - pistolCanyonX);
 
@@ -2247,13 +2568,34 @@ export function createTerrainMesh(): THREE.Mesh {
       r = 0.42 * factor + r * (1 - factor);
       g = 0.54 * factor + g * (1 - factor);
       b = 0.26 * factor + b * (1 - factor);
-    } else if (distToMalapais < 68 && vy > 26) {
-      // Malapais Mountain ("Black Mountain") dark volcanic basalt caprock & desert varnish
-      const basaltNoise = Math.sin(vx * 0.35) * Math.cos(vz * 0.35) * 0.06;
-      const strata = Math.sin(vy * 0.8) * 0.04;
-      r = 0.28 + basaltNoise + strata;
-      g = 0.23 + basaltNoise * 0.8 + strata * 0.5;
-      b = 0.20 + basaltNoise * 0.6 + strata * 0.3;
+    } else if (Math.hypot((vx - 78) / 58, (vz - (-216)) / 66) < 1.18 && vy > 12) {
+      // Malapais Mountain Complex ("Black Mountain"): dark volcanic basalt caprock, ancillary humps, & West Side Canyon
+      const canyonProg = Math.max(0.0, Math.min(1.0, (vx - 16.0) / 72.0));
+      const canyonCenterZ = -206 + Math.sin(vx * 0.12) * 2.8 - canyonProg * 12.0;
+      const canyonDistZ = Math.abs(vz - canyonCenterZ);
+      const washBedElev = 8.0 + (vx - 16.0) * 0.44;
+      const isWestSideCanyonWash = vx >= 16.0 && vx <= 88.0 && canyonDistZ < 6.5 && vy <= washBedElev + 3.8;
+
+      if (isWestSideCanyonWash) {
+        // Traversable canyon wash bed: sun-warmed alluvium, weathered volcanic silt, & trail gravel
+        const washNoise = Math.sin(vx * 0.4) * 0.03;
+        r = 0.58 + washNoise;
+        g = 0.49 + washNoise * 0.9;
+        b = 0.39 + washNoise * 0.8;
+      } else if (vx >= 18.0 && vx <= 86.0 && canyonDistZ < 16.5) {
+        // Sheer columnar basalt canyon walls flanking the ravine
+        const colStrata = Math.sin(vy * 0.85) * 0.05 + (Math.sin(vx * 0.9) > 0.5 ? -0.04 : 0.03);
+        r = 0.30 + colStrata;
+        g = 0.24 + colStrata * 0.7;
+        b = 0.20 + colStrata * 0.5;
+      } else {
+        // Dark volcanic basalt caprock, columnar jointed cliffs, & ancillary humps
+        const basaltNoise = Math.sin(vx * 0.35) * Math.cos(vz * 0.35) * 0.06;
+        const strata = Math.sin(vy * 0.8) * 0.04;
+        r = 0.27 + basaltNoise + strata;
+        g = 0.22 + basaltNoise * 0.8 + strata * 0.5;
+        b = 0.19 + basaltNoise * 0.6 + strata * 0.3;
+      }
     } else if (distToPistol < 24 && vz <= -58 && vz >= -192) {
       // Pistol Canyon: sheer volcanic breccia walls and sun-bleached alluvial wash gravel
       if (slope > 0.65) {
@@ -2267,6 +2609,54 @@ export function createTerrainMesh(): THREE.Mesh {
         g = 0.68;
         b = 0.48;
       }
+    } else if (vz <= 40 && vz >= -295 && Math.abs(vx - (80 - 22 * Math.pow(Math.max(0, Math.min(1, (40 - vz) / 335)), 0.75) - 123 * Math.pow(Math.max(0, Math.min(1, (40 - vz) / 335)), 2.1) + Math.sin(vz * 0.032) * 5.5 + Math.cos(vz * 0.016) * 3.0)) < 24.0) {
+      // La Barge Canyon & Upper Box: polished river boulders, tinajas, & sheer volcanic canyon walls
+      const tLB = Math.max(0, Math.min(1, (40 - vz) / 335));
+      const axisLB = 80 - 22 * Math.pow(tLB, 0.75) - 123 * Math.pow(tLB, 2.1) + Math.sin(vz * 0.032) * 5.5 + Math.cos(vz * 0.016) * 3.0;
+      const distLB = Math.abs(vx - axisLB);
+      const isWash = distLB < 5.5;
+
+      if (isWash) {
+        // Polished river wash gravel, quartz sand, & alluvial silt
+        const washNoise = Math.sin(vx * 0.35) * 0.03;
+        r = 0.86 + washNoise;
+        g = 0.71 + washNoise * 0.8;
+        b = 0.52 + washNoise * 0.6;
+      } else {
+        // Sheer canyon walls: stratified red-gold dacite cliffs & dark desert varnish
+        const strata = Math.sin(vy * 0.88 + vx * 0.04) * 0.08;
+        const varnish = Math.sin(vz * 0.28) > 0.35 ? -0.09 : 0.02;
+        r = 0.72 + strata + varnish;
+        g = 0.34 + strata * 0.5 + varnish * 0.6;
+        b = 0.20 + strata * 0.3 + varnish * 0.4;
+      }
+    } else if (vx >= 56 && vx <= 126 && Math.abs(vz - (-135 + ((vx - 58) / 68) * 4.0 + Math.sin((vx - 58) * 0.09) * 4.5)) < 17.0) {
+      // Squaw Box Canyon: sheer dacite palisade walls & narrow box canyon wash
+      const axisSquaw = -135 + ((vx - 58) / 68) * 4.0 + Math.sin((vx - 58) * 0.09) * 4.5;
+      const distSquaw = Math.abs(vz - axisSquaw);
+      if (distSquaw < 4.5) {
+        r = 0.83;
+        g = 0.67;
+        b = 0.47;
+      } else {
+        r = 0.70 + Math.sin(vy * 0.85) * 0.08;
+        g = 0.30 + Math.sin(vy * 0.85) * 0.04;
+        b = 0.18 + Math.sin(vy * 0.85) * 0.03;
+      }
+    } else if (vz <= -175 && vz >= -330 && Math.abs(vx - (243 + (vz - (-267)) * -0.34 + Math.sin((vz - (-267)) * 0.04) * 4.5)) < 22.0) {
+      // Peters Canyon (Pete's Canyon at X: 243, Z: -267): rugged canyon wash flanked by canyon rimrock & Peters Cave
+      const axisPC = 243 + (vz - (-267)) * -0.34 + Math.sin((vz - (-267)) * 0.04) * 4.5;
+      const distPC = Math.abs(vx - axisPC);
+      if (distPC < 5.0) {
+        r = 0.84;
+        g = 0.69;
+        b = 0.49;
+      } else {
+        const strata = Math.sin(vy * 0.85 + vx * 0.03) * 0.07;
+        r = 0.69 + strata;
+        g = 0.32 + strata * 0.5;
+        b = 0.19 + strata * 0.3;
+      }
     } else if (slope > 0.75) {
       // Sheer canyon walls & mountain cliff faces: exposed layered red sandstone & desert varnish
       const strata = Math.sin(vy * 0.95 + vx * 0.04) * 0.09;
@@ -2274,11 +2664,11 @@ export function createTerrainMesh(): THREE.Mesh {
       r = 0.74 + strata + varnish;
       g = 0.28 + strata * 0.5 + varnish * 0.6;
       b = 0.16 + strata * 0.3 + varnish * 0.4;
-    } else if (vy > 34 && slope < 0.42 && vx < 20 && vz < -40) {
+    } else if (vy > 30 && slope < 0.42 && Math.hypot(vx - 135, vz - (-125)) < 38) {
       // Flat-topped Peters Mesa plateau caprock: weathered dark basalt & desert pavement
-      r = 0.44;
-      g = 0.36;
-      b = 0.30;
+      r = 0.42;
+      g = 0.35;
+      b = 0.29;
     } else if (vy > 36) {
       // High volcanic arête ridge & craggy summit
       const varnish = Math.sin(vx * 0.15) * 0.04;

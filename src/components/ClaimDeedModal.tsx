@@ -42,6 +42,7 @@ interface ClaimDeedModalProps {
   onListClaimForSale?: (claimId: string, priceDollars: number, priceGold: number, desc: string) => void;
   onCancelListing?: (claimId: string) => void;
   onTradeOfferResponse?: (offerId: string, accept: boolean) => void;
+  onClearAllClaims?: () => void;
 }
 
 export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
@@ -61,9 +62,11 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
   onListClaimForSale,
   onCancelListing,
   onTradeOfferResponse,
+  onClearAllClaims,
 }) => {
   const [activeTab, setActiveTab] = useState<'deed' | 'sell' | 'exchange'>('deed');
   const [isEditing, setIsEditing] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const [claimNameInput, setClaimNameInput] = useState(claim?.name || "Jacob Waltz's Discovery Lode");
 
   // Listing state
@@ -295,6 +298,24 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
     (o) => o.buyerId === localProspectorId || o.targetOwnerId === localProspectorId
   );
 
+  const handleClearAllClaimsAction = async () => {
+    if (
+      !window.confirm(
+        'Remove all claims from the territory for testing? This will erase all claim stakes, deeds, and registry records.'
+      )
+    ) {
+      return;
+    }
+    setIsClearing(true);
+    setStatusNotice('Clearing all territorial claims from database...');
+    await territoryClaims.clearAllClaims();
+    if (onClearAllClaims) {
+      onClearAllClaims();
+    }
+    setIsClearing(false);
+    setStatusNotice('All mineral claims successfully removed for testing!');
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-950/80 backdrop-blur-md select-none font-serif">
       <div className="relative w-full max-w-3xl bg-[#f4ebd0] text-[#332211] rounded-2xl p-6 sm:p-8 shadow-2xl border-4 border-[#8b6540] overflow-hidden">
@@ -327,39 +348,51 @@ export const ClaimDeedModal: React.FC<ClaimDeedModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b-2 border-[#bfa37b] mb-4 gap-2 font-sans text-xs font-bold uppercase tracking-wider">
+        <div className="flex flex-wrap items-center justify-between border-b-2 border-[#bfa37b] mb-4 gap-2 font-sans text-xs font-bold uppercase tracking-wider">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setActiveTab('deed')}
+              className={`pb-2 px-4 flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
+                activeTab === 'deed'
+                  ? 'border-[#7a4f27] text-[#4a2e15] font-black'
+                  : 'border-transparent text-stone-600 hover:text-stone-900'
+              }`}
+            >
+              <Scroll className="w-4 h-4" />
+              1. Official Deed Patent
+            </button>
+            <button
+              onClick={() => setActiveTab('sell')}
+              className={`pb-2 px-4 flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
+                activeTab === 'sell'
+                  ? 'border-[#7a4f27] text-[#4a2e15] font-black'
+                  : 'border-transparent text-stone-600 hover:text-stone-900'
+              }`}
+            >
+              <Tag className="w-4 h-4" />
+              2. Sell & Appraisal
+            </button>
+            <button
+              onClick={() => setActiveTab('exchange')}
+              className={`pb-2 px-4 flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
+                activeTab === 'exchange'
+                  ? 'border-[#7a4f27] text-[#4a2e15] font-black'
+                  : 'border-transparent text-stone-600 hover:text-stone-900'
+              }`}
+            >
+              <Store className="w-4 h-4" />
+              3. District Claims Exchange ({allClaims.filter((c) => c.forSale).length})
+            </button>
+          </div>
+
           <button
-            onClick={() => setActiveTab('deed')}
-            className={`pb-2 px-4 flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
-              activeTab === 'deed'
-                ? 'border-[#7a4f27] text-[#4a2e15] font-black'
-                : 'border-transparent text-stone-600 hover:text-stone-900'
-            }`}
+            onClick={handleClearAllClaimsAction}
+            disabled={isClearing}
+            className="mb-1.5 px-2.5 py-1 bg-red-950/15 hover:bg-red-900/25 text-red-900 border border-red-800/40 rounded flex items-center gap-1 text-[11px] font-sans font-semibold cursor-pointer transition-colors"
+            title="Delete all mineral claims from database and local storage for testing"
           >
-            <Scroll className="w-4 h-4" />
-            1. Official Deed Patent
-          </button>
-          <button
-            onClick={() => setActiveTab('sell')}
-            className={`pb-2 px-4 flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
-              activeTab === 'sell'
-                ? 'border-[#7a4f27] text-[#4a2e15] font-black'
-                : 'border-transparent text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <Tag className="w-4 h-4" />
-            2. Sell & Appraisal
-          </button>
-          <button
-            onClick={() => setActiveTab('exchange')}
-            className={`pb-2 px-4 flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
-              activeTab === 'exchange'
-                ? 'border-[#7a4f27] text-[#4a2e15] font-black'
-                : 'border-transparent text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <Store className="w-4 h-4" />
-            3. District Claims Exchange ({allClaims.filter((c) => c.forSale).length})
+            <Trash2 className="w-3.5 h-3.5 text-red-800" />
+            <span>{isClearing ? 'Clearing...' : 'Clear All Claims (Testing)'}</span>
           </button>
         </div>
 

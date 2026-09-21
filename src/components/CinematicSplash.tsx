@@ -262,7 +262,7 @@ export const CinematicSplash: React.FC<CinematicSplashProps> = ({ onEnterGame })
               1880s Historic Frontier Simulation
             </span>
             <span className="text-xs sm:text-sm text-stone-400 font-sans">
-              Arizona Territory • Salt River Canyon
+              Arizona Territory • Tortilla Creek • Apache Trail
             </span>
           </div>
         </div>

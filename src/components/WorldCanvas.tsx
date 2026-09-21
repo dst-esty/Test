@@ -68,6 +68,7 @@ import { apacheVigilance, VigilanceStatus } from '../services/apacheVigilanceSer
 import { ApacheSmokeSignalSystem } from '../world/apacheSmokeSignals';
 import { SurfaceAnalysisResult, analyzeSurfaceAtPosition } from '../world/prospectingAnalysis';
 import { ProspectorGogglesOverlay } from './ProspectorGogglesOverlay';
+import { WorldScaleMode } from '../world/superstitionTopography';
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -146,21 +147,23 @@ interface WorldCanvasProps {
   onUpdateVigilance?: (status: VigilanceStatus) => void;
   areGogglesActive?: boolean;
   onToggleGoggles?: () => void;
+  worldScaleMode?: WorldScaleMode;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
   const isMobile = isMobileDevice();
   const rawDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
   if (quality === 'performance') {
-    return Math.min(rawDpr, isMobile ? 0.92 : 1.05);
+    return Math.min(rawDpr, isMobile ? 0.90 : 1.0);
   } else if (quality === 'balanced') {
-    return Math.min(rawDpr, isMobile ? 1.0 : 1.35);
+    return Math.min(rawDpr, 1.0);
   } else {
-    return Math.min(rawDpr, 1.8);
+    // High quality mode: gentle edge antialiasing cap to protect laptop thermals
+    return Math.min(rawDpr, 1.15);
   }
 };
 
-export const WorldCanvas: React.FC<WorldCanvasProps> = ({
+const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   playerState,
   setPlayerState,
   landmarks,
@@ -223,6 +226,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onUpdateVigilance,
   areGogglesActive = false,
   onToggleGoggles,
+  worldScaleMode = '1:1',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
@@ -379,16 +383,32 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   useEffect(() => {
     if (onRegisterTeleportHandler) {
       onRegisterTeleportHandler((targetPos: Vector3D) => {
-        const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
         const uLayers = undergroundLayersRef.current;
+        const isUnderground = (uLayers?.currentLevel || 0) > 0;
+        // If traveling to surface location, exit underground
+        if (targetPos.y > -20 && uLayers) {
+          uLayers.currentLevel = 0;
+        }
         const groundY =
-          isUnderground && uLayers
+          isUnderground && uLayers && targetPos.y <= -20
             ? uLayers.getFloorElevationForPosition(targetPos.x, targetPos.z, uLayers.currentLevel)
             : getTerrainHeight(targetPos.x, targetPos.z);
         playerPos.current.set(targetPos.x, groundY + 1.7, targetPos.z);
         lastSentPos.current.set(targetPos.x, groundY + 1.7, targetPos.z);
         verticalVelocity.current = 0;
         isGrounded.current = true;
+        if (cameraRef.current) {
+          cameraRef.current.position.set(targetPos.x, groundY + 1.7, targetPos.z);
+        }
+        if (endlessTerrainRef.current) {
+          endlessTerrainRef.current.update(playerPos.current, 0.016);
+        }
+        if (mountManagerRef.current && playerStateRef.current.ownedMount) {
+          const spawnX = targetPos.x + 2.5;
+          const spawnZ = targetPos.z + 2.0;
+          const spawnY = getTerrainHeight(spawnX, spawnZ);
+          mountManagerRef.current.mountGroup.position.set(spawnX, spawnY, spawnZ);
+        }
       });
     }
   }, [onRegisterTeleportHandler]);
@@ -487,6 +507,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const playerPitch = useRef<number>(playerState.rotation.pitch);
   const verticalVelocity = useRef<number>(0);
   const isGrounded = useRef<boolean>(true);
+  const cameraSpringArmDist = useRef<number>(4.2);
+  const cameraSmoothY = useRef<number>(playerState.position.y + 2.0);
   const headBobTimer = useRef<number>(0);
   const toolSwingProgress = useRef<number>(0);
   const ghostRotationY = useRef<number>(0);
@@ -510,18 +532,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const lastSentPos = useRef<THREE.Vector3>(
     new THREE.Vector3(playerState.position.x, playerState.position.y, playerState.position.z)
   );
+  // Track position history dispatched by WorldCanvas so internal locomotion never echoes back as an external teleport
+  const recentlyDispatchedPositions = useRef<{ x: number; z: number; time: number }[]>([]);
   const lastSentYaw = useRef<number>(playerState.rotation?.yaw || 0);
   const lastSentPitch = useRef<number>(playerState.rotation?.pitch || 0);
   const currentHydrationRef = useRef<number>(playerState.hydration ?? 100);
   const currentHealthRef = useRef<number>(playerState.health ?? 100);
   const hasTriggeredLowHydrationWarningRef = useRef<boolean>(false);
-  const hasLeftTownRef = useRef<boolean>(false);
-  const expeditionStartingGoldRef = useRef<number>(0);
-  const lastNightColdWarningTimeRef = useRef<number>(0);
   const lastMultiplayerSyncTime = useRef<number>(0);
   const interactionCheckTick = useRef<number>(0);
   const renderFrameCount = useRef<number>(0);
   const wasUndergroundRef = useRef<boolean>(false);
+  const isWindowFocusedRef = useRef<boolean>(true);
 
   // Dynamic quality adjustment without rebuilding scene
   useEffect(() => {
@@ -563,14 +585,28 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
   // Sync external position changes (e.g. fast travel or mine teleport)
   useEffect(() => {
-    // Only teleport if the position was changed EXTERNALLY by another component (Map fast travel, mine enter, etc.),
-    // not by WorldCanvas's own internal locomotion loop.
-    const distFromLastSent = Math.hypot(
-      playerState.position.x - lastSentPos.current.x,
-      playerState.position.z - lastSentPos.current.z
+    // Clean up dispatched position history older than 5 seconds
+    const now = performance.now();
+    recentlyDispatchedPositions.current = recentlyDispatchedPositions.current.filter(
+      (p) => now - p.time < 5000
     );
 
-    if (distFromLastSent > 0.5) {
+    // If this position was dispatched by WorldCanvas itself during internal locomotion, NEVER rubberband!
+    const wasDispatchedLocally = recentlyDispatchedPositions.current.some(
+      (p) => Math.hypot(p.x - playerState.position.x, p.z - playerState.position.z) < 0.4
+    );
+    if (wasDispatchedLocally) {
+      return;
+    }
+
+    // Only teleport if the position was changed EXTERNALLY by another component (Map fast travel, mine enter, etc.),
+    // and is a significant change (> 2.0m) from current 3D position
+    const distFromCurrent = Math.hypot(
+      playerState.position.x - playerPos.current.x,
+      playerState.position.z - playerPos.current.z
+    );
+
+    if (distFromCurrent > 2.0) {
       const isUnderground = (undergroundLayersRef.current?.currentLevel || 0) > 0;
       const uLayers = undergroundLayersRef.current;
       const groundY =
@@ -593,6 +629,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       );
       verticalVelocity.current = 0;
       isGrounded.current = true;
+      if (cameraRef.current) {
+        cameraRef.current.position.set(
+          playerState.position.x,
+          groundY + 1.7,
+          playerState.position.z
+        );
+      }
+      if (endlessTerrainRef.current) {
+        endlessTerrainRef.current.update(playerPos.current, 0.016);
+      }
+      if (mountManagerRef.current && playerStateRef.current.ownedMount) {
+        const spawnX = playerState.position.x + 2.5;
+        const spawnZ = playerState.position.z + 2.0;
+        const spawnY = getTerrainHeight(spawnX, spawnZ);
+        mountManagerRef.current.mountGroup.position.set(spawnX, spawnY, spawnZ);
+      }
     }
   }, [playerState.position.x, playerState.position.z]);
 
@@ -618,7 +670,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     // 1. Scene Setup
     const scene = new THREE.Scene();
     sceneRef.current = scene;
-    scene.fog = new THREE.FogExp2(0xddaf88, 0.0035);
+    // Initial scene fog: calibrated for expansive Sonoran desert visibility and crisp distant landmarks
+    scene.fog = new THREE.FogExp2(0xd6beaa, 0.00085);
 
     // Initialize Rapier3D Kinematic Physics Engine
     RapierPhysicsManager.getInstance().then((rpm) => {
@@ -628,7 +681,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     // 2. Camera Setup
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
-    const camera = new THREE.PerspectiveCamera(65, width / height, 0.1, 3500);
+    // Tightened near plane (0.25) with logarithmic depth distribution completely eliminates depth buffer precision tearing & Z-fighting
+    const camera = new THREE.PerspectiveCamera(65, width / height, 0.25, 3500);
     cameraRef.current = camera;
 
     // 3. Renderer Setup (Hardware Accelerated WebGL2 Pipeline with Adaptive Mobile Performance)
@@ -645,6 +699,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         stencil: false,
         depth: true,
         alpha: false,
+        logarithmicDepthBuffer: true,
       });
     } catch (glErr) {
       console.warn('[WorldCanvas] Primary WebGLRenderer init failed, falling back to basic WebGL context:', glErr);
@@ -655,6 +710,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         stencil: false,
         depth: true,
         alpha: false,
+        logarithmicDepthBuffer: true,
       });
     }
     renderer.setSize(width, height);
@@ -676,6 +732,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
+    renderer.domElement.style.transform = 'translateZ(0)';
+    renderer.domElement.style.backfaceVisibility = 'hidden';
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -3323,8 +3381,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('wheel', handleWheel, { passive: false });
-    window.addEventListener('blur', handleResetInputs);
-    window.addEventListener('focus', handleResetInputs);
+    const onWindowBlur = () => {
+      isWindowFocusedRef.current = false;
+      handleResetInputs();
+    };
+    const onWindowFocus = () => {
+      isWindowFocusedRef.current = true;
+      handleResetInputs();
+    };
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('focus', onWindowFocus);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     document.addEventListener('pointerlockerror', handlePointerLockError);
@@ -4062,7 +4128,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         return;
       }
 
-      // 3b. Historic Town of Tortilla Flat (Saloon, Mercantile, Campfire, Artesian Trough & Salt River Pier)
+      // 3b. Historic Town of Tortilla Flat (Saloon, Mercantile, Campfire, Artesian Trough & Tortilla Creek Landing)
       const distToTownFire = Math.hypot(px - 3.5, pz - (-236));
       if (distToTownFire < 4.5) {
         const handleRestFire = () => {
@@ -4259,7 +4325,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         return;
       }
 
-      // 3b-1. Salt River Landing & Pier (North of town at z = -304)
+      // 3b-1. Tortilla Creek Landing & Pier (North of town at z = -304)
       const distToRiverPier = Math.hypot(px - (-2.0), pz - (-304));
       if (distToRiverPier < 6.0) {
         const handleRiverPier = () => {
@@ -4270,12 +4336,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             health: Math.min(100, (prev.health || 0) + 15),
             hydration: 100,
           }));
-          if (onShowBanner) onShowBanner('Refreshed at the Salt River Pier & drank fresh mountain river water!');
+          if (onShowBanner) onShowBanner('Refreshed at Tortilla Creek & drank fresh mountain creek water!');
         };
         if (executeAction) {
           handleRiverPier();
         } else {
-          onPromptInteract('Salt River Landing: Drink & Fill Canteen [E]', handleRiverPier);
+          onPromptInteract('Tortilla Creek Landing: Drink & Fill Canteen [E]', handleRiverPier);
         }
         return;
       }
@@ -4600,19 +4666,27 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     const animate = (now: number) => {
       animationFrameId = requestAnimationFrame(animate);
+
+      // Only pause/skip rendering if the browser tab is completely hidden/minimized
+      if (typeof document !== 'undefined' && document.hidden) {
+        lastTime = now;
+        return;
+      }
+
       const delta = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
-      // Dynamic Resolution Scaling (DRS) & Real-Time FPS Tracker
+      // Dynamic Resolution Scaling (DRS) & Real-Time FPS Tracker (Smooth 1.5s interval to eliminate React re-render thrashing)
       fpsTrackerRef.current.frames++;
       fpsTrackerRef.current.time += delta;
-      if (fpsTrackerRef.current.time >= 0.5) {
+      if (fpsTrackerRef.current.time >= 1.5) {
         const measuredFps = fpsTrackerRef.current.frames / fpsTrackerRef.current.time;
         fpsTrackerRef.current.frames = 0;
         fpsTrackerRef.current.time = 0;
 
+        const roundedFps = Math.round(measuredFps);
         if (onFpsUpdate) {
-          onFpsUpdate(Math.round(measuredFps));
+          onFpsUpdate(roundedFps);
         }
 
         // Automatic DRS downscaling if mobile/browser drops below 32 FPS for consecutive intervals
@@ -4667,16 +4741,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       const isSprinting = !isGameOverRef.current && allowSprint && (keys['ShiftLeft'] || keys['ShiftRight']);
       
-      // Speed calculation: Riding a Pony gives +75% speed! Riding a Burro gives +35% speed.
-      let baseWalkSpeed = 6.5;
-      let baseSprintSpeed = 12.0;
+      // Speed calculation: In 1:1 True Wilderness scale, pony sprint gallop hits up to 32 m/s (~72 mph)
+      // and burro hits 19.5 m/s, allowing swift traversal across multi-kilometer expanses!
+      const isOneToOne = worldScaleMode === '1:1';
+      let baseWalkSpeed = isOneToOne ? 7.2 : 6.5;
+      let baseSprintSpeed = isOneToOne ? 13.5 : 12.0;
       if (isRiding) {
         if (isPony) {
-          baseWalkSpeed = 11.0;
-          baseSprintSpeed = 21.0; // Fast gallop!
+          baseWalkSpeed = isOneToOne ? 16.5 : 11.0;
+          baseSprintSpeed = isOneToOne ? 32.0 : 21.0; // Fast gallop!
         } else if (ownsBurro) {
-          baseWalkSpeed = 8.5;
-          baseSprintSpeed = 15.0; // Steady trot!
+          baseWalkSpeed = isOneToOne ? 11.0 : 8.5;
+          baseSprintSpeed = isOneToOne ? 19.5 : 15.0; // Steady trot!
         }
       }
       const moveSpeed = (isSprinting ? baseSprintSpeed : baseWalkSpeed) * encumbranceFactor * delta;
@@ -4750,40 +4826,23 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           let movedZ = playerPos.current.z;
           let atBoundary = false;
 
-          // If Rapier3D is ready and player is on surface/canyons, use Rapier's kinematic character controller
-          if (
-            rapierPhysicsRef.current?.isReady() &&
-            !tunnelCheck?.inside &&
-            (Math.abs(targetDx) > 0.0001 || Math.abs(targetDz) > 0.0001)
-          ) {
-            const rapierRes = rapierPhysicsRef.current.computeMovement(
-              new THREE.Vector3(playerPos.current.x, currentGroundY, playerPos.current.z),
-              new THREE.Vector3(targetDx, 0, targetDz),
-              foliageManagerRef.current
-            );
-            movedX = rapierRes.position.x;
-            movedZ = rapierRes.position.z;
-            if (rapierRes.atBoundary) {
-              atBoundary = true;
-            }
-          } else {
-            const colRes = resolveKinematicMovement(
-              playerPos.current.x,
-              playerPos.current.z,
-              targetDx,
-              targetDz,
-              currentGroundY,
-              getTerrainHeight,
-              foliageManagerRef.current,
-              movableRockManagerRef.current,
-              mineBuildingRef.current,
-              !isGrounded.current
-            );
-            movedX = colRes.x;
-            movedZ = colRes.z;
-            if (colRes.isBlocked && colRes.blockedReason === 'frontier_boundary') {
-              atBoundary = true;
-            }
+          // Butter-smooth kinematic character locomotion with tangent gliding & spatial indexing
+          const colRes = resolveKinematicMovement(
+            playerPos.current.x,
+            playerPos.current.z,
+            targetDx,
+            targetDz,
+            currentGroundY,
+            getTerrainHeight,
+            foliageManagerRef.current,
+            movableRockManagerRef.current,
+            mineBuildingRef.current,
+            !isGrounded.current
+          );
+          movedX = colRes.x;
+          movedZ = colRes.z;
+          if (colRes.isBlocked && colRes.blockedReason === 'frontier_boundary') {
+            atBoundary = true;
           }
 
           playerPos.current.x = movedX;
@@ -4816,16 +4875,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         }
 
-        // Hydration drain - balanced rate so the player does not become dehydrated too quickly (Riding saves stamina!)
+        // Hydration drain - balanced rate so the player does not become dehydrated too quickly
+        // In 1:1 scale, riding provides 85% hydration relief so players can make long multi-kilometer treks!
         if (!isGameOverRef.current) {
           const isRaining = weather === 'storm' || weather === 'light_rain';
           const rainRelief = isRaining ? 0.2 : 1.0;
-          const ridingRelief = isRiding ? 0.45 : 1.0;
-          const rawGoldWeight = playerStateRef.current.goldFound || 0;
-          const isWellRested = Boolean(playerStateRef.current.wellRestedUntil && Date.now() < playerStateRef.current.wellRestedUntil);
-          const encumbranceFactor = isRiding ? 1.0 : (1.0 + Math.min(0.85, (rawGoldWeight / 20) * 0.25));
-          const wellRestedRelief = isWellRested ? 0.7 : 1.0;
-          const drainRate = (isSprinting ? 0.35 : 0.12) * delta * rainRelief * ridingRelief * encumbranceFactor * wellRestedRelief;
+          const ridingRelief = isRiding ? (isOneToOne ? 0.15 : 0.45) : 1.0;
+          const sprintDrain = isOneToOne ? 0.22 : 0.35;
+          const walkDrain = isOneToOne ? 0.08 : 0.12;
+          const drainRate = (isSprinting ? sprintDrain : walkDrain) * delta * rainRelief * ridingRelief;
           currentHydrationRef.current = Math.max(0, currentHydrationRef.current - drainRate);
 
           // Low hydration warning (< 20%)
@@ -4865,46 +4923,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const curZ = playerPos.current.z;
         const curY = playerPos.current.y;
 
-        // High-Stakes Expedition Tracking & Return to Tortilla Flat Sanctuary
-        const isInWilderness = curZ > -170 || Math.hypot(curX, curZ - (-246)) > 115;
-        const isInTortillaFlat = curZ < -210 && Math.abs(curX) < 95;
-
-        if (isInWilderness && !hasLeftTownRef.current) {
-          hasLeftTownRef.current = true;
-          expeditionStartingGoldRef.current = playerStateRef.current.goldFound || 0;
-        } else if (isInTortillaFlat && hasLeftTownRef.current) {
-          hasLeftTownRef.current = false;
-          const currentGold = playerStateRef.current.goldFound || 0;
-          const goldCarriedBack = Math.max(0, currentGold - expeditionStartingGoldRef.current);
-          if (goldCarriedBack >= 0.1) {
-            soundEngine.playDiscovery();
-            if (onShowBanner) {
-              onShowBanner(`🏆 Expedition Safely Returned to Tortilla Flat! You carried ${goldCarriedBack.toFixed(1)} oz of raw mountain gold back across the canyons. Visit Assayer Hiram Walker or store your haul at the Hotel!`);
-            }
-          }
-        }
-
-        // Nighttime Desert Cold & Hypothermia Hazard in Wilderness
-        const isNight = timeOfDay >= 19.5 || timeOfDay < 5.5;
-        if (isNight && isInWilderness && !isUnderground) {
-          const nearLitFire = (playerStateRef.current.builtStructures || []).some(
-            (s) => (s.type === 'campfire' || s.type === 'prospector_camp') && s.isLit && Math.hypot(curX - s.position.x, curZ - s.position.z) < 8.0
-          );
-          if (!nearLitFire && Date.now() - lastNightColdWarningTimeRef.current > 110000) {
-            lastNightColdWarningTimeRef.current = Date.now();
-            if (onShowBanner) {
-              onShowBanner('🥶 Freezing Mountain Night: Desert temperatures plunge below freezing! Light a campfire or return to the Superstition Hotel to stay warm.');
-            }
-          }
-        }
-
         // 1. Peters Mesa Plateau (NW Tableland, elevation > 32m)
-        if (curX < -175 && curX > -240 && curZ > 130 && curZ < 205 && curY > 32) {
+        if (Math.hypot(curX - (-105), curZ - (-155)) < 36 && curY > 32) {
           if (!discoveredSummitsRef.current.has('peters_mesa')) {
             discoveredSummitsRef.current.add('peters_mesa');
             soundEngine.playDiscovery();
             if (onShowBanner) {
-              onShowBanner('🌄 Summit Reached: Peters Mesa Tableland (Elev. 2,980 ft) • Vast basalt plateau with 360° views across the Superstition wilderness!');
+              onShowBanner('🌄 Mesa Reached: Peters Mesa Tableland (USGS Elev. 3,500 ft) • Vast basalt tableland west of Malapais Mountain!');
             }
           }
         }
@@ -4939,12 +4964,42 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         }
         // 5. Malapais Mountain High Summit (USGS Elev. 4,229 ft / 1,289m)
-        else if (Math.hypot(curX - 95, curZ - (-155)) < 36 && curY > 44) {
+        else if (Math.hypot(curX - 95, curZ - (-205)) < 26 && curY > 44) {
           if (!discoveredSummitsRef.current.has('malapais_mountain')) {
             discoveredSummitsRef.current.add('malapais_mountain');
             soundEngine.playDiscovery();
             if (onShowBanner) {
               onShowBanner('⛰️ Summit Reached: Malapais Mountain (USGS Elev. 4,229 ft) • Highest volcanic basalt massif in the northern Superstitions! Triangulation benchmark & 360° panoramic view.');
+            }
+          }
+        }
+        // 5B. Malapais North Peak (USGS Elev. 4,159 ft / 1,268m)
+        else if (Math.hypot(curX - 96, curZ - (-242)) < 22 && curY > 40) {
+          if (!discoveredSummitsRef.current.has('malapais_north_peak')) {
+            discoveredSummitsRef.current.add('malapais_north_peak');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('⛰️ Summit Reached: Malapais North Peak (USGS Elev. 4,159 ft) • Rugged secondary volcanic summit & basalt palisades overlooking Boulder Canyon.');
+            }
+          }
+        }
+        // 5C. Malapais West Side Canyon (Deep Basalt Chasm & Dry Tinaja Chute)
+        else if (curX >= 26 && curX <= 82 && Math.abs(curZ - (-206)) < 12 && curY < 28) {
+          if (!discoveredSummitsRef.current.has('malapais_west_canyon')) {
+            discoveredSummitsRef.current.add('malapais_west_canyon');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('🏜️ Chasm Discovered: Malapais West Side Canyon • Steep 80-foot deep basalt gorge with sheer columnar walls & dry tinaja pour-off.');
+            }
+          }
+        }
+        // 5D. Malapais West Rim Ancillary Hump (Elev. 3,850 ft)
+        else if (Math.hypot(curX - 64, curZ - (-188)) < 16 && curY > 34) {
+          if (!discoveredSummitsRef.current.has('malapais_west_hump')) {
+            discoveredSummitsRef.current.add('malapais_west_hump');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('⛰️ Knoll Reached: Malapais West Rim Hump (Elev. 3,850 ft) • Volcanic basalt knoll with sheer overlook above the West Side Canyon abyss.');
             }
           }
         }
@@ -4955,6 +5010,26 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             soundEngine.playDiscovery();
             if (onShowBanner) {
               onShowBanner("🏜️ Canyon Discovered: Pistol Canyon • Rugged slot gorge below Peters Mesa! Site of Roy Bradford's lost 1920s Colt revolver.");
+            }
+          }
+        }
+        // 7. Peters Canyon Drainage Gorge (USGS Mormon Flat Dam & Weavers Needle Quads)
+        else if (Math.abs(curX - (-155)) < 22 && curZ <= -75 && curZ >= -308 && curY < 24) {
+          if (!discoveredSummitsRef.current.has('peters_canyon')) {
+            discoveredSummitsRef.current.add('peters_canyon');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('🏜️ Canyon Discovered: Peters Canyon • Rugged canyon wash flanked by Peters Mesa rimrock, draining north toward Canyon Lake!');
+            }
+          }
+        }
+        // 9. Weaver's Needle Summit (USGS Benchmark Elev. 4,553 ft / 1,388m)
+        else if (Math.hypot(curX - 80, curZ - 15) < 22 && curY > 52) {
+          if (!discoveredSummitsRef.current.has('weavers_needle_summit')) {
+            discoveredSummitsRef.current.add('weavers_needle_summit');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner("🦅 Summit Reached: Weaver's Needle Summit (USGS Benchmark 4,553 ft) • Standing atop the iconic volcanic neck of the Superstitions!");
             }
           }
         }
@@ -5193,9 +5268,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const targetEyeY = currentGroundY + 1.7;
 
         if (isGrounded.current) {
-          // Cleanly clamped to terrain - walking up/down dunes and ridges is buttery smooth!
-          playerPos.current.y = targetEyeY;
-          verticalVelocity.current = 0;
+          // Check if ground dropped away sharply beneath our feet (cliff edge / canyon drop-off)
+          const dropDistance = playerPos.current.y - targetEyeY;
+          if (dropDistance > 0.65) {
+            // Stepped over a canyon rim or sharp outcrop edge: smoothly fall with gravity instead of teleporting down in 1 frame!
+            isGrounded.current = false;
+            verticalVelocity.current = -1.2;
+          } else {
+            // Cleanly clamped to terrain - walking up/down dunes and ridges is buttery smooth!
+            playerPos.current.y = targetEyeY;
+            verticalVelocity.current = 0;
+          }
         } else {
           // Airborne jump physics
           verticalVelocity.current -= 22.0 * delta;
@@ -5503,16 +5586,35 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               }
             }
 
-            const camX = playerPos.current.x + dirBehindX * effectiveDist;
-            const camZ = playerPos.current.z + dirBehindZ * effectiveDist;
+            // Smooth spring-arm distance adjustment to prevent violent camera snap-in/out on canyon walls
+            if (effectiveDist < cameraSpringArmDist.current) {
+              cameraSpringArmDist.current = THREE.MathUtils.lerp(cameraSpringArmDist.current, effectiveDist, Math.min(1.0, 24.0 * delta));
+            } else {
+              cameraSpringArmDist.current = THREE.MathUtils.lerp(cameraSpringArmDist.current, effectiveDist, Math.min(1.0, 8.0 * delta));
+            }
+            const smoothDist = cameraSpringArmDist.current;
+
+            const camX = playerPos.current.x + dirBehindX * smoothDist;
+            const camZ = playerPos.current.z + dirBehindZ * smoothDist;
             const camGroundY = getTerrainHeight(camX, camZ);
-            const camY = Math.max(
+            const targetCamY = Math.max(
               camGroundY + 0.45,
               currentGroundY + 0.8,
               playerPos.current.y + camYOffset + idealPitchY
             );
 
-            camera.position.set(camX, camY, camZ);
+            // Smooth vertical camera tracking over ridges and rocks
+            if (Math.abs(targetCamY - cameraSmoothY.current) > 3.5) {
+              cameraSmoothY.current = targetCamY;
+            } else {
+              cameraSmoothY.current = THREE.MathUtils.lerp(
+                cameraSmoothY.current,
+                targetCamY,
+                Math.min(1.0, 16.0 * delta)
+              );
+            }
+
+            camera.position.set(camX, cameraSmoothY.current, camZ);
             camera.lookAt(playerPos.current.x, lookTargetY, playerPos.current.z);
           }
         }
@@ -6093,6 +6195,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           getTerrainHeight,
           (msg) => {
             if (onShowBanner) onShowBanner(msg);
+          },
+          (cavalryPos) => {
+            if (combatManagerRef.current) {
+              const livingBandit = combatManagerRef.current.getNearbyLivingBandit(cavalryPos, 38);
+              if (livingBandit) {
+                combatManagerRef.current.cavalryFireAtBandit(livingBandit, cavalryPos, (outlawName) => {
+                  if (onShowBanner) {
+                    onShowBanner(`🎖️ Fort McDowell Cavalry Trooper Crawford suppressed outlaw ${outlawName}!`);
+                  }
+                });
+              }
+            }
           }
         );
       }
@@ -6138,13 +6252,23 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const timeSinceLastSync = nowMs - lastHudSyncTime.current;
 
       const hasMoved = posDistSq > 0.08 || yawDiff > 0.05 || pitchDiff > 0.05;
-      const shouldSync = (hasMoved && timeSinceLastSync > 90) || (!hasMoved && timeSinceLastSync > 250 && posDistSq > 0.0001);
+      const shouldSync = (hasMoved && timeSinceLastSync > 180) || (!hasMoved && timeSinceLastSync > 400 && posDistSq > 0.0001);
 
       if (shouldSync) {
         lastHudSyncTime.current = nowMs;
         lastSentPos.current.copy(playerPos.current);
         lastSentYaw.current = playerYaw.current;
         lastSentPitch.current = playerPitch.current;
+
+        // Record position to history so incoming prop echo is recognized as internal locomotion
+        recentlyDispatchedPositions.current.push({
+          x: playerPos.current.x,
+          z: playerPos.current.z,
+          time: nowMs,
+        });
+        if (recentlyDispatchedPositions.current.length > 50) {
+          recentlyDispatchedPositions.current.shift();
+        }
 
         const currentSprint = Boolean(keysPressed.current['ShiftLeft'] || keysPressed.current['ShiftRight']);
 
@@ -6352,18 +6476,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
-      // Adaptive Shadow Map Scheduling (maintains 60 FPS frame pacing under complex terrain/weather conditions)
+      // Consistent Shadow Map Scheduling (eliminates alternating-frame camera shadow judder)
       if (renderer.shadowMap.enabled) {
         renderFrameCount.current++;
-        if (qualityRef.current === 'high') {
-          renderer.shadowMap.autoUpdate = true;
-        } else {
-          // In balanced/performance mode, interleave shadow recalculations every 2 frames for a massive GPU boost
-          renderer.shadowMap.autoUpdate = (renderFrameCount.current % 2 === 0);
-          if (renderer.shadowMap.autoUpdate) {
-            renderer.shadowMap.needsUpdate = true;
-          }
-        }
+        renderer.shadowMap.autoUpdate = true;
       }
 
       // Render scene via cinematic post-processing pipeline or fallback to standard renderer
@@ -6429,8 +6545,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('wheel', handleWheel);
-      window.removeEventListener('blur', handleResetInputs);
-      window.removeEventListener('focus', handleResetInputs);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('focus', onWindowFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('pointerlockchange', handlePointerLockChange);
       document.removeEventListener('pointerlockerror', handlePointerLockError);
@@ -6785,3 +6901,34 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     </div>
   );
 };
+
+export const WorldCanvas = React.memo(WorldCanvasComponent, (prev, next) => {
+  // Only trigger React component re-render when discrete gameplay/scene properties change,
+  // preventing continuous locomotion and mouse looking from re-evaluating the 6,700-line canvas tree.
+  const sameTools = prev.playerState.equippedTool === next.playerState.equippedTool;
+  const sameMount =
+    prev.playerState.ownedMount === next.playerState.ownedMount &&
+    prev.playerState.isRidingMount === next.playerState.isRidingMount;
+  const sameCarried = prev.playerState.carriedObject?.name === next.playerState.carriedObject?.name;
+  const sameClaim = prev.playerState.activeClaim?.id === next.playerState.activeClaim?.id;
+  const sameMine =
+    prev.playerState.isInsideMine === next.playerState.isInsideMine &&
+    prev.playerState.currentMineLevel === next.playerState.currentMineLevel;
+  const sameEnvironment =
+    prev.timeOfDay === next.timeOfDay &&
+    prev.weather === next.weather &&
+    prev.viewMode === next.viewMode &&
+    prev.graphicsQuality === next.graphicsQuality &&
+    prev.areGogglesActive === next.areGogglesActive;
+
+  return (
+    sameTools &&
+    sameMount &&
+    sameCarried &&
+    sameClaim &&
+    sameMine &&
+    sameEnvironment &&
+    prev.landmarks === next.landmarks &&
+    prev.clues === next.clues
+  );
+});

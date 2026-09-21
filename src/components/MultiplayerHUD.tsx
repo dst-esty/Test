@@ -684,9 +684,11 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                 value={chatText}
                 onChange={(e) => setChatText(e.target.value)}
                 onKeyDown={(e) => {
+                  e.stopPropagation();
                   if (e.key === 'Enter') handleSend(false);
                   if (e.key === 'Escape') toggleTelegraph(false);
                 }}
+                onKeyUp={(e) => e.stopPropagation()}
                 placeholder="Telegraph message... [Enter]"
                 className="flex-1 px-2.5 py-1.5 rounded-lg bg-stone-900 border border-stone-700/80 text-stone-100 text-xs focus:outline-none focus:border-amber-500"
                 maxLength={140}

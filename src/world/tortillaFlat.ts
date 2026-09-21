@@ -1834,7 +1834,7 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
   overlookGroup.add(oRail);
   townGroup.add(overlookGroup);
 
-  // Salt River Project Freight Depot Platform (z = -298, trail elev: ~3.9m, offset -3.6m)
+  // Tortilla Creek Freight Depot Platform (z = -298, trail elev: ~3.9m, offset -3.6m)
   const depotGroup = new THREE.Group();
   depotGroup.position.set(13.0, -3.6, -48.0); // World Z: -298
 
@@ -1867,9 +1867,9 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
   depotGroup.add(craneBoom);
 
   const depotSignTex = createWesternSignTexture(
-    'SALT RIVER PROJECT',
-    'ROOSEVELT DAM FREIGHT STAGING — 1904',
-    'HYDRAULIC MACHINERY • CEMENT • CANYON FREIGHT',
+    'TORTILLA CREEK FREIGHT DEPOT',
+    'APACHE TRAIL FREIGHT STAGING — 1904',
+    'HYDRAULIC MACHINERY • TIMBER • CANYON FREIGHT',
     { bg: '#251b14', border: '#bfa060', text: '#fcedd2', subText: '#dfb86c', width: 512, height: 128 }
   );
   const depotSign = createMountedSignboard(depotSignTex, 3.6, 0.8, '+Z', 0x251b14);
@@ -1878,7 +1878,7 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
   depotGroup.add(depotSign);
   townGroup.add(depotGroup);
 
-  // River Pier & Boat Landing extending out into the Salt River (z = -304, water elev: 2.8m, offset -4.7m)
+  // Creek Pier & Boat Landing extending out into Tortilla Creek (z = -304, water elev: 2.8m, offset -4.7m)
   const riverPierGroup = new THREE.Group();
   riverPierGroup.position.set(-2.0, -4.7, -54.0); // World Z: -304
 
@@ -1923,17 +1923,17 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
   pierLanternPole.position.set(-2.0, 1.7, -9.0);
   riverPierGroup.add(pierLanternPole);
 
-  // River Skiff moored at the pier
+  // Creek Skiff moored at the pier
   const skiff = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.65, 4.8), woodClapboardWeathered);
   skiff.position.set(-3.8, -0.6, -6.0);
   skiff.rotation.y = 0.08;
   riverPierGroup.add(skiff);
 
-  // River Landing Signboard
+  // Creek Landing Signboard
   const landingSignTex = createWesternSignTexture(
-    'SALT RIVER LANDING',
-    'TORTILLA FLAT FREIGHT DOCK — ELEVATION 1,680 FT',
-    'APACHE TRAIL FERRY & WATER SUPPLY',
+    'TORTILLA CREEK LANDING',
+    'TORTILLA FLAT FREIGHT DOCK — ELEVATION 1,780 FT',
+    'APACHE TRAIL FORDING & WATER SUPPLY',
     { bg: '#251b14', border: '#cfa95b', text: '#fcedd2', subText: '#dfb86c', width: 512, height: 128 }
   );
   const landingSign = createMountedSignboard(landingSignTex, 3.6, 0.85, '+Z', 0x251b14);
@@ -2133,7 +2133,7 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
     createFrontierTorch(new THREE.Vector3(-8.4, -1.8, -36.0), townTorches, { height: 2.0, baseIntensity: 2.6 })
   );
 
-  // Salt River Pier & Freight Dock Landing
+  // Tortilla Creek Pier & Freight Dock Landing
   torchesGroup.add(
     createFrontierTorch(new THREE.Vector3(-4.5, -4.7, -53.0), townTorches, { height: 2.25, baseIntensity: 2.8 })
   );

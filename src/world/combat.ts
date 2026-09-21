@@ -405,6 +405,44 @@ export class CombatManager {
     return this.bandits.map((b) => b.data);
   }
 
+  /**
+   * Find nearest living bandit within range
+   */
+  public getNearbyLivingBandit(pos: THREE.Vector3, maxDist: number): BanditEntity | null {
+    let nearest: BanditEntity | null = null;
+    let minDist = maxDist;
+    for (const b of this.bandits) {
+      if (b.data.state !== 'dead') {
+        const d = b.mesh.position.distanceTo(pos);
+        if (d <= minDist) {
+          minDist = d;
+          nearest = b;
+        }
+      }
+    }
+    return nearest;
+  }
+
+  /**
+   * Cavalry Trooper engages hostile bandit with Springfield carbine fire
+   */
+  public cavalryFireAtBandit(
+    bandit: BanditEntity,
+    cavalryOrigin: THREE.Vector3,
+    onDefeated?: (name: string) => void
+  ): boolean {
+    if (bandit.data.state === 'dead') return false;
+    soundEngine.playRifleShot();
+    this.spawnTracer(cavalryOrigin, bandit.mesh.position, false);
+    bandit.data.health -= 55;
+    if (bandit.data.health <= 0) {
+      this.killBandit(bandit);
+      if (onDefeated) onDefeated(bandit.data.name);
+      return true;
+    }
+    return false;
+  }
+
   public dispose() {
     this.scene.remove(this.combatGroup);
     this.combatGroup.traverse((child) => {

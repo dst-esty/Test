@@ -1063,7 +1063,7 @@ export class TownfolkManager {
         position: new THREE.Vector3(10.2, townY + 0.15, -242.0),
         heading: -Math.PI / 2, // Facing west toward the town street
         dialogues: [
-          'Howdy! Need a surefooted Spanish pack burro to haul heavy quartz ore, or a spirited mountain mustang to cross the Salt River flats?',
+          'Howdy! Need a surefooted Spanish pack burro to haul heavy quartz ore, or a spirited mountain mustang to cross the Tortilla Creek flats?',
           'A good burro can carry 150 pounds of solid pay-dirt over razor-sharp volcanic scree without losing a shoe. Best partner a prospector could ask for.',
           'Be sure to water your mount at the artesian trough before you ride out past the canyon narrows. Dehydration kills faster than outlaws in this desert.',
           'If you press [M], you can mount up and ride at a brisk gallop across the open washes!',
@@ -1122,7 +1122,7 @@ export class TownfolkManager {
         position: new THREE.Vector3(3.4, townY + 0.15, -252.2),
         heading: -Math.PI / 1.5, // Leaning near stagecoach
         dialogues: [
-          'Fresh team of six sturdy horses harnessed up! The Salt River stage run departs for Florence and Phoenix every Tuesday and Friday.',
+          'Fresh team of six sturdy horses harnessed up! The Tortilla Flat stage run departs for Florence and Phoenix every Tuesday and Friday.',
           'The road through Fish Creek Canyon is rough enough to rattle your teeth loose, but this Abbott-Downing Concord coach has genuine English thoroughbrace leather suspension.',
           'If you need swift transport across the territory to the established trailheads, hop aboard and we’ll make good time before sundown.',
         ],
@@ -1145,7 +1145,7 @@ export class TownfolkManager {
           speed: 0.9,
         },
         dialogues: [
-          'Good day to you, traveler! The air off the Salt River is sweet this morning. Mind the rattlesnakes if you step off the gravel road.',
+          'Good day to you, traveler! The air off Tortilla Creek is sweet this morning. Mind the rattlesnakes if you step off the gravel road.',
           'If you\'re staying the night in Tortilla Flat, rent an upstairs room in the Superstition Hotel. Clean feather ticks, wool blankets, and a warm stove—much safer than sleeping on the open gravel when the desert cold sets in!',
           'Mr. Jacob Waltz used to pass by with his pack burros loaded with dried jerky and flour. A quiet, hardened man—never said where he dug his gold, God rest his soul.',
           'Be sure to keep your canteen filled at the artesian spring trough. You can’t drink gold when the desert fever takes hold!',

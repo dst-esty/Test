@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   getTerrainHeight,
   getBaseTerrainHeight,
+  isHighPointOrPeak,
   DugHole,
   activeDugHoles,
   createRealisticTerrainMaterial,
@@ -22,7 +23,7 @@ import {
 } from './foliage';
 
 export const CHUNK_SIZE = 140;
-export const CHUNK_SEGMENTS = 28; // 29 x 29 vertices per chunk = 841 vertices (crisp fidelity, peak 60+ FPS)
+export const CHUNK_SEGMENTS = 28; // Uniform 29 x 29 vertices per chunk (841 vertices) ensures 100% watertight seamless edges with ZERO mesh tearing
 export const CHUNK_RADIUS = 4;   // 9x9 grid = 81 chunks = 1260m wide field, blankets expansive mountain horizons
 
 // Deterministic pseudo-random number generator for chunk scatter
@@ -33,19 +34,16 @@ function pseudoRandom(seed: number): number {
 
 export type ChunkLOD = 0 | 1 | 2;
 
-export function getSegmentsForLOD(lod: ChunkLOD): number {
-  switch (lod) {
-    case 0: return 28; // High resolution: 29x29 = 841 vertices (within 140m)
-    case 1: return 14; // Medium resolution: 15x15 = 225 vertices (140m - 280m, 73% reduction)
-    case 2: return 7;  // Low resolution: 8x8 = 64 vertices (> 280m to horizon, 92% reduction)
-  }
+export function getSegmentsForLOD(_lod?: ChunkLOD): number {
+  // Always use uniform segment density across all chunks.
+  // When all adjacent chunks share identical vertex spacing along shared borders,
+  // boundary vertices align mathematically to 0.0000mm, completely eliminating
+  // T-junction gaps, holes, cracks, and terrain seam tearing.
+  return CHUNK_SEGMENTS;
 }
 
-export function calculateChunkLOD(cx: number, cz: number, centerCx: number, centerCz: number): ChunkLOD {
-  const dist = Math.max(Math.abs(cx - centerCx), Math.abs(cz - centerCz));
-  if (dist <= 1) return 0;
-  if (dist === 2) return 1;
-  return 2;
+export function calculateChunkLOD(_cx: number, _cz: number, _centerCx: number, _centerCz: number): ChunkLOD {
+  return 0;
 }
 
 export interface TerrainChunk {
@@ -496,9 +494,13 @@ export class EndlessTerrainManager {
       const worldX = originX + rx;
       const worldZ = originZ + rz;
       const y = getTerrainHeight(worldX, worldZ);
+      const slope = Math.hypot(
+        getTerrainHeight(worldX + 1.2, worldZ) - getTerrainHeight(worldX - 1.2, worldZ),
+        getTerrainHeight(worldX, worldZ + 1.2) - getTerrainHeight(worldX, worldZ - 1.2)
+      ) / 2.4;
 
-      // Avoid extreme summits
-      if (y > 52) continue;
+      // Exclude high points, summits, and steep cliff faces
+      if (isHighPointOrPeak(worldX, worldZ, y, slope)) continue;
 
       const scale = 0.75 + pseudoRandom(seed + 12 + i * 4) * 0.7;
       const cactusGroup = new THREE.Group();
@@ -547,6 +549,11 @@ export class EndlessTerrainManager {
       const worldX = originX + rx;
       const worldZ = originZ + rz;
       const worldY = getTerrainHeight(worldX, worldZ);
+      const slope = Math.hypot(
+        getTerrainHeight(worldX + 1.2, worldZ) - getTerrainHeight(worldX - 1.2, worldZ),
+        getTerrainHeight(worldX, worldZ + 1.2) - getTerrainHeight(worldX - 1.2, worldZ)
+      ) / 2.4;
+      if (slope > 0.55 || (worldY > 48 && slope > 0.35)) continue;
 
       const bScale = 0.8 + pseudoRandom(seed + 62 + i * 3) * 1.1;
       const bMesh = new THREE.Mesh(this.boulderGeo, this.boulderMat);
@@ -588,6 +595,11 @@ export class EndlessTerrainManager {
       const worldX = originX + rx;
       const worldZ = originZ + rz;
       const worldY = getTerrainHeight(worldX, worldZ);
+      const slope = Math.hypot(
+        getTerrainHeight(worldX + 1.2, worldZ) - getTerrainHeight(worldX - 1.2, worldZ),
+        getTerrainHeight(worldX, worldZ + 1.2) - getTerrainHeight(worldX - 1.2, worldZ)
+      ) / 2.4;
+      if (isHighPointOrPeak(worldX, worldZ, worldY, slope)) continue;
       const floraTypeVal = pseudoRandom(seed + 112 + i * 5);
 
       if (floraTypeVal < 0.28) {

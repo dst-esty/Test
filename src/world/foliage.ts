@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { getTerrainHeight, updateTerrainHoleCutouts, applyMountainHoleShaderToMaterial } from './terrain';
+import { getTerrainHeight, updateTerrainHoleCutouts, applyMountainHoleShaderToMaterial, isHighPointOrPeak } from './terrain';
 import { DebrisType } from '../types';
 import { MountainHoleManager } from './mountainHoles';
 import { MountainDustParticleSystem } from './mountainDustParticles';
@@ -992,6 +992,7 @@ export class DesertFoliageManager {
   public outcroppingMeshes: THREE.InstancedMesh[] = [];
   public boulderHitsMap: Map<string, number> = new Map();
   public rockColliders: WorldRockCollider[] = [];
+  public rockSpatialGrid: Map<string, WorldRockCollider[]> = new Map();
   public mountainHoleManager: MountainHoleManager;
   public dustParticleSystem?: MountainDustParticleSystem;
   public mountainHoleUniformsList: Array<{
@@ -1012,13 +1013,22 @@ export class DesertFoliageManager {
     this.mountainHoleManager = new MountainHoleManager(this.scene, dustParticles, 'surface');
     // Wire rock check callback so mountain holes can detect when they pierce through outcroppings
     this.mountainHoleManager.setRockCheckCallback((pos: THREE.Vector3) => {
-      for (let i = 0; i < this.rockColliders.length; i++) {
-        const c = this.rockColliders[i];
-        if (!c.active || c.type !== 'mountain') continue;
-        const dx = pos.x - c.x;
-        const dz = pos.z - c.z;
-        if (Math.hypot(dx, dz) <= c.radius && pos.y >= c.y - 0.6 && pos.y <= c.y + c.height + 0.6) {
-          return true;
+      const cellSize = 28;
+      const cx = Math.floor(pos.x / cellSize);
+      const cz = Math.floor(pos.z / cellSize);
+      for (let dxCell = -1; dxCell <= 1; dxCell++) {
+        for (let dzCell = -1; dzCell <= 1; dzCell++) {
+          const cell = this.rockSpatialGrid.get(`${cx + dxCell},${cz + dzCell}`);
+          if (!cell) continue;
+          for (let i = 0; i < cell.length; i++) {
+            const c = cell[i];
+            if (!c.active || c.type !== 'mountain') continue;
+            const dx = pos.x - c.x;
+            const dz = pos.z - c.z;
+            if (dx * dx + dz * dz <= c.radius * c.radius && pos.y >= c.y - 0.6 && pos.y <= c.y + c.height + 0.6) {
+              return true;
+            }
+          }
         }
       }
       return false;
@@ -1141,6 +1151,7 @@ export class DesertFoliageManager {
     this.allOcotilloMeshes = [];
     this.allAgaveMeshes = [];
     this.rockColliders = [];
+    this.rockSpatialGrid.clear();
 
     // ==========================================
     // 1. Saguaro Cacti Generation (Instanced Mesh Merging by Quadrant)
@@ -1208,7 +1219,7 @@ export class DesertFoliageManager {
         getTerrainHeight(x + 1.2, z) - getTerrainHeight(x - 1.2, z),
         getTerrainHeight(x, z + 1.2) - getTerrainHeight(x, z - 1.2)
       ) / 2.4;
-      if (y > 45 || slope > 0.75 || isNearPeraltaCamp(x, z, 18)) continue;
+      if (isHighPointOrPeak(x, z, y, slope) || isNearPeraltaCamp(x, z, 18)) continue;
 
       const scale = 0.7 + Math.random() * 0.8;
       const hasLeftArm = Math.random() > 0.3;
@@ -1295,7 +1306,11 @@ export class DesertFoliageManager {
       const rx = (Math.random() - 0.5) * 360;
       const rz = (Math.random() - 0.5) * 360;
       const ry = getTerrainHeight(rx, rz);
-      if (ry > 50 || isNearPeraltaCamp(rx, rz, 16)) continue;
+      const slope = Math.hypot(
+        getTerrainHeight(rx + 1.2, rz) - getTerrainHeight(rx - 1.2, rz),
+        getTerrainHeight(rx, rz + 1.2) - getTerrainHeight(rx, rz - 1.2)
+      ) / 2.4;
+      if (isHighPointOrPeak(rx, rz, ry, slope) || isNearPeraltaCamp(rx, rz, 16)) continue;
 
       const bScale = 0.5 + Math.random() * 0.7;
       barrelByQuad[getQIdx(rx, rz)].push({
@@ -1388,6 +1403,12 @@ export class DesertFoliageManager {
         const rz = (Math.random() - 0.5) * 380;
         if (isNearPeraltaCamp(rx, rz, 20)) continue;
         const ry = getTerrainHeight(rx, rz);
+        const slope = Math.hypot(
+          getTerrainHeight(rx + 1.2, rz) - getTerrainHeight(rx - 1.2, rz),
+          getTerrainHeight(rx, rz + 1.2) - getTerrainHeight(rx, rz - 1.2)
+        ) / 2.4;
+        const distMalapais = Math.hypot(rx - 95, rz - (-205));
+        if (slope > 0.55 || (distMalapais < 28 && ry > 50)) continue;
 
         const scaleRoll = Math.random();
         let s = 1.0;
@@ -1515,6 +1536,11 @@ export class DesertFoliageManager {
       const rz = (Math.random() - 0.5) * 380;
       if (isNearPeraltaCamp(rx, rz, 14)) continue;
       const ry = getTerrainHeight(rx, rz);
+      const slope = Math.hypot(
+        getTerrainHeight(rx + 1.2, rz) - getTerrainHeight(rx - 1.2, rz),
+        getTerrainHeight(rx, rz + 1.2) - getTerrainHeight(rx, rz - 1.2)
+      ) / 2.4;
+      if (isHighPointOrPeak(rx, rz, ry, slope)) continue;
 
       const s = 0.65 + Math.random() * 0.75;
       scrubByQuad[getQIdx(rx, rz)].push({
@@ -1582,7 +1608,11 @@ export class DesertFoliageManager {
       const gx = (Math.random() - 0.5) * 360;
       const gz = (Math.random() - 0.5) * 360;
       const gy = getTerrainHeight(gx, gz);
-      if (gy > 42) continue;
+      const slope = Math.hypot(
+        getTerrainHeight(gx + 1.2, gz) - getTerrainHeight(gx - 1.2, gz),
+        getTerrainHeight(gx, gz + 1.2) - getTerrainHeight(gx, gz - 1.2)
+      ) / 2.4;
+      if (isHighPointOrPeak(gx, gz, gy, slope)) continue;
 
       const scale = 0.7 + Math.random() * 0.6;
       grassByQuad[getQIdx(gx, gz)].push({
@@ -1651,7 +1681,11 @@ export class DesertFoliageManager {
       const px = (Math.random() - 0.5) * 340;
       const pz = (Math.random() - 0.5) * 340;
       const py = getTerrainHeight(px, pz);
-      if (py > 38 || isNearPeraltaCamp(px, pz, 14)) continue;
+      const slope = Math.hypot(
+        getTerrainHeight(px + 1.2, pz) - getTerrainHeight(px - 1.2, pz),
+        getTerrainHeight(px, pz + 1.2) - getTerrainHeight(px, pz - 1.2)
+      ) / 2.4;
+      if (isHighPointOrPeak(px, pz, py, slope) || isNearPeraltaCamp(px, pz, 14)) continue;
 
       const scale = 0.75 + Math.random() * 0.5;
       pricklyByQuad[getQIdx(px, pz)].push({
@@ -1720,7 +1754,11 @@ export class DesertFoliageManager {
       const cx = (Math.random() - 0.5) * 320;
       const cz = (Math.random() - 0.5) * 320;
       const cy = getTerrainHeight(cx, cz);
-      if (cy > 36 || isNearPeraltaCamp(cx, cz, 14)) continue;
+      const slope = Math.hypot(
+        getTerrainHeight(cx + 1.2, cz) - getTerrainHeight(cx - 1.2, cz),
+        getTerrainHeight(cx, cz + 1.2) - getTerrainHeight(cx, cz - 1.2)
+      ) / 2.4;
+      if (isHighPointOrPeak(cx, cz, cy, slope) || isNearPeraltaCamp(cx, cz, 14)) continue;
 
       const scale = 0.75 + Math.random() * 0.45;
       chollaByQuad[getQIdx(cx, cz)].push({
@@ -1787,7 +1825,11 @@ export class DesertFoliageManager {
       const ox = (Math.random() - 0.5) * 360;
       const oz = (Math.random() - 0.5) * 360;
       const oy = getTerrainHeight(ox, oz);
-      if (oy > 45 || isNearPeraltaCamp(ox, oz, 16)) continue;
+      const slope = Math.hypot(
+        getTerrainHeight(ox + 1.2, oz) - getTerrainHeight(ox - 1.2, oz),
+        getTerrainHeight(ox, oz + 1.2) - getTerrainHeight(ox, oz - 1.2)
+      ) / 2.4;
+      if (isHighPointOrPeak(ox, oz, oy, slope) || isNearPeraltaCamp(ox, oz, 16)) continue;
 
       const scale = 0.8 + Math.random() * 0.5;
       ocotilloByQuad[getQIdx(ox, oz)].push({
@@ -1854,7 +1896,11 @@ export class DesertFoliageManager {
       const ax = (Math.random() - 0.5) * 350;
       const az = (Math.random() - 0.5) * 350;
       const ay = getTerrainHeight(ax, az);
-      if (ay > 48 || isNearPeraltaCamp(ax, az, 14)) continue;
+      const slope = Math.hypot(
+        getTerrainHeight(ax + 1.2, az) - getTerrainHeight(ax - 1.2, az),
+        getTerrainHeight(ax, az + 1.2) - getTerrainHeight(ax, az - 1.2)
+      ) / 2.4;
+      if (isHighPointOrPeak(ax, az, ay, slope) || isNearPeraltaCamp(ax, az, 14)) continue;
 
       const scale = 0.75 + Math.random() * 0.5;
       agaveByQuad[getQIdx(ax, az)].push({
@@ -1988,6 +2034,7 @@ export class DesertFoliageManager {
         const oz = Math.sin(angle) * r;
         if (isNearPeraltaCamp(ox, oz, 30)) continue;
         const oy = getTerrainHeight(ox, oz);
+        if (isHighPointOrPeak(ox, oz, oy)) continue;
 
         const baseScale = 0.85 + Math.random() * 1.35;
         let sx = baseScale;
@@ -2146,7 +2193,7 @@ export class DesertFoliageManager {
   private initSpringTrees() {
     const springLocations = [
       { id: 'hieroglyphic', name: 'Hieroglyphic Oasis Spring', x: -70, z: -20, treeCount: 8, poolRadius: 5.5 },
-      { id: 'salt_river', name: 'Salt River Fremont Cottonwoods', x: 0, z: -305, treeCount: 14, poolRadius: 14.0 },
+      { id: 'tortilla_creek', name: 'Tortilla Creek Fremont Cottonwoods', x: 0, z: -305, treeCount: 14, poolRadius: 14.0 },
       { id: 'needle', name: "Weaver's Needle Basin Tinaja", x: 68, z: 32, treeCount: 6, poolRadius: 4.5 },
       { id: 'peralta', name: 'Peralta Canyon Tinaja', x: -35, z: 75, treeCount: 6, poolRadius: 4.0 },
       { id: 'pistol_canyon', name: 'Pistol Canyon Bedrock Tinaja', x: -46, z: -130, treeCount: 6, poolRadius: 4.5 },
@@ -2188,6 +2235,11 @@ export class DesertFoliageManager {
         const tx = spring.x + Math.cos(angle) * dist;
         const tz = spring.z + Math.sin(angle) * dist;
         const ty = getTerrainHeight(tx, tz);
+        const slope = Math.hypot(
+          getTerrainHeight(tx + 1.2, tz) - getTerrainHeight(tx - 1.2, tz),
+          getTerrainHeight(tx, tz + 1.2) - getTerrainHeight(tx, tz - 1.2)
+        ) / 2.4;
+        if (ty > 26 || slope > 0.35 || isHighPointOrPeak(tx, tz, ty, slope)) continue;
 
         const isCottonwood = i % 2 === 0;
         const treeType = isCottonwood ? 'Riparian Cottonwood Tree' : 'Velvet Mesquite Tree';
@@ -2244,6 +2296,36 @@ export class DesertFoliageManager {
         });
       }
     });
+
+    // Build fast spatial hash grid for instant obstacle collision querying
+    this.rebuildRockSpatialGrid();
+  }
+
+  /**
+   * Rebuilds the 2D spatial hash grid partitioning all active rock and mountain colliders.
+   * This provides O(1) collision queries and eliminates linear scans over thousands of colliders.
+   */
+  public rebuildRockSpatialGrid(): void {
+    this.rockSpatialGrid.clear();
+    const cellSize = 28;
+    for (let i = 0; i < this.rockColliders.length; i++) {
+      const c = this.rockColliders[i];
+      const minCx = Math.floor((c.x - c.radius) / cellSize);
+      const maxCx = Math.floor((c.x + c.radius) / cellSize);
+      const minCz = Math.floor((c.z - c.radius) / cellSize);
+      const maxCz = Math.floor((c.z + c.radius) / cellSize);
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        for (let cz = minCz; cz <= maxCz; cz++) {
+          const key = `${cx},${cz}`;
+          let cell = this.rockSpatialGrid.get(key);
+          if (!cell) {
+            cell = [];
+            this.rockSpatialGrid.set(key, cell);
+          }
+          cell.push(c);
+        }
+      }
+    }
   }
 
   /**
@@ -2304,6 +2386,7 @@ export class DesertFoliageManager {
 
   /**
    * Checks horizontal distance and vertical overlap with all physical boulders, mountain outcroppings, and cacti
+   * Uses spatial grid indexing for near-instant O(1) proximity queries without frame hitches.
    * Supports de-penetration: if player started already embedded inside this obstacle, moving away is permitted.
    */
   public checkObstacleCollision(
@@ -2314,37 +2397,60 @@ export class DesertFoliageManager {
     startX?: number,
     startZ?: number
   ): { hit: boolean; collider?: WorldRockCollider; normal?: { x: number; z: number } } {
-    for (let i = 0; i < this.rockColliders.length; i++) {
-      const c = this.rockColliders[i];
-      if (!c.active) continue;
-      const combinedRadius = c.radius + playerRadius;
-      const dx = x - c.x;
-      if (Math.abs(dx) > combinedRadius) continue;
-      const dz = z - c.z;
-      if (Math.abs(dz) > combinedRadius) continue;
+    if (this.rockSpatialGrid.size === 0 && this.rockColliders.length > 0) {
+      this.rebuildRockSpatialGrid();
+    }
 
-      const distSq = dx * dx + dz * dz;
-      if (distSq < combinedRadius * combinedRadius) {
-        // De-penetration tolerance: If player started already embedded inside this collider,
-        // and candidate position is moving further away from the collider's center, ALLOW IT!
-        if (startX !== undefined && startZ !== undefined) {
-          const startDistSq = (startX - c.x) * (startX - c.x) + (startZ - c.z) * (startZ - c.z);
-          if (startDistSq < combinedRadius * combinedRadius && distSq > startDistSq) {
-            continue; // Player is stepping out of / away from the obstacle - do not block
+    const cellSize = 28;
+    const minCx = Math.floor((x - playerRadius) / cellSize);
+    const maxCx = Math.floor((x + playerRadius) / cellSize);
+    const minCz = Math.floor((z - playerRadius) / cellSize);
+    const maxCz = Math.floor((z + playerRadius) / cellSize);
+
+    // Fast tracking of visited IDs for colliders spanning grid boundaries
+    const visited = new Set<string>();
+
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cz = minCz; cz <= maxCz; cz++) {
+        const cell = this.rockSpatialGrid.get(`${cx},${cz}`);
+        if (!cell) continue;
+
+        for (let i = 0; i < cell.length; i++) {
+          const c = cell[i];
+          if (!c.active) continue;
+          if (visited.has(c.id)) continue;
+          visited.add(c.id);
+
+          const combinedRadius = c.radius + playerRadius;
+          const dx = x - c.x;
+          if (Math.abs(dx) > combinedRadius) continue;
+          const dz = z - c.z;
+          if (Math.abs(dz) > combinedRadius) continue;
+
+          const distSq = dx * dx + dz * dz;
+          if (distSq < combinedRadius * combinedRadius) {
+            // De-penetration tolerance: If player started already embedded inside this collider,
+            // and candidate position is moving further away from the collider's center, ALLOW IT!
+            if (startX !== undefined && startZ !== undefined) {
+              const startDistSq = (startX - c.x) * (startX - c.x) + (startZ - c.z) * (startZ - c.z);
+              if (startDistSq < combinedRadius * combinedRadius && distSq > startDistSq) {
+                continue; // Player is stepping out of / away from the obstacle - do not block
+              }
+            }
+
+            // Vertical check: is player within elevation range of this obstacle?
+            if (y >= c.y - 1.0 && y <= c.y + c.height + 0.6) {
+              const dist = Math.sqrt(distSq);
+              return {
+                hit: true,
+                collider: c,
+                normal: {
+                  x: dist > 0.0001 ? dx / dist : 1,
+                  z: dist > 0.0001 ? dz / dist : 0,
+                },
+              };
+            }
           }
-        }
-
-        // Vertical check: is player within elevation range of this obstacle?
-        if (y >= c.y - 1.0 && y <= c.y + c.height + 0.6) {
-          const dist = Math.sqrt(distSq);
-          return {
-            hit: true,
-            collider: c,
-            normal: {
-              x: dist > 0.0001 ? dx / dist : 1,
-              z: dist > 0.0001 ? dz / dist : 0,
-            },
-          };
         }
       }
     }

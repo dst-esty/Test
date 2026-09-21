@@ -102,7 +102,7 @@ const LANDMARK_ANCHORS: LandmarkAnchor[] = [
   {
     name: 'Malapais Mountain',
     x: 95,
-    z: -155,
+    z: -205,
     templates: [
       'Malapais Basalt Lode',
       'Black Crest Mountain Claim',
@@ -121,6 +121,30 @@ const LANDMARK_ANCHORS: LandmarkAnchor[] = [
       'Outlaw Hollow Lode',
       'Gunsmoke Arroyo Placer',
       'Pistol Creek Bench',
+    ],
+  },
+  {
+    name: 'Peters Mesa',
+    x: -105,
+    z: -155,
+    templates: [
+      'Peters Mesa Basalt Lode',
+      'Peter Henderson Old Pasture Claim',
+      'High Tableland Bonanza',
+      'Peters Rim Quartz Placer',
+      'Western Mesa Bench Claim',
+    ],
+  },
+  {
+    name: 'Peters Canyon',
+    x: -155,
+    z: -160,
+    templates: [
+      'Peters Canyon Wash Placer',
+      'Canyon Lake Drainage Lode',
+      'Salt River Gateway Claim',
+      'Peters Gulch Alluvial Diggings',
+      'Red Rim Gulch Claim',
     ],
   },
   {

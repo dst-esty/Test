@@ -36,103 +36,35 @@ export class TerritoryClaimService {
     return TerritoryClaimService.instance;
   }
 
-  private static STARTER_CLAIMS: TerritoryClaim[] = [
-    {
-      id: 'claim_historic_weavers_placer',
-      name: "Weaver's Needle Gold Placer",
-      ownerId: 'syndicate_land_office',
-      ownerName: 'Arizona Territorial Mining Syndicate',
-      x: 82.0,
-      z: -64.0,
-      radius: 38,
-      stakedAt: Date.now() - 86400000 * 12,
-      extractedGold: 14.5,
-      blocksDug: 28,
-      isWildcatOrigin: false,
-      forSale: true,
-      priceDollars: 320,
-      priceGoldOunces: 15.5,
-      description: 'Rich placer sand wash bordering the volcanic basalt needle. Proven heavy nugget yield.',
-      listedAt: Date.now() - 86400000 * 2,
-    },
-    {
-      id: 'claim_historic_black_rock_gulch',
-      name: 'Black Rock Quartz Lode #2',
-      ownerId: 'npc_old_pete',
-      ownerName: 'Dusty Pete',
-      x: -115.0,
-      z: 145.0,
-      radius: 42,
-      stakedAt: Date.now() - 86400000 * 25,
-      extractedGold: 22.0,
-      blocksDug: 54,
-      isWildcatOrigin: true,
-      forSale: true,
-      priceDollars: 450,
-      priceGoldOunces: 21.8,
-      description: 'Exposed milky quartz seam with visible electrum wire veins. Timbered entry collar included.',
-      listedAt: Date.now() - 86400000 * 1,
-    },
-    {
-      id: 'claim_historic_palo_verde_wash',
-      name: 'Palo Verde Wash Claim #4',
-      ownerId: 'npc_silas_thorne',
-      ownerName: 'Silas Thorne',
-      x: -45.0,
-      z: -160.0,
-      radius: 35,
-      stakedAt: Date.now() - 86400000 * 7,
-      extractedGold: 5.0,
-      blocksDug: 16,
-      isWildcatOrigin: false,
-      forSale: true,
-      priceDollars: 120,
-      priceGoldOunces: 5.8,
-      description: 'Shallow placer gravel bench near dry wash. Affordable starter claim for newly arrived prospectors.',
-      listedAt: Date.now() - 86400000 * 1,
-    },
-    {
-      id: 'claim_historic_peralta_arrastra',
-      name: 'Peralta Arrastra Lode #1',
-      ownerId: 'syndicate_land_office',
-      ownerName: 'Arizona Territorial Mining Syndicate',
-      x: 120.0,
-      z: 85.0,
-      radius: 40,
-      stakedAt: Date.now() - 86400000 * 40,
-      extractedGold: 18.0,
-      blocksDug: 36,
-      isWildcatOrigin: false,
-      forSale: true,
-      priceDollars: 260,
-      priceGoldOunces: 12.6,
-      description: 'Historic Spanish arrastra site with exposed crushed quartz tailings and rich ore veins in canyon wall.',
-      listedAt: Date.now() - 86400000 * 3,
-    },
-  ];
+  // Starter claims emptied for testing as requested
+  private static STARTER_CLAIMS: TerritoryClaim[] = [];
+  private static VERSION_KEY = 'superstition_claims_version';
+  private static CURRENT_VERSION = 'v2_cleared_for_testing';
 
   constructor() {
-    // 1. Attempt to load locally cached claims first for instantaneous reload restoration
+    // Check version: if old version, clear stale cache and active claim for testing
     try {
-      const cachedRaw = safeLocalStorage.getItem(TerritoryClaimService.STORAGE_KEY);
-      if (cachedRaw) {
-        const parsed: TerritoryClaim[] = JSON.parse(cachedRaw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((c) => {
-            if (c && c.id) this.claimsCache.set(c.id, c);
-          });
+      const currentVer = safeLocalStorage.getItem(TerritoryClaimService.VERSION_KEY);
+      if (currentVer !== TerritoryClaimService.CURRENT_VERSION) {
+        safeLocalStorage.removeItem(TerritoryClaimService.STORAGE_KEY);
+        safeLocalStorage.removeItem('superstition_active_claim');
+        safeLocalStorage.setItem(TerritoryClaimService.VERSION_KEY, TerritoryClaimService.CURRENT_VERSION);
+        this.claimsCache.clear();
+      } else {
+        const cachedRaw = safeLocalStorage.getItem(TerritoryClaimService.STORAGE_KEY);
+        if (cachedRaw) {
+          const parsed: TerritoryClaim[] = JSON.parse(cachedRaw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((c) => {
+              if (c && c.id) this.claimsCache.set(c.id, c);
+            });
+          }
         }
       }
     } catch (e) {
       console.warn('[TerritoryClaimService] Failed to parse local cached claims:', e);
     }
 
-    // 2. Pre-populate cache with initial starter patents if missing
-    for (const c of TerritoryClaimService.STARTER_CLAIMS) {
-      if (!this.claimsCache.has(c.id)) {
-        this.claimsCache.set(c.id, c);
-      }
-    }
     this.initRealtimeListeners();
   }
 
@@ -186,11 +118,7 @@ export class TerritoryClaimService {
 
           this.claimsCache = remoteMap;
 
-          // If no claims exist in database, seed historic frontier claims so market is lively
-          if (this.claimsCache.size === 0) {
-            this.seedHistoricMarketClaims();
-          }
-
+          // No starter claims auto-seeded (cleared for testing)
           this.notifyClaimsSubscribers();
         },
         (error) => {
@@ -257,18 +185,6 @@ export class TerritoryClaimService {
     }
   }
 
-  // Seed historic territorial patents on market if database is fresh
-  private async seedHistoricMarketClaims() {
-    for (const c of TerritoryClaimService.STARTER_CLAIMS) {
-      try {
-        await setDoc(doc(db, 'territory_claims', c.id), c);
-        this.claimsCache.set(c.id, c);
-      } catch (e) {
-        console.warn('Could not seed claim', c.id, e);
-      }
-    }
-  }
-
   public subscribe(cb: (claims: TerritoryClaim[]) => void): () => void {
     this.subscribers.add(cb);
     cb(Array.from(this.claimsCache.values()));
@@ -316,6 +232,29 @@ export class TerritoryClaimService {
       return true;
     } catch (err) {
       console.warn('[TerritoryClaimService] Non-fatal delete claim notice:', err);
+      return false;
+    }
+  }
+
+  // Clear all claims from local memory, storage, and remote Firestore (for testing)
+  public async clearAllClaims(): Promise<boolean> {
+    this.claimsCache.clear();
+    safeLocalStorage.removeItem(TerritoryClaimService.STORAGE_KEY);
+    safeLocalStorage.removeItem('superstition_active_claim');
+    this.saveToLocalStorage([]);
+    this.notifyClaimsSubscribers();
+    try {
+      const snap = await getDocs(collection(db, 'territory_claims'));
+      for (const d of snap.docs) {
+        await deleteDoc(doc(db, 'territory_claims', d.id));
+      }
+      const snapInf = await getDocs(collection(db, 'claim_infringements'));
+      for (const d of snapInf.docs) {
+        await deleteDoc(doc(db, 'claim_infringements', d.id));
+      }
+      return true;
+    } catch (err) {
+      console.warn('[TerritoryClaimService] Non-fatal notice during clearAllClaims:', err);
       return false;
     }
   }

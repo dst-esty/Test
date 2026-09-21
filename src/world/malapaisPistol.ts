@@ -2,26 +2,27 @@ import * as THREE from 'three';
 import { getTerrainHeight } from './terrain';
 
 /**
- * Builds the summit features for Malapais Mountain (USGS Elev. 4,229 ft / 1,289 m).
- * Topographically authentic:
- * - USGS Triangulation Benchmark brass geodetic survey monument & stone pillar
- * - Summit basalt rock cairn with wooden sighting staff
- * - Vintage brass surveyor's transit on wooden tripod aimed south at Weaver's Needle
- * - Hexagonal dark basalt caprock ("malpaís") columnar crags along the summit rim
+ * Builds the summit & massif features for Malapais Mountain (USGS Elev. 4,229 ft / 1,289 m).
+ * Topographically authentic Sonoran volcanic geology:
+ * - Main South Peak (USGS Elev. 4,229 ft): Triangulation Benchmark, historic cairn, vintage surveyor transit & columnar rim crags
+ * - North Peak (USGS Elev. 4,159 ft): Secondary summit cairn & northern rim columnar basalt palisades overlooking Boulder Canyon
+ * - Ancillary Volcanic Humps: West Rim Hump (3,850 ft), Southwest Hump (3,920 ft), and Peak 3509 Foothill Hump
+ * - West Side Canyon (Deep Basalt Chasm): Sheer vertical columnar basalt canyon walls, dry bedrock tinaja pour-off chute, and talus boulders
  */
 export function buildMalapaisMountainSummit(scene: THREE.Scene): THREE.Group {
   const group = new THREE.Group();
-  const summitX = 95;
-  const summitZ = -155;
-  const summitY = getTerrainHeight(summitX, summitZ);
-
-  group.position.set(summitX, summitY, summitZ);
 
   // Materials
   const basaltMat = new THREE.MeshStandardMaterial({
     color: 0x221e1c,
     roughness: 0.92,
     metalness: 0.1,
+  });
+
+  const weatheredBasaltMat = new THREE.MeshStandardMaterial({
+    color: 0x362c28,
+    roughness: 0.88,
+    metalness: 0.08,
   });
 
   const stonePillarMat = new THREE.MeshStandardMaterial({
@@ -40,7 +41,21 @@ export function buildMalapaisMountainSummit(scene: THREE.Scene): THREE.Group {
     roughness: 0.78,
   });
 
-  // 1. USGS Triangulation Station Monument
+  const talusMat = new THREE.MeshStandardMaterial({
+    color: 0x2e2723,
+    roughness: 0.95,
+  });
+
+  // =========================================================================
+  // 1. MAIN SOUTH PEAK (USGS Elev. 4,229 ft / 1,289 m) at (95, -205)
+  // =========================================================================
+  const southPeakGroup = new THREE.Group();
+  const southX = 95;
+  const southZ = -205;
+  const southY = getTerrainHeight(southX, southZ);
+  southPeakGroup.position.set(southX, southY, southZ);
+
+  // A. USGS Triangulation Station Monument
   const monumentPillar = new THREE.Mesh(
     new THREE.CylinderGeometry(0.45, 0.55, 1.0, 10),
     stonePillarMat
@@ -48,7 +63,7 @@ export function buildMalapaisMountainSummit(scene: THREE.Scene): THREE.Group {
   monumentPillar.position.set(0, 0.5, 0);
   monumentPillar.castShadow = true;
   monumentPillar.receiveShadow = true;
-  group.add(monumentPillar);
+  southPeakGroup.add(monumentPillar);
 
   // Stamped Brass Geodetic Benchmark Disk
   const benchmarkDisk = new THREE.Mesh(
@@ -56,17 +71,17 @@ export function buildMalapaisMountainSummit(scene: THREE.Scene): THREE.Group {
     brassMat
   );
   benchmarkDisk.position.set(0, 1.02, 0);
-  group.add(benchmarkDisk);
+  southPeakGroup.add(benchmarkDisk);
 
   // Crosshairs engraved into disk
   const crosshairH = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.008, 0.02), stonePillarMat);
   crosshairH.position.set(0, 1.041, 0);
-  group.add(crosshairH);
+  southPeakGroup.add(crosshairH);
   const crosshairV = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.008, 0.36), stonePillarMat);
   crosshairV.position.set(0, 1.041, 0);
-  group.add(crosshairV);
+  southPeakGroup.add(crosshairV);
 
-  // 2. Historic Basalt Summit Cairn (piled rocks marking 4,229 ft)
+  // B. Historic Basalt Summit Cairn (marking 4,229 ft)
   const cairnGroup = new THREE.Group();
   cairnGroup.position.set(2.8, 0, 1.5);
 
@@ -90,7 +105,7 @@ export function buildMalapaisMountainSummit(scene: THREE.Scene): THREE.Group {
     cairnGroup.add(rMesh);
   });
 
-  // Wooden Sighting Mast stuck in the cairn
+  // Wooden Sighting Mast
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.6, 6), woodTripodMat);
   mast.position.set(0, 1.8, 0);
   cairnGroup.add(mast);
@@ -101,14 +116,12 @@ export function buildMalapaisMountainSummit(scene: THREE.Scene): THREE.Group {
   flag.position.set(0.2, 2.8, 0);
   flag.rotation.y = 0.3;
   cairnGroup.add(flag);
+  southPeakGroup.add(cairnGroup);
 
-  group.add(cairnGroup);
-
-  // 3. Vintage Surveyor's Transit on Wooden Tripod
+  // C. Vintage Surveyor's Transit on Wooden Tripod Aimed South
   const transitGroup = new THREE.Group();
   transitGroup.position.set(-2.2, 0, 1.8);
 
-  // 3 Tripod Legs
   for (let angle = 0; angle < Math.PI * 2; angle += (Math.PI * 2) / 3) {
     const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.02, 1.45, 6), woodTripodMat);
     leg.position.set(Math.cos(angle) * 0.35, 0.68, Math.sin(angle) * 0.35);
@@ -118,21 +131,18 @@ export function buildMalapaisMountainSummit(scene: THREE.Scene): THREE.Group {
     transitGroup.add(leg);
   }
 
-  // Brass Transit Mount & Compass Rose Plate
   const transitHead = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.15, 12), brassMat);
   transitHead.position.set(0, 1.4, 0);
   transitGroup.add(transitHead);
 
-  // Optical Telescope Aimed South toward Weaver's Needle
   const telescope = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.65, 10), brassMat);
   telescope.position.set(0, 1.55, 0);
-  telescope.rotation.x = Math.PI / 2 + 0.12; // tilted slightly downward toward Weaver's Needle
+  telescope.rotation.x = Math.PI / 2 + 0.12;
   telescope.castShadow = true;
   transitGroup.add(telescope);
+  southPeakGroup.add(transitGroup);
 
-  group.add(transitGroup);
-
-  // 4. Hexagonal Basalt Column Clusters (Columnar Jointing along plateau edge)
+  // D. Hexagonal Basalt Columns along South Peak rim
   const columnOffsets = [
     { x: -5.5, z: -4.0, h: 2.8 },
     { x: -6.2, z: -3.2, h: 3.4 },
@@ -145,16 +155,251 @@ export function buildMalapaisMountainSummit(scene: THREE.Scene): THREE.Group {
   ];
 
   columnOffsets.forEach((col) => {
-    const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.55, col.h, 6),
-      basaltMat
-    );
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, col.h, 6), basaltMat);
     pillar.position.set(col.x, col.h / 2 - 0.4, col.z);
     pillar.rotation.y = Math.random() * Math.PI;
     pillar.castShadow = true;
     pillar.receiveShadow = true;
-    group.add(pillar);
+    southPeakGroup.add(pillar);
   });
+
+  group.add(southPeakGroup);
+
+  // =========================================================================
+  // 2. NORTH PEAK (USGS Elev. 4,159 ft / 1,268 m) at (96, -242)
+  // =========================================================================
+  const northPeakGroup = new THREE.Group();
+  const northX = 96;
+  const northZ = -242;
+  const northY = getTerrainHeight(northX, northZ);
+  northPeakGroup.position.set(northX, northY, northZ);
+
+  // Secondary Summit Rock Cairn
+  const northCairn = new THREE.Group();
+  for (let i = 0; i < 7; i++) {
+    const r = 0.5 - i * 0.05;
+    const cMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 1), basaltMat);
+    cMesh.position.set((Math.random() - 0.5) * 0.2, i * 0.32 + 0.2, (Math.random() - 0.5) * 0.2);
+    cMesh.rotation.set(Math.random(), Math.random(), Math.random());
+    cMesh.castShadow = true;
+    northCairn.add(cMesh);
+  }
+  // Weathered wooden cedar marker post
+  const northMarker = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.8, 6), woodTripodMat);
+  northMarker.position.set(0, 1.4, 0);
+  northMarker.castShadow = true;
+  northCairn.add(northMarker);
+  northPeakGroup.add(northCairn);
+
+  // Northern Escarpment Columnar Crags overlooking Boulder Canyon
+  const northCrags = [
+    { x: -3.5, z: -5.0, h: 4.2 },
+    { x: 0.0, z: -6.5, h: 4.8 },
+    { x: 3.2, z: -5.2, h: 3.8 },
+    { x: 5.5, z: -3.0, h: 3.4 },
+    { x: -5.2, z: -2.8, h: 3.6 },
+  ];
+  northCrags.forEach((crag) => {
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.65, crag.h, 6), weatheredBasaltMat);
+    p.position.set(crag.x, crag.h / 2 - 0.5, crag.z);
+    p.rotation.y = Math.random() * Math.PI;
+    p.castShadow = true;
+    p.receiveShadow = true;
+    northPeakGroup.add(p);
+  });
+
+  group.add(northPeakGroup);
+
+  // =========================================================================
+  // 3. ANCILLARY VOLCANIC HUMPS (Subsidiary Volcanic Knolls & Ridges)
+  // =========================================================================
+  // A. West Rim Ancillary Hump (Elev. 3,850 ft) at (64, -188)
+  const westHumpGroup = new THREE.Group();
+  const westHX = 64;
+  const westHZ = -188;
+  const westHY = getTerrainHeight(westHX, westHZ);
+  westHumpGroup.position.set(westHX, westHY, westHZ);
+
+  // Volcanic basalt knoll spires & outcrop
+  const westHumpPillars = [
+    { x: 0, z: 0, h: 3.6, r: 0.8 },
+    { x: -1.8, z: 1.2, h: 2.8, r: 0.6 },
+    { x: 1.5, z: -1.0, h: 3.2, r: 0.65 },
+    { x: -2.5, z: -1.5, h: 2.4, r: 0.55 },
+  ];
+  westHumpPillars.forEach((p) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(p.r * 0.9, p.r, p.h, 6), basaltMat);
+    m.position.set(p.x, p.h / 2 - 0.3, p.z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    westHumpGroup.add(m);
+  });
+  // Trail cairn on West Rim Hump
+  const westHumpCairn = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 6), weatheredBasaltMat);
+  westHumpCairn.position.set(0.8, 0.45, 1.4);
+  westHumpGroup.add(westHumpCairn);
+  group.add(westHumpGroup);
+
+  // B. Southwest Ancillary Hump (Elev. 3,920 ft) at (74, -228)
+  const swHumpGroup = new THREE.Group();
+  const swHX = 74;
+  const swHZ = -228;
+  const swHY = getTerrainHeight(swHX, swHZ);
+  swHumpGroup.position.set(swHX, swHY, swHZ);
+
+  const swPillars = [
+    { x: 0, z: 0, h: 3.8, r: 0.85 },
+    { x: 1.6, z: 1.4, h: 2.9, r: 0.6 },
+    { x: -1.5, z: -1.2, h: 3.1, r: 0.65 },
+  ];
+  swPillars.forEach((p) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(p.r * 0.88, p.r, p.h, 6), basaltMat);
+    m.position.set(p.x, p.h / 2 - 0.3, p.z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    swHumpGroup.add(m);
+  });
+  group.add(swHumpGroup);
+
+  // C. Peak 3509 Foothill Hump (Elev. 3,509 ft) at (44, -182)
+  const p3509Group = new THREE.Group();
+  const p3509X = 44;
+  const p3509Z = -182;
+  const p3509Y = getTerrainHeight(p3509X, p3509Z);
+  p3509Group.position.set(p3509X, p3509Y, p3509Z);
+
+  const p3509Boulders = [
+    { x: 0, y: 0.6, z: 0, r: 1.2 },
+    { x: -1.2, y: 0.4, z: 0.8, r: 0.8 },
+    { x: 1.0, y: 0.5, z: -0.7, r: 0.9 },
+  ];
+  p3509Boulders.forEach((b) => {
+    const m = new THREE.Mesh(new THREE.DodecahedronGeometry(b.r, 1), weatheredBasaltMat);
+    m.position.set(b.x, b.y, b.z);
+    m.rotation.set(Math.random(), Math.random(), Math.random());
+    m.castShadow = true;
+    p3509Group.add(m);
+  });
+  group.add(p3509Group);
+
+  // =========================================================================
+  // 4. MALAPAIS WEST SIDE CANYON (Deep Basalt Chasm & Dry Tinaja Chute)
+  // Splits the western rockface between the ancillary humps from x: 82 to x: 26
+  // =========================================================================
+  const canyonGroup = new THREE.Group();
+
+  // A. North Rim Palisades (Towering Columnar Basalt Cliff Walls)
+  const northRimPillars = [
+    { x: 78, z: -198, h: 5.5, r: 0.8 },
+    { x: 72, z: -197, h: 6.2, r: 0.9 },
+    { x: 65, z: -196, h: 6.8, r: 0.95 },
+    { x: 58, z: -195, h: 6.0, r: 0.9 },
+    { x: 50, z: -196, h: 5.4, r: 0.85 },
+    { x: 42, z: -197, h: 4.8, r: 0.8 },
+    { x: 35, z: -198, h: 4.0, r: 0.75 },
+  ];
+  northRimPillars.forEach((p) => {
+    const y = getTerrainHeight(p.x, p.z);
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(p.r * 0.9, p.r, p.h, 6), basaltMat);
+    col.position.set(p.x, y + p.h / 2 - 0.8, p.z);
+    col.rotation.y = Math.random() * Math.PI;
+    col.castShadow = true;
+    col.receiveShadow = true;
+    canyonGroup.add(col);
+  });
+
+  // B. South Rim Palisades (Guarding the southern cliff face)
+  const southRimPillars = [
+    { x: 80, z: -214, h: 5.2, r: 0.85 },
+    { x: 74, z: -215, h: 6.0, r: 0.9 },
+    { x: 67, z: -216, h: 6.5, r: 0.95 },
+    { x: 60, z: -215, h: 6.2, r: 0.9 },
+    { x: 52, z: -214, h: 5.6, r: 0.85 },
+    { x: 44, z: -215, h: 5.0, r: 0.8 },
+    { x: 36, z: -216, h: 4.2, r: 0.75 },
+  ];
+  southRimPillars.forEach((p) => {
+    const y = getTerrainHeight(p.x, p.z);
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(p.r * 0.9, p.r, p.h, 6), basaltMat);
+    col.position.set(p.x, y + p.h / 2 - 0.8, p.z);
+    col.rotation.y = Math.random() * Math.PI;
+    col.castShadow = true;
+    col.receiveShadow = true;
+    canyonGroup.add(col);
+  });
+
+  // C. Headwall Dry Tinaja Chute & Pour-Off (at x: 82, z: -206)
+  // Slickrock water chute where flash flood waters plunge into the chasm
+  const chuteX = 82;
+  const chuteZ = -206;
+  const chuteY = getTerrainHeight(chuteX, chuteZ);
+
+  const pourOffGroup = new THREE.Group();
+  pourOffGroup.position.set(chuteX, chuteY, chuteZ);
+
+  // Bedrock amphitheater bowl
+  const bowlMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(3.0, 1.8, 1.2, 12, 1, true),
+    weatheredBasaltMat
+  );
+  bowlMesh.position.set(0, 0.4, 0);
+  bowlMesh.castShadow = true;
+  bowlMesh.receiveShadow = true;
+  pourOffGroup.add(bowlMesh);
+
+  // Scoured pothole tinaja rim rocks
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+    const tr = new THREE.Mesh(new THREE.DodecahedronGeometry(0.55, 1), basaltMat);
+    tr.position.set(Math.cos(a) * 2.2, 0.4, Math.sin(a) * 2.2);
+    tr.castShadow = true;
+    pourOffGroup.add(tr);
+  }
+  canyonGroup.add(pourOffGroup);
+
+  // D. Canyon Floor Talus & Scree Boulders (along the rugged wash bottom)
+  const canyonFloorPoints = [
+    { x: 74, z: -206, r: 1.1 },
+    { x: 68, z: -205, r: 1.4 },
+    { x: 62, z: -207, r: 1.2 },
+    { x: 55, z: -206, r: 1.5 },
+    { x: 48, z: -205, r: 1.3 },
+    { x: 40, z: -207, r: 1.1 },
+    { x: 32, z: -206, r: 0.95 },
+  ];
+  canyonFloorPoints.forEach((pt) => {
+    const y = getTerrainHeight(pt.x, pt.z);
+    const boulder = new THREE.Mesh(new THREE.DodecahedronGeometry(pt.r, 1), talusMat);
+    boulder.position.set(pt.x, y + pt.r * 0.7, pt.z);
+    boulder.rotation.set(Math.random(), Math.random(), Math.random());
+    boulder.castShadow = true;
+    boulder.receiveShadow = true;
+    canyonGroup.add(boulder);
+
+    // Accompanying shattered basalt scree cluster
+    for (let s = 0; s < 3; s++) {
+      const scree = new THREE.Mesh(new THREE.DodecahedronGeometry(pt.r * 0.35, 0), basaltMat);
+      scree.position.set(
+        pt.x + (Math.random() - 0.5) * 2.5,
+        y + pt.r * 0.25,
+        pt.z + (Math.random() - 0.5) * 2.5
+      );
+      scree.rotation.set(Math.random(), Math.random(), Math.random());
+      scree.castShadow = true;
+      canyonGroup.add(scree);
+    }
+  });
+
+  // E. West Rim Overlook Crag (Projecting basalt promontory at 62, -196)
+  const overlookX = 62;
+  const overlookZ = -196;
+  const overlookY = getTerrainHeight(overlookX, overlookZ);
+  const overlookCrag = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.4, 2.0), weatheredBasaltMat);
+  overlookCrag.position.set(overlookX, overlookY + 0.6, overlookZ);
+  overlookCrag.rotation.y = 0.2;
+  overlookCrag.castShadow = true;
+  canyonGroup.add(overlookCrag);
+
+  group.add(canyonGroup);
 
   scene.add(group);
   return group;

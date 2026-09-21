@@ -289,7 +289,7 @@ export interface PlayerState {
     waterOz?: number;
     woodPlanks?: number;
   };
-  wellRestedUntil?: number; // timestamp until when well-rested buff applies (+stamina, slower thirst)
+  worldScaleMode?: '1:1' | 'compact'; // '1:1' authentic USGS Quadrangle scale vs 'compact' frontier scale
 }
 
 export type GraphicsQuality = 'performance' | 'balanced' | 'high';

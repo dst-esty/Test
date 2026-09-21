@@ -1,6 +1,6 @@
 import React from 'react';
-import { Compass, Sun, Moon, MapPin, Flame, Mountain } from 'lucide-react';
-import { getUsgsElevation } from '../world/superstitionTopography';
+import { Compass, Sun, Moon, MapPin, Flame, Mountain, Globe, Eye } from 'lucide-react';
+import { getUsgsElevation, formatUsgsDistance, WorldScaleMode, getFourPeaksSightlineStatus } from '../world/superstitionTopography';
 
 interface CompassHUDProps {
   yaw: number; // in radians
@@ -12,6 +12,8 @@ interface CompassHUDProps {
   isInsideMine: boolean;
   onToggleDayNight?: () => void;
   playerCoords?: { x: number; y?: number; z: number };
+  worldScaleMode?: WorldScaleMode;
+  onToggleWorldScaleMode?: () => void;
 }
 
 export const CompassHUD: React.FC<CompassHUDProps> = ({
@@ -24,6 +26,8 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   isInsideMine,
   onToggleDayNight,
   playerCoords,
+  worldScaleMode = '1:1',
+  onToggleWorldScaleMode,
 }) => {
   // Convert yaw to degrees (0 to 360)
   const deg = Math.round(((-yaw * 180) / Math.PI + 360) % 360);
@@ -40,6 +44,12 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
   const isNight = timeOfDay < 5.2 || timeOfDay > 20.2;
   const isSunset = timeOfDay >= 17.5 && timeOfDay <= 20.2;
+
+  // Dynamic Four Peaks sightline calculations based on player position
+  const sightline = playerCoords && !isInsideMine
+    ? getFourPeaksSightlineStatus(playerCoords.x, playerCoords.z)
+    : null;
+  const isLookingNorth = deg >= 335 || deg <= 45;
 
   return (
     <div className="pointer-events-none absolute top-3 left-0 right-0 z-20 flex flex-col items-center select-none px-4">
@@ -88,15 +98,28 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
         {nearestLandmarkName && (
           <div className="flex items-center gap-1.5 text-xs">
             <MapPin className="w-3.5 h-3.5 text-amber-400" />
-            <span className="max-w-[130px] sm:max-w-[200px] truncate text-stone-200">
+            <span className="max-w-[130px] sm:max-w-[180px] truncate text-stone-200">
               {nearestLandmarkName}
             </span>
             {nearestLandmarkDist !== undefined && (
-              <span className="text-amber-400/90 font-mono text-[11px]">
-                ({Math.round(nearestLandmarkDist)}m)
+              <span className="text-amber-400/90 font-mono text-[11px]" title={`Distance in ${worldScaleMode === '1:1' ? '1:1 USGS Scale' : 'Compact Scale'}`}>
+                ({formatUsgsDistance(nearestLandmarkDist, worldScaleMode).formatted})
               </span>
             )}
           </div>
+        )}
+
+        {/* 1:1 Scale Mode Switcher Badge */}
+        {onToggleWorldScaleMode && (
+          <button
+            type="button"
+            onClick={onToggleWorldScaleMode}
+            className="pointer-events-auto flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wide transition-all cursor-pointer border shadow-sm bg-amber-950/70 hover:bg-amber-900/90 text-amber-300 border-amber-600/50"
+            title={`Active: ${worldScaleMode === '1:1' ? '1:1 True USGS Quadrangle Scale (Real Kilometers)' : 'Compact Exploration Scale'}. Click to toggle scale mode.`}
+          >
+            <Globe className="w-3 h-3 text-amber-400" />
+            <span>{worldScaleMode === '1:1' ? '1:1 USGS' : 'Compact'}</span>
+          </button>
         )}
 
         {/* Global Coordinates & Endless Territory Indicator */}
@@ -112,10 +135,10 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
             >
               <Mountain className="w-3 h-3 text-amber-400" />
               <span className="font-semibold text-amber-300">
-                {getUsgsElevation(playerCoords.y ?? 0).feet.toLocaleString()} ft
+                {getUsgsElevation(playerCoords.y ?? 0, playerCoords.x, playerCoords.z).feet.toLocaleString()} ft
               </span>
               <span className="text-[10px] text-amber-500/70 hidden md:inline">
-                ({getUsgsElevation(playerCoords.y ?? 0).meters}m)
+                ({getUsgsElevation(playerCoords.y ?? 0, playerCoords.x, playerCoords.z).meters}m)
               </span>
             </span>
             {Math.hypot(playerCoords.x, playerCoords.z) > 340 && (
@@ -156,6 +179,31 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
         </div>
         <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-0.5 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
       </div>
+
+      {/* Dynamic Four Peaks Sightline & Alignment Status */}
+      {sightline && (isLookingNorth || sightline.isAlignedAsOne) && (
+        <div className="mt-1.5 flex items-center gap-2">
+          {sightline.isAlignedAsOne ? (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/95 text-amber-200 border border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.4)] text-[11px] font-serif font-bold tracking-wide animate-pulse">
+              <span className="text-amber-400">✦</span>
+              <span>FOUR PEAKS ALIGNED AS ONE</span>
+              <span className="text-[9px] font-mono text-amber-300 bg-stone-900/90 px-1.5 py-0.2 rounded border border-amber-600/50">
+                Waltz Dutchman Transit
+              </span>
+            </div>
+          ) : isLookingNorth ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-stone-900/85 backdrop-blur-sm text-stone-300 border border-amber-900/50 text-[10px] font-mono shadow-sm">
+              <Mountain className="w-3 h-3 text-amber-400" />
+              <span className="text-amber-200 font-semibold">Four Peaks:</span>
+              <span className="text-stone-300">{sightline.spreadDeg.toFixed(1)}° crown</span>
+              <span className="text-stone-500">|</span>
+              <span className="text-amber-400/90">
+                Transit: {sightline.perpDistanceM < 150 ? `${Math.round(sightline.perpDistanceM)}m away` : `${(sightline.perpDistanceM / 1000).toFixed(1)}km`}
+              </span>
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 };

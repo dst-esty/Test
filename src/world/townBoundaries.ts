@@ -1,13 +1,13 @@
 /**
  * Historic Town of Tortilla Flat settlement boundary and municipal jurisdiction definitions.
  * Staking mining claims, patent surveys, shaft sinking, and mine structures are prohibited
- * within the settlement limits and its riverfront commercial terrace under frontier municipal law.
+ * within the settlement limits and its creekfront commercial terrace under frontier municipal law.
  */
 
 export const TORTILLA_FLAT_BOUNDS = {
   minX: -48,
   maxX: 48,
-  minZ: -315, // North boundary at Salt River boat landing and freight depot
+  minZ: -315, // North boundary at Tortilla Creek crossing and freight depot
   maxZ: -220, // South boundary at trailhead entrance
   centerX: 0,
   centerZ: -252,

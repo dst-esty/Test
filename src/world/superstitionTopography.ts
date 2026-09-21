@@ -58,14 +58,50 @@ export const REAL_USGS_TOPOGRAPHY: UsgsTopographicFeature[] = [
   },
   {
     id: 'malapais_mountain',
-    name: 'Malapais Mountain',
+    name: 'Malapais Mountain (South Peak)',
     gnisName: 'Malapais Mountain',
     elevationFt: 4229,
     elevationMeters: 1289,
     quadrangle: "Weavers Needle 7.5' Quad",
     geology: 'Dark Basaltic Andesite & Weathered Volcanic Malpaís Caprock',
     historicalNotes: 'Dominant northern massif historically known as "Black Mountain". Its dark volcanic caprock forms a key landmark overlooking Needle Canyon.',
-    position: { x: 95, z: -155 },
+    position: { x: 95, z: -205 },
+    featureCategory: 'summit',
+  },
+  {
+    id: 'malapais_north_peak',
+    name: 'Malapais Mountain (North Peak)',
+    gnisName: 'Malapais Mountain North',
+    elevationFt: 4159,
+    elevationMeters: 1268,
+    quadrangle: "Weavers Needle 7.5' Quad",
+    geology: 'Basalt Caprock Dome & Northern Escarpment',
+    historicalNotes: 'Secondary northern summit of the Malapais massif overlooking Boulder Canyon and the Salt River drainage.',
+    position: { x: 96, z: -242 },
+    featureCategory: 'summit',
+  },
+  {
+    id: 'malapais_west_canyon',
+    name: 'Malapais West Side Canyon',
+    gnisName: 'Malapais West Canyon',
+    elevationFt: 2680,
+    elevationMeters: 817,
+    quadrangle: "Weavers Needle 7.5' Quad",
+    geology: 'Deep Columnar Basalt Chasm & Dry Tinaja Chute',
+    historicalNotes: 'Dramatic vertical side canyon cutting deep into the western basalt rockface between the ancillary humps.',
+    position: { x: 55, z: -206 },
+    featureCategory: 'canyon',
+  },
+  {
+    id: 'malapais_west_hump',
+    name: 'Malapais West Rim Hump',
+    gnisName: 'Malapais West Knoll',
+    elevationFt: 3850,
+    elevationMeters: 1173,
+    quadrangle: "Weavers Needle 7.5' Quad",
+    geology: 'Volcanic Basalt Knoll & Overlook Crag',
+    historicalNotes: 'Prominent ancillary hump rising above the northern palisades of the West Side Canyon.',
+    position: { x: 64, z: -188 },
     featureCategory: 'summit',
   },
   {
@@ -112,8 +148,8 @@ export const REAL_USGS_TOPOGRAPHY: UsgsTopographicFeature[] = [
     elevationMeters: 1113,
     quadrangle: "Weavers Needle 7.5' Quad",
     geology: 'Flat-Topped Basalt Mesa with Resistant Caprock',
-    historicalNotes: 'Basalt tableland between Boulder Canyon and Needle Canyon. Famous for historical Spanish arrastras, stone map inscriptions, and panoramic vista.',
-    position: { x: 35, z: 75 },
+    historicalNotes: 'Basalt tableland overlooking Boulder Canyon and Needle Canyon, north of Weaver\'s Needle and west of La Barge Canyon. Famous for historical Spanish arrastras, stone map inscriptions, and panoramic vista.',
+    position: { x: 25, z: -45 },
     featureCategory: 'mesa',
   },
   {
@@ -171,8 +207,8 @@ export const REAL_USGS_TOPOGRAPHY: UsgsTopographicFeature[] = [
     elevationFt: 1780,
     elevationMeters: 542,
     quadrangle: "Mormon Flat Dam 7.5' Quad",
-    geology: 'River Alluvial Terrace along Tortilla Creek & Salt River Canyon',
-    historicalNotes: 'Founded in 1879 along the historic Apache Trail (AZ-88) as a stagecoach stop and freight camp during the construction of Theodore Roosevelt Dam.',
+    geology: 'Alluvial Canyon Terrace along Tortilla Creek in Tortilla Canyon',
+    historicalNotes: 'Founded in 1879 along Tortilla Creek on the historic Apache Trail (AZ-88) as a stagecoach stop and freight camp during the construction of Theodore Roosevelt Dam.',
     position: { x: 0, z: -252 },
     featureCategory: 'settlement',
   },
@@ -212,31 +248,292 @@ export const REAL_USGS_TOPOGRAPHY: UsgsTopographicFeature[] = [
     position: { x: -180, z: -160 },
     featureCategory: 'mesa',
   },
+  {
+    id: 'peters_mesa',
+    name: 'Peters Mesa',
+    gnisName: 'Peters Mesa',
+    elevationFt: 3500,
+    elevationMeters: 1067,
+    quadrangle: "Mormon Flat Dam 7.5' Quad",
+    geology: 'Broad Volcanic Basalt Tableland with Rimrock Escarpments',
+    historicalNotes: 'Expansive flat-topped volcanic mesa east of La Barge Canyon and Charlebois Spring. Overlooks Squaw Box Canyon on its northwest rim and Peters Canyon to the northeast.',
+    position: { x: 135, z: -125 },
+    featureCategory: 'mesa',
+  },
+  {
+    id: 'la_barge_canyon',
+    name: 'La Barge Canyon & Upper Box',
+    gnisName: 'La Barge Canyon',
+    elevationFt: 2240,
+    elevationMeters: 683,
+    quadrangle: "Weavers Needle 7.5' Quad / Mormon Flat Dam 7.5' Quad",
+    geology: 'Deep Volcanic Ash-Flow Tuff Gorge, Bedrock Tinajas, & Polished Boulders',
+    historicalNotes: 'The primary perennial waterway and central canyon through the Superstition Wilderness, passing Charlebois Spring, receiving Squaw Box Canyon, and narrowing into the sheer Upper La Barge Box toward Canyon Lake.',
+    position: { x: 60, z: -135 },
+    featureCategory: 'canyon',
+  },
+  {
+    id: 'squaw_canyon',
+    name: 'Squaw Canyon (Squaw Box Canyon)',
+    gnisName: 'Squaw Canyon',
+    elevationFt: 2360,
+    elevationMeters: 719,
+    quadrangle: "Weavers Needle 7.5' Quad (N33°28'24\" W111°21'47\")",
+    geology: 'Sheer Box Canyon with Vertical Dacite Palisade Walls & Tinajas',
+    historicalNotes: 'Steep, dramatic box canyon descending from the northwest rim of Peters Mesa directly into La Barge Canyon. Historic 1970s campsite of Robert "Crazy Jake" Jacob and his notorious cliffside pack trail ascending to Peters Mesa.',
+    position: { x: 92, z: -133 },
+    featureCategory: 'canyon',
+  },
+  {
+    id: 'peters_canyon',
+    name: 'Peters Canyon (Pete\'s Canyon)',
+    gnisName: 'Peters Canyon',
+    elevationFt: 2080,
+    elevationMeters: 634,
+    quadrangle: "Mormon Flat Dam 7.5' Quad",
+    geology: 'Rugged Boulder-Choked Canyon Wash with Natural Caverns & Tinajas',
+    historicalNotes: 'Rugged canyon draining the northeast side of Peters Mesa down into Tortilla Creek near Tortilla Flat. Followed by Peters Trail (#105) and home to the famous Peters Cave.',
+    position: { x: 85, z: -205 },
+    featureCategory: 'canyon',
+  },
+  {
+    id: 'peters_cave',
+    name: 'Peters Cave (Peters Canyon)',
+    gnisName: 'Peters Cave',
+    elevationFt: 2150,
+    elevationMeters: 655,
+    quadrangle: "Mormon Flat Dam 7.5' Quad",
+    geology: 'Natural Volcanic Tuff Solution Cavern & Deep Bedrock Overhang',
+    historicalNotes: 'Historic natural cave hollowed into the volcanic cliff wall along Peters Canyon, used by Native Americans, early cattle drovers, and 19th-century Dutch hunters searching for Waltz\'s lost mine.',
+    position: { x: 85, z: -205 },
+    featureCategory: 'canyon',
+  },
+  {
+    id: 'four_peaks',
+    name: 'Four Peaks (Mazatzal Mountains)',
+    gnisName: 'Four Peaks / Browns Peak',
+    elevationFt: 7657,
+    elevationMeters: 2334,
+    quadrangle: "Four Peaks 7.5' Quad",
+    geology: 'Proterozoic Mazatzal Quartzite (1.7 Ga) & Hydrothermal Amethyst Vein',
+    historicalNotes: 'Dominant 4-summited crown in the Mazatzal Range north across the Salt River (highest point Brown\'s Peak at 7,657 ft). Keystone of Waltz\'s Lost Dutchman sightline clue: when viewed from the high ridge above the mine, the four peaks line up to appear as a single solitary mountain peak.',
+    position: { x: 286, z: -606 },
+    featureCategory: 'summit',
+  },
 ];
 
 /**
- * Calculates authentic real-world USGS elevation in feet and meters based on terrain Y height.
- * Accurately calibrated to real-world Superstition quadrangle topography:
- * - Salt River surface (Y = 2.8m): ~1,660 ft (506 m)
- * - Tortilla Flat terrace (Y = 7.5m): ~1,780 ft (542 m)
- * - Mid-elevation canyon floors (Y = 16-24m): ~2,400-2,800 ft (730-850 m)
- * - Fremont Saddle & Black Top Mesa (Y = 40-44m): ~3,650-3,800 ft (1,110-1,160 m)
- * - Weaver's Needle base & Malapais cap (Y = 58-62m): ~4,550-4,700 ft (1,385-1,430 m)
- * - Superstition Peak crest (Y = 68.5m): ~5,057 ft (1,541 m)
+ * Authentic Four Peaks Lost Dutchman Sightline Alignment Calculator
+ *
+ * Ground truth transit line passes through the High Ridge above the mine (150, 60)
+ * pointing along azimuth 11.5° (NNE) toward the 4 summits of Four Peaks.
  */
-export function getUsgsElevation(terrainHeightY: number): {
+export interface FourPeaksSightlineStatus {
+  isAlignedAsOne: boolean; // True if within 0.35° of collinear alignment
+  spreadDeg: number;       // Angular spread between summits (0.0° when aligned as one)
+  perpDistanceM: number;   // Distance in meters to the Dutchman Transit Line
+  transitAzimuthDeg: number; // Azimuth looking toward the summits (~11.5°)
+  statusLabel: string;
+}
+
+export function getFourPeaksSightlineStatus(
+  playerX: number,
+  playerZ: number
+): FourPeaksSightlineStatus {
+  // Transit anchor: High Ridge above the Lost Dutchman Mine
+  const anchorX = 150;
+  const anchorZ = 60;
+  const bearingRad = (11.5 * Math.PI) / 180;
+  const dirX = Math.sin(bearingRad);  // 0.19937
+  const dirZ = -Math.cos(bearingRad); // -0.97992
+
+  // The 4 summits positioned along the true strike:
+  const centerDist = 680;
+  const amethystOffset = -90;
+  const brownsOffset = 90;
+
+  const amethystX = anchorX + dirX * (centerDist + amethystOffset);
+  const amethystZ = anchorZ + dirZ * (centerDist + amethystOffset);
+  const brownsX = anchorX + dirX * (centerDist + brownsOffset);
+  const brownsZ = anchorZ + dirZ * (centerDist + brownsOffset);
+
+  // Azimuths from player to South and North summits
+  const angAmethyst = (Math.atan2(amethystX - playerX, -(amethystZ - playerZ)) * 180) / Math.PI;
+  const angBrowns = (Math.atan2(brownsX - playerX, -(brownsZ - playerZ)) * 180) / Math.PI;
+
+  const spreadDeg = Math.abs(angBrowns - angAmethyst);
+
+  // Perpendicular distance to the Dutchman Transit Line
+  const perpDist = Math.abs((playerX - anchorX) * (-dirZ) - (playerZ - anchorZ) * dirX);
+
+  const isAlignedAsOne = spreadDeg <= 0.35 || perpDist <= 4.5;
+
+  let statusLabel = '';
+  if (isAlignedAsOne) {
+    statusLabel = '✦ ALIGNED AS ONE (Dutchman Transit Line)';
+  } else if (spreadDeg < 2.0) {
+    statusLabel = `▲ Crown Fanning (${spreadDeg.toFixed(1)}° spread)`;
+  } else {
+    statusLabel = `▲ 4 Summits Visible (${spreadDeg.toFixed(1)}° crown)`;
+  }
+
+  return {
+    isAlignedAsOne,
+    spreadDeg,
+    perpDistanceM: perpDist,
+    transitAzimuthDeg: 11.5,
+    statusLabel,
+  };
+}
+
+/**
+ * Authentic 1:1 USGS Superstition Mountain Quadrangle Horizontal Scale Calibration.
+ *
+ * In the USGS 7.5-minute topographic survey:
+ * - Distance from Peralta Trailhead (-120, -120) to Weaver's Needle (80, 15) is 4.20 km (2.61 miles / 4,200 meters).
+ * - Distance from Weaver's Needle to Tortilla Flat (0, -252) is 4.85 km straight-line (10.8 km pack trail via Canyon).
+ * - Distance from Peralta Trailhead to Superstition Peak (-180, 65) is 3.82 km (2.37 miles).
+ *
+ * In local engine coordinate space, Peralta -> Weaver's Needle is hypot(200, 135) = 241.3 units.
+ * Therefore, 1 coordinate unit represents 17.406 real-world meters (1:17.4 simulation ratio).
+ */
+export const USGS_1TO1_HORIZONTAL_SCALE = 17.406;
+
+export type WorldScaleMode = '1:1' | 'compact';
+
+export interface FormattedDistance {
+  meters: number;
+  formatted: string;
+  isKm: boolean;
+  milesStr: string;
+}
+
+/**
+ * Formats a distance in simulation coordinate units according to the active scale mode.
+ * In '1:1' mode, accurately expands to true USGS metric meters / kilometers and imperial miles.
+ */
+export function formatUsgsDistance(
+  distanceUnits: number,
+  mode: WorldScaleMode = '1:1'
+): FormattedDistance {
+  const meters = mode === '1:1' ? distanceUnits * USGS_1TO1_HORIZONTAL_SCALE : distanceUnits;
+  const miles = meters * 0.000621371;
+  const milesStr = `${miles.toFixed(1)} mi`;
+
+  if (meters >= 1000) {
+    const km = meters / 1000;
+    return {
+      meters,
+      formatted: `${km.toFixed(1)} km`,
+      isKm: true,
+      milesStr,
+    };
+  }
+
+  return {
+    meters,
+    formatted: `${Math.round(meters)} m`,
+    isKm: false,
+    milesStr: `${Math.round(meters * 1.09361)} yd`,
+  };
+}
+
+/**
+ * Calculates authentic real-world USGS elevation in feet and meters.
+ * If spatial coordinates (x, z) are provided, computes a continuous, spatially grounded
+ * elevation surface calibrated to the official USGS 7.5-minute quadrangle benchmarks:
+ * - Salt River / Canyon Lake surface: 1,660 ft (506 m)
+ * - Tortilla Flat terrace: 1,780 ft (542 m)
+ * - Peralta Trailhead Camp: 2,420 ft (738 m)
+ * - Charlebois Spring: 2,480 ft (756 m)
+ * - Battleship Mountain: 3,240 ft (988 m)
+ * - Black Top Mesa: 3,650 ft (1,113 m)
+ * - Miners Needle: 3,680 ft (1,122 m)
+ * - Fremont Saddle: 3,780 ft (1,152 m)
+ * - Malapais Mountain: 4,229 ft (1,289 m)
+ * - Weaver's Needle: 4,553 ft (1,388 m)
+ * - Superstition Peak: 5,057 ft (1,541 m)
+ * - Four Peaks (Brown's Peak): 7,657 ft (2,334 m)
+ */
+export function getUsgsElevation(
+  terrainHeightY: number,
+  x?: number,
+  z?: number
+): {
   feet: number;
   meters: number;
   formatted: string;
 } {
-  const clampedY = Math.max(0, terrainHeightY);
-  // Linear elevation mapping matching USGS 7.5' quad benchmarks
-  const feet = Math.round(1660 + clampedY * 49.6);
-  const meters = Math.round(feet * 0.3048);
+  const effectiveY = Math.max(0, terrainHeightY);
+
+  if (x === undefined || z === undefined) {
+    // Standard baseline fallback if coordinates are omitted
+    const fallbackFeet = Math.round(1660 + effectiveY * 49.6);
+    const fallbackMeters = Math.round(fallbackFeet * 0.3048);
+    return {
+      feet: fallbackFeet,
+      meters: fallbackMeters,
+      formatted: `${fallbackFeet.toLocaleString()} ft (${fallbackMeters.toLocaleString()} m)`,
+    };
+  }
+
+  // 1. Regional drainage basin datums (Inverse Distance Weighting)
+  const regionalDatums = [
+    { x: 0, z: -300, datumFt: 1660 }, // Salt River Canyon
+    { x: 0, z: -252, datumFt: 1780 }, // Tortilla Flat
+    { x: -120, z: -120, datumFt: 2420 }, // Peralta Trailhead Basin
+    { x: 25, z: -40, datumFt: 2480 }, // Charlebois / Needle Canyon Basin
+    { x: -180, z: -150, datumFt: 2360 }, // Hieroglyphic Canyon Wash
+    { x: 180, z: -120, datumFt: 3400 }, // Reavis Valley Plateau
+    { x: 286, z: -606, datumFt: 4600 }, // Mazatzal Massif Base
+  ];
+
+  let totalWeight = 0;
+  let weightedDatum = 0;
+  for (let i = 0; i < regionalDatums.length; i++) {
+    const d = regionalDatums[i];
+    const dist = Math.hypot(x - d.x, z - d.z) + 12;
+    const w = 1 / (dist * dist);
+    totalWeight += w;
+    weightedDatum += d.datumFt * w;
+  }
+  const baseDatumFt = weightedDatum / totalWeight;
+
+  // 2. Proximity blending to official USGS summit and landmark benchmarks
+  let closestFeature: UsgsTopographicFeature | null = null;
+  let minFeatureDist = Infinity;
+  for (let i = 0; i < REAL_USGS_TOPOGRAPHY.length; i++) {
+    const feat = REAL_USGS_TOPOGRAPHY[i];
+    const dist = Math.hypot(x - feat.position.x, z - feat.position.z);
+    if (dist < minFeatureDist) {
+      minFeatureDist = dist;
+      closestFeature = feat;
+    }
+  }
+
+  // Linear ascent above local basin floor
+  let computedFeet = baseDatumFt + effectiveY * 46;
+
+  if (closestFeature && minFeatureDist < 65) {
+    const blendFactor = Math.max(0, 1 - minFeatureDist / 65);
+    // Smooth cosine bell transition
+    const smoothBlend = 0.5 - 0.5 * Math.cos(blendFactor * Math.PI);
+    const targetSummitElevationFt = closestFeature.elevationFt;
+
+    // Harmonize height with the target summit elevation
+    const localizedPeakFt =
+      baseDatumFt + (targetSummitElevationFt - baseDatumFt) * Math.min(1.25, Math.max(0.2, effectiveY / 42));
+
+    computedFeet = computedFeet * (1 - smoothBlend) + localizedPeakFt * smoothBlend;
+  }
+
+  const finalFeet = Math.round(Math.max(1660, computedFeet));
+  const finalMeters = Math.round(finalFeet * 0.3048);
+
   return {
-    feet,
-    meters,
-    formatted: `${feet.toLocaleString()} ft (${meters.toLocaleString()} m)`,
+    feet: finalFeet,
+    meters: finalMeters,
+    formatted: `${finalFeet.toLocaleString()} ft (${finalMeters.toLocaleString()} m)`,
   };
 }
 

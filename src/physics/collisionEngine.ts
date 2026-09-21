@@ -31,15 +31,15 @@ export const LANDMARK_OBSTACLES: LandmarkObstacle[] = [
   { name: 'Lost Dutchman Portal (Right Buttress)', x: 166, z: 110, radius: 5.5, height: 18 },
   // 4. Peralta Stone Cabin (Dugout)
   { name: 'Peralta Stone Dugout Cabin', x: 30, z: -90, radius: 3.8, height: 3.5 },
-  // 5. Historic Town of Tortilla Flat buildings along the Salt River (town center: x: 0, z: -250)
+  // 5. Historic Town of Tortilla Flat buildings along Tortilla Creek (town center: x: 0, z: -250)
   { name: 'Tortilla Flat Saloon', x: -14.8, z: -246, radius: 5.0, height: 9.0 },
   { name: 'Tortilla Flat Mercantile & Assayer', x: -14.8, z: -261.5, radius: 4.8, height: 7.5 },
   { name: 'Tortilla Flat Territorial Jail', x: 14.8, z: -258.5, radius: 4.5, height: 6.5 },
   { name: 'Tortilla Flat Livery & Barn', x: 14.8, z: -242.5, radius: 5.0, height: 7.5 },
   { name: 'Tortilla Flat Water Tower', x: -13.0, z: -233.5, radius: 3.5, height: 12.0 },
   { name: 'Concord Stagecoach', x: 0, z: -252, radius: 2.0, height: 3.2 },
-  { name: 'Salt River Project Freight Depot', x: 13.0, z: -298, radius: 4.8, height: 7.0 },
-  { name: 'Salt River Timber Pier & Boat Landing', x: -2.0, z: -304, radius: 3.8, height: 4.0 },
+  { name: 'Tortilla Creek Freight Depot', x: 13.0, z: -298, radius: 4.8, height: 7.0 },
+  { name: 'Tortilla Creek Timber Pier & Landing', x: -2.0, z: -304, radius: 3.8, height: 4.0 },
   // 6. Pistol Canyon Sun-Bleached Granite Table Boulder & Tinaja
   { name: 'Pistol Canyon Table Boulder', x: -46, z: -130, radius: 2.2, height: 2.5 },
 ];
@@ -107,7 +107,7 @@ export function testPositionCollision(
   // Natural mountain passes, saddles, and canyon corridors cut through the perimeter mountains
   const isApacheTrailOrSaltRiver =
     (candZ < -150 && candZ >= -235 && Math.abs(candX) < 40) || // Apache Trail pass
-    (candZ < -225 && candZ > -325 && Math.abs(candX) < 290);  // Salt River Canyon & Tortilla Flat valley
+    (candZ < -225 && candZ > -325 && Math.abs(candX) < 290);  // Tortilla Creek Canyon & northern basin
 
   const isFremontSaddle = Math.hypot(candX - 30, candZ - 220) < 36; // Fremont Saddle (South)
   const isTerrapinPass = Math.hypot(candX - 210, candZ - (-10)) < 34; // Terrapin Pass (East)
@@ -116,7 +116,13 @@ export function testPositionCollision(
   const isNeedleCanyonChasm = candX > 110 && candX < 185 && candZ > -70 && candZ < 150; // Needle Canyon chasm
   const isFishCreekCanyon = candX < -40 && candX > -180 && candZ < -170 && candZ > -300; // Fish Creek Canyon
   const isPistolCanyon = candX > -85 && candX < -15 && candZ < -55 && candZ > -195; // Pistol Canyon box gorge
-  const isMalapaisRidge = Math.hypot(candX - 95, candZ - (-155)) < 75; // Malapais Mountain massif & summit ridge
+  const isPetersCanyon = candX < -130 && candX > -180 && candZ <= -75 && candZ >= -308; // Peters Canyon drainage gorge
+  const isPetersMesa = Math.hypot(candX - (-105), candZ - (-155)) < 44; // Peters Mesa tableland
+  const isMalapaisRidge = Math.hypot((candX - 78) / 58, (candZ - (-216)) / 66) < 1.25; // Malapais Mountain massif & summits
+  const isMalapaisWestRavine =
+    candX >= 16 &&
+    candX <= 88 &&
+    Math.abs(candZ - (-206 + Math.sin(candX * 0.12) * 2.8 - ((candX - 16) / 72) * 12.0)) < 16.5; // Malapais West Side Canyon & ravine wash
 
   const isNavigablePassOrCanyon =
     isApacheTrailOrSaltRiver ||
@@ -127,7 +133,10 @@ export function testPositionCollision(
     isNeedleCanyonChasm ||
     isFishCreekCanyon ||
     isPistolCanyon ||
-    isMalapaisRidge;
+    isPetersCanyon ||
+    isPetersMesa ||
+    isMalapaisRidge ||
+    isMalapaisWestRavine;
 
   const distFromCenter = Math.hypot(candX, candZ);
   const isHardWorldBoundary = distFromCenter > WORLD_BOUNDARY_RADIUS || Math.abs(candX) > 2550 || Math.abs(candZ) > 2550;
@@ -152,24 +161,41 @@ export function testPositionCollision(
     const dirX = (candX - startX) / stepDist;
     const dirZ = (candZ - startZ) / stepDist;
 
-    // A sudden vertical elevation step higher than knee height cannot be walked through
-    if (dh > MAX_STEP_HEIGHT && !isAirborne) {
-      return {
-        blocked: true,
-        reason: 'cliff_step',
-        normal: { x: -dirX, z: -dirZ },
-      };
-    }
+    // In designated canyons, ravines, and mountain scramble passes, allow climbing natural wash boulder steps and talus ramps
+    const effectiveMaxStep = isNavigablePassOrCanyon ? 0.85 : MAX_STEP_HEIGHT;
+    const effectiveMaxSlope = isNavigablePassOrCanyon ? 1.65 : MAX_WALKABLE_SLOPE;
 
-    // Continuous slope evaluation:
-    // If dh > 0.02m uphill, check the frame slope
-    if (dh > 0.02) {
+    // Fast check for elevation rise
+    if ((dh > effectiveMaxStep || dh > 0.02) && !isAirborne) {
+      // Calculate true terrain gradient normal so player glides naturally along canyon walls and ridge faces
+      const eps = 0.35;
+      const hL = getTerrainHeight(candX - eps, candZ);
+      const hR = getTerrainHeight(candX + eps, candZ);
+      const hD = getTerrainHeight(candX, candZ - eps);
+      const hU = getTerrainHeight(candX, candZ + eps);
+      const gradX = hR - hL;
+      const gradZ = hU - hD;
+      const gradLen = Math.hypot(gradX, gradZ);
+      const slopeNormal = gradLen > 0.001
+        ? { x: -gradX / gradLen, z: -gradZ / gradLen }
+        : { x: -dirX, z: -dirZ };
+
+      // A sudden vertical elevation step higher than knee height cannot be walked through
+      if (dh > effectiveMaxStep) {
+        return {
+          blocked: true,
+          reason: 'cliff_step',
+          normal: slopeNormal,
+        };
+      }
+
+      // Continuous slope evaluation
       const frameSlope = dh / stepDist;
-      if (frameSlope > MAX_WALKABLE_SLOPE) {
+      if (frameSlope > effectiveMaxSlope) {
         return {
           blocked: true,
           reason: 'steep_slope',
-          normal: { x: -dirX, z: -dirZ },
+          normal: slopeNormal,
         };
       }
     }
@@ -180,9 +206,9 @@ export function testPositionCollision(
     const probeZ = candZ + dirZ * 0.38;
     const probeGroundY = getTerrainHeight(probeX, probeZ);
     const probeRise = probeGroundY - candGroundY;
-    // If the ground 0.38m ahead rises steeply (> MAX_WALKABLE_SLOPE * 0.38 = ~0.47m)
-    // or rises higher than knee height (0.50m), the capsule is colliding with a steep canyon wall or rock face!
-    if (probeRise > 0.46 && !isAirborne) {
+    // In passes and ravines, allow natural ascent without false cliff flags from nearby boulder banks
+    const probeThreshold = isNavigablePassOrCanyon ? 0.65 : 0.46;
+    if (probeRise > probeThreshold && !isAirborne) {
       const eps = 0.4;
       const hL = getTerrainHeight(probeX - eps, probeZ);
       const hR = getTerrainHeight(probeX + eps, probeZ);
@@ -419,7 +445,42 @@ export function resolveKinematicMovement(
     };
   }
 
-  // 2. Second attempt: Smooth wall-sliding
+  // 2. Second attempt: Tangent vector sliding along obstacle surface normal (silky contour gliding)
+  if (directCheck.normal) {
+    const nx = directCheck.normal.x;
+    const nz = directCheck.normal.z;
+    const dot = targetDx * nx + targetDz * nz;
+    if (dot < 0) {
+      // Vector projection onto tangent plane
+      const tanDx = targetDx - dot * nx;
+      const tanDz = targetDz - dot * nz;
+      if (tanDx * tanDx + tanDz * tanDz > 0.00005) {
+        const checkTan = testPositionCollision(
+          startX + tanDx,
+          startZ + tanDz,
+          startX,
+          startZ,
+          currentGroundY,
+          getTerrainHeight,
+          foliageManager,
+          movableRockManager,
+          mineBuildingSystem,
+          isAirborne
+        );
+        if (!checkTan.blocked) {
+          return {
+            x: startX + tanDx,
+            z: startZ + tanDz,
+            isBlocked: true,
+            slid: true,
+            blockedReason: directCheck.reason,
+          };
+        }
+      }
+    }
+  }
+
+  // 3. Third attempt: Axis-aligned sliding fallback (if tangent is wedged in corner)
   // Try X alone
   let resolvedX = startX;
   let didSlideX = false;
@@ -472,41 +533,6 @@ export function resolveKinematicMovement(
       slid: true,
       blockedReason: directCheck.reason,
     };
-  }
-
-  // 3. Third attempt: Tangent vector sliding if an obstacle surface normal was returned
-  if (directCheck.normal) {
-    const nx = directCheck.normal.x;
-    const nz = directCheck.normal.z;
-    const dot = targetDx * nx + targetDz * nz;
-    if (dot < 0) {
-      // Vector projection onto plane tangent
-      const tanDx = targetDx - dot * nx;
-      const tanDz = targetDz - dot * nz;
-      if (Math.hypot(tanDx, tanDz) > 0.0001) {
-        const checkTan = testPositionCollision(
-          startX + tanDx,
-          startZ + tanDz,
-          startX,
-          startZ,
-          currentGroundY,
-          getTerrainHeight,
-          foliageManager,
-          movableRockManager,
-          mineBuildingSystem,
-          isAirborne
-        );
-        if (!checkTan.blocked) {
-          return {
-            x: startX + tanDx,
-            z: startZ + tanDz,
-            isBlocked: true,
-            slid: true,
-            blockedReason: directCheck.reason,
-          };
-        }
-      }
-    }
   }
 
   // 4. Completely blocked by solid obstacle: halt firmly at current position

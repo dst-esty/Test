@@ -61,7 +61,8 @@ export class CavalryPatrolManager {
   private pauseTimer: number = 0;
   private hoofSoundTimer: number = 0;
   private bannerTriggeredForArrival: boolean = false;
-  private patrolCycleTimer: number = 600; // Rare historic event: 10 min cooldown before first patrol
+  private patrolCycleTimer: number = 18; // First historic sweep departs shortly after expedition begins (18s)
+  private combatTimer: number = 0;
 
   // Patrol waypoints: Starts from Fort McDowell approach (North-West across Salt River Canyon),
   // rides along Tortilla Flat Stage road, surveys Apache Trail wash, passes Mountain Bluffs, and returns.
@@ -573,9 +574,10 @@ export class CavalryPatrolManager {
     delta: number,
     playerPos: Vector3D,
     getTerrainElevation: (x: number, z: number) => number,
-    onShowBanner?: (msg: string) => void
+    onShowBanner?: (msg: string) => void,
+    onEngageHostiles?: (cavalryPos: THREE.Vector3) => void
   ) {
-    // 1. Patrol Cycle Spawning (rides through very rarely as an authentic historic event)
+    // 1. Patrol Cycle Spawning (rides through as an authentic historic event)
     if (!this.isActive) {
       this.patrolCycleTimer -= delta;
       if (this.patrolCycleTimer <= 0) {
@@ -584,7 +586,16 @@ export class CavalryPatrolManager {
       return;
     }
 
-    // 2. Pause Handling at scenic waypoints (scouting Tortilla Flat or trail overlooks)
+    // 2. Hostile Bandits Suppression (mounted troopers defend prospectors with Springfield carbines)
+    this.combatTimer += delta;
+    if (this.combatTimer > 2.2) {
+      this.combatTimer = 0;
+      if (onEngageHostiles) {
+        onEngageHostiles(this.columnPosition);
+      }
+    }
+
+    // 3. Pause Handling at scenic waypoints (scouting Tortilla Flat or trail overlooks)
     if (this.pauseTimer > 0) {
       this.pauseTimer -= delta;
       // Idle horse breathing & gentle tail swish while stationed
@@ -592,7 +603,7 @@ export class CavalryPatrolManager {
       return;
     }
 
-    // 3. Move along waypoints
+    // 4. Move along waypoints
     const targetWp = this.waypoints[this.currentWaypointIndex];
     const dx = targetWp.x - this.columnPosition.x;
     const dz = targetWp.z - this.columnPosition.z;
@@ -603,12 +614,12 @@ export class CavalryPatrolManager {
       if (targetWp.pauseSeconds && targetWp.pauseSeconds > 0) {
         this.pauseTimer = targetWp.pauseSeconds;
 
-        // Play gentle bugle call ONLY when stopping at Tortilla Flat AND player is physically close by (< 35m)
+        // Play gentle bugle call when stopping at Tortilla Flat if player is anywhere near (< 70m)
         if (targetWp.name.includes('Tortilla Flat') && !this.bannerTriggeredForArrival) {
           this.bannerTriggeredForArrival = true;
           const playerDistToTF = Math.hypot(playerPos.x - targetWp.x, playerPos.z - targetWp.z);
-          if (playerDistToTF < 35) {
-            const volScale = (1 - playerDistToTF / 35) * 0.08;
+          if (playerDistToTF < 70) {
+            const volScale = Math.max(0.1, (1 - playerDistToTF / 70) * 0.3);
             soundEngine.playCavalryBugleCall('assembly', volScale);
             if (onShowBanner) {
               onShowBanner('🎖️ 6th U.S. Cavalry Detachment arrived at Tortilla Flat hitching rails.');
@@ -619,10 +630,10 @@ export class CavalryPatrolManager {
 
       this.currentWaypointIndex++;
       if (this.currentWaypointIndex >= this.waypoints.length) {
-        // Patrol finished round trip; rest at garrison before next rare sweep
+        // Patrol finished round trip; rest at garrison before next sweep
         this.isActive = false;
         this.patrolGroup.visible = false;
-        this.patrolCycleTimer = 1200 + Math.random() * 600; // 20 - 30 minutes between rare patrols
+        this.patrolCycleTimer = 360 + Math.random() * 240; // 6 - 10 minutes between subsequent sweeps
         this.currentWaypointIndex = 0;
         this.bannerTriggeredForArrival = false;
         return;
@@ -633,7 +644,7 @@ export class CavalryPatrolManager {
       // Smooth turning interpolation
       let angleDiff = targetAngle - this.columnRotation;
       while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff -= Math.PI * 2;
       this.columnRotation += angleDiff * Math.min(1, delta * 3.5);
 
       const moveDist = this.speed * delta;
@@ -647,13 +658,13 @@ export class CavalryPatrolManager {
       // Animate trotting legs, body bounce, and fluttering guidon flag
       this.animateTrottingTroop(delta);
 
-      // Sound: Very occasional soft hooves clattering only when player is physically close (< 28m)
+      // Sound: Very occasional soft hooves clattering only when player is physically close (< 32m)
       this.hoofSoundTimer += delta;
       if (this.hoofSoundTimer > 1.6) {
         this.hoofSoundTimer = 0;
         const playerDist = Math.hypot(playerPos.x - this.columnPosition.x, playerPos.z - this.columnPosition.z);
-        if (playerDist < 28) {
-          const volumeFactor = Math.max(0, 1 - (playerDist / 28)) * 0.25;
+        if (playerDist < 32) {
+          const volumeFactor = Math.max(0, 1 - (playerDist / 32)) * 0.28;
           soundEngine.playCavalryTroopHooves(volumeFactor);
         }
       }
@@ -677,11 +688,11 @@ export class CavalryPatrolManager {
     this.pauseTimer = 0;
     this.bannerTriggeredForArrival = false;
 
-    // Distant faint bugle call only if player is near Fort McDowell river crossing (< 50m)
+    // Distant bugle call if player is anywhere in northern approach basin (< 140m)
     if (playerPos) {
       const dist = Math.hypot(playerPos.x - startWp.x, playerPos.z - startWp.z);
-      if (dist < 50) {
-        const volScale = (1 - dist / 50) * 0.08;
+      if (dist < 140) {
+        const volScale = Math.max(0.08, (1 - dist / 140) * 0.22);
         soundEngine.playCavalryBugleCall('boots_and_saddles', volScale);
         if (onShowBanner) {
           onShowBanner('🎺 Fort McDowell Cavalry Patrol dispatched along the Salt River trail.');

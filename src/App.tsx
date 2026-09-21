@@ -35,6 +35,7 @@ import { Compass, BookOpen, Map as MapIcon, Sparkles, AlertCircle } from 'lucide
 import { isMobileDevice } from './utils/device';
 import { safeLocalStorage } from './utils/storage';
 import { VigilanceStatus } from './services/apacheVigilanceService';
+import { WorldScaleMode, formatUsgsDistance } from './world/superstitionTopography';
 
 export default function App() {
   // Player State
@@ -206,6 +207,20 @@ export default function App() {
   const mobileJumpHandlerRef = useRef<(() => void) | null>(null);
   const mobileInteractHandlerRef = useRef<(() => void) | null>(null);
   const mobileMoveHandlerRef = useRef<((move: { forward: number; right: number }) => void) | null>(null);
+  const toggleScopeHandlerRef = useRef<(() => void) | null>(null);
+  const scopeZoomHandlerRef = useRef<((delta: number) => void) | null>(null);
+  const digHandlerRef = useRef<(() => void) | null>(null);
+  const reinforceHandlerRef = useRef<(() => void) | null>(null);
+  const excavateHandlerRef = useRef<(() => void) | null>(null);
+  const shaftTraverseHandlerRef = useRef<((level: number) => void) | null>(null);
+  const shaftExitHandlerRef = useRef<(() => void) | null>(null);
+  const shaftDigHandlerRef = useRef<(() => void) | null>(null);
+  const excavateRoomHandlerRef = useRef<((dir: RoomDirection) => void) | null>(null);
+  const timberRoomHandlerRef = useRef<((dir: RoomDirection) => void) | null>(null);
+  const togglePumpHandlerRef = useRef<(() => void) | null>(null);
+  const strikeVoxelHandlerRef = useRef<(() => void) | null>(null);
+  const placeTimberHandlerRef = useRef<(() => void) | null>(null);
+  const shoreHandlerRef = useRef<(() => void) | null>(null);
   const [activeInteractAction, setActiveInteractAction] = useState<(() => void) | null>(null);
   const playerStateRef = useRef<PlayerState>(playerState);
 
@@ -264,6 +279,18 @@ export default function App() {
                 activeClaim: updatedClaim,
               };
             }
+          }
+          return prev;
+        });
+      } else {
+        // If the prospector has no active claims, clear any stale active claim
+        setPlayerState((prev) => {
+          if (prev.activeClaim) {
+            safeLocalStorage.removeItem('superstition_active_claim');
+            return {
+              ...prev,
+              activeClaim: null,
+            };
           }
           return prev;
         });
@@ -387,8 +414,6 @@ export default function App() {
   // Winchester Rifle Scope State
   const [isAimingRifle, setIsAimingRifle] = useState<boolean>(false);
   const [rifleScopeZoom, setRifleScopeZoom] = useState<number>(3.0);
-  const toggleScopeHandlerRef = useRef<(() => void) | null>(null);
-  const scopeZoomHandlerRef = useRef<((delta: number) => void) | null>(null);
 
   const handleToggleGoggles = useCallback(() => {
     setAreGogglesActive((prev) => {
@@ -410,10 +435,9 @@ export default function App() {
       if (saved && (saved === 'performance' || saved === 'balanced' || saved === 'high')) {
         return saved;
       }
-      const isMobile = isMobileDevice();
-      return isMobile ? 'performance' : 'balanced';
+      return 'performance';
     }
-    return 'balanced';
+    return 'performance';
   });
   const [currentFps, setCurrentFps] = useState<number>(60);
   const [vigilanceStatus, setVigilanceStatus] = useState<VigilanceStatus | null>(null);
@@ -439,6 +463,28 @@ export default function App() {
   // Universal Synchronized Sky & Weather Instance
   const [timeOfDay, setTimeOfDay] = useState<number>(() => multiplayer.getUniversalTimeOfDay());
   const [weather, setWeather] = useState<WeatherType>(() => multiplayer.getUniversalWeather());
+
+  // World Scale Mode: '1:1' (True USGS 7.5-minute Quadrangle Scale) vs 'compact'
+  const [worldScaleMode, setWorldScaleMode] = useState<WorldScaleMode>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = safeLocalStorage.getItem('superstition_scale_mode') as WorldScaleMode | null;
+      if (saved === '1:1' || saved === 'compact') return saved;
+    }
+    return '1:1';
+  });
+
+  const handleToggleWorldScaleMode = useCallback(() => {
+    setWorldScaleMode((prev) => {
+      const next = prev === '1:1' ? 'compact' : '1:1';
+      safeLocalStorage.setItem('superstition_scale_mode', next);
+      showBanner(
+        next === '1:1'
+          ? '🌍 1:1 True USGS Quadrangle Scale: Real distances (1 unit = 17.4m), 32 m/s horse gallop & 85% hydration endurance active!'
+          : '📐 Compact Exploration Scale active.'
+      );
+      return next;
+    });
+  }, [showBanner]);
 
   // Nearby active player-built campfire or outpost camp (within 6.5m)
   const nearbyCamp = useMemo(() => {
@@ -469,7 +515,6 @@ export default function App() {
   const handleSleepUntilDawn = useCallback(() => {
     soundEngine.playCampfire();
     setTimeOfDay(6.0); // 6:00 AM Sunrise
-    multiplayer.requestTimeChange(6.0, 'camp_rest');
     setPlayerState((prev) => {
       const updatedStructures = (prev.builtStructures || []).map((s) => {
         if (s.type === 'campfire' || s.type === 'prospector_camp') {
@@ -493,45 +538,35 @@ export default function App() {
     showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Campfire consumed ~8h of wood fuel.");
   }, [showBanner]);
 
-  const handleSleepInHotel = useCallback((paymentMethod: 'cash' | 'gold', isSuite: boolean = false, targetTime: number = 6.0) => {
+  const handleSleepInHotel = useCallback((paymentMethod: 'cash' | 'gold') => {
     const cash = playerState.cashDollars || 0;
     const gold = playerState.goldFound || 0;
-    const cashCost = isSuite ? 5.0 : 2.0;
-    const goldCost = isSuite ? 0.25 : 0.10;
 
     if (paymentMethod === 'cash') {
-      if (cash < cashCost) {
-        showBanner(`⚠️ Not enough cash to rent this room! ($${cashCost.toFixed(2)} required). Cash in gold at the Assayer counter.`);
+      if (cash < 2.0) {
+        showBanner("⚠️ Not enough cash to rent a room! ($2.00 required). Cash in gold at the Assayer counter.");
         return false;
       }
     } else {
-      if (gold < goldCost) {
-        showBanner(`⚠️ Not enough gold ore to barter! (${goldCost.toFixed(2)} oz required).`);
+      if (gold < 0.1) {
+        showBanner("⚠️ Not enough gold ore to barter for a room! (0.10 oz required).");
         return false;
       }
     }
 
     soundEngine.playHotelRest();
-    setTimeOfDay(targetTime);
-    multiplayer.requestTimeChange(targetTime, 'hotel_rest');
-
-    const wellRestedDurationMs = isSuite ? 25 * 60 * 1000 : 10 * 60 * 1000;
+    setTimeOfDay(6.0); // 6:00 AM Sunrise
     setPlayerState((prev) => ({
       ...prev,
-      cashDollars: paymentMethod === 'cash' ? Math.max(0, (prev.cashDollars || 0) - cashCost) : prev.cashDollars,
-      goldFound: paymentMethod === 'gold' ? Math.max(0, (prev.goldFound || 0) - goldCost) : prev.goldFound,
+      cashDollars: paymentMethod === 'cash' ? Math.max(0, (prev.cashDollars || 0) - 2.0) : prev.cashDollars,
+      goldFound: paymentMethod === 'gold' ? Math.max(0, (prev.goldFound || 0) - 0.1) : prev.goldFound,
       health: 100,
       hydration: 100,
       canteenOunces: 32,
-      wellRestedUntil: Date.now() + wellRestedDurationMs,
     }));
 
     setIsTortillaFlatOpen(false);
-    showBanner(
-      isSuite
-        ? `🛁 Soaked in artesian spring bath and slept peacefully until ${targetTime === 6.0 ? '6:00 AM Dawn' : '6:00 PM Dusk'}! Well-Rested Prospector buff active (+stamina & hydration preservation).`
-        : `🌅 Rested comfortably in the Superstition Hotel until ${targetTime === 6.0 ? '6:00 AM Dawn' : '6:00 PM Dusk'}! Health and Hydration fully replenished.`
-    );
+    showBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health and Hydration fully replenished.");
     return true;
   }, [playerState.cashDollars, playerState.goldFound, showBanner]);
 
@@ -540,7 +575,6 @@ export default function App() {
       const isDay = prev >= 5.5 && prev < 19.5;
       const nextTime = isDay ? 21.0 : 9.5;
       soundEngine.playCampfire();
-      multiplayer.requestTimeChange(nextTime, 'toggle');
       showBanner(
         isDay
           ? "🌌 Night has fallen over Tortilla Flat! Main street is illuminated with festive string lights, flickering torches, and warm boardwalk lanterns."
@@ -586,25 +620,14 @@ export default function App() {
       showBanner("🔥 Frontier Ground Torch Equipped! Aim at ground & Left-Click to drive stake into earth (place 3-4 along your trail/camp, Esc to finish).");
     }
   }, [showBanner]);
-  const digHandlerRef = useRef<(() => void) | null>(null);
-  const reinforceHandlerRef = useRef<(() => void) | null>(null);
-  const excavateHandlerRef = useRef<(() => void) | null>(null);
 
   // Subterranean Mine Shaft & Strata Layer State
   const [shaftLayers, setShaftLayers] = useState<MineLayerData[]>([]);
   const [currentMineLevel, setCurrentMineLevel] = useState<number>(0);
   const [maxUnlockedMineLevel, setMaxUnlockedMineLevel] = useState<number>(1);
-  const shaftTraverseHandlerRef = useRef<((level: number) => void) | null>(null);
-  const shaftExitHandlerRef = useRef<(() => void) | null>(null);
-  const shaftDigHandlerRef = useRef<(() => void) | null>(null);
-  const excavateRoomHandlerRef = useRef<((dir: RoomDirection) => void) | null>(null);
-  const timberRoomHandlerRef = useRef<((dir: RoomDirection) => void) | null>(null);
-  const togglePumpHandlerRef = useRef<(() => void) | null>(null);
 
   // Mini-Voxel Shaft Sinking & Bedrock Excavation State
   const [shaftSinkingStats, setShaftSinkingStats] = useState<ShaftSinkingStats | null>(null);
-  const strikeVoxelHandlerRef = useRef<(() => void) | null>(null);
-  const placeTimberHandlerRef = useRef<(() => void) | null>(null);
 
   // Subterranean Hydrology & Water Table State
   const [waterTable, setWaterTable] = useState<WaterTableState>({
@@ -634,7 +657,6 @@ export default function App() {
     strataAdvice?: string;
     canShore: boolean;
   } | null>(null);
-  const shoreHandlerRef = useRef<(() => void) | null>(null);
 
   const handlePurchaseRocks = useCallback((rockAmount: number, goldCost: number) => {
     setPlayerState((prev) => {
@@ -938,6 +960,17 @@ export default function App() {
     [showBanner]
   );
 
+  const handleClearAllClaims = useCallback(async () => {
+    await territoryClaims.clearAllClaims();
+    setRegisteredClaims([]);
+    setPlayerState((prev) => ({
+      ...prev,
+      activeClaim: null,
+    }));
+    soundEngine.playDiscovery();
+    showBanner('🧹 All mineral claims removed for testing!');
+  }, [showBanner]);
+
   // Universal continuous sun & celestial progression (shared instance)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1173,22 +1206,53 @@ export default function App() {
 
   // Fast travel from Map, Claim Deed, or Stagecoach
   const handleFastTravel = (targetPos: Vector3D, destinationLabel?: string) => {
-    const terrainY = getTerrainHeight(targetPos.x, targetPos.z) + 1.7;
-    const dest = { x: targetPos.x + 1, y: terrainY, z: targetPos.z + 1 };
+    // If destination is Weaver's Needle monolithic core, place the player safely at the scenic lookout saddle (55, 18) looking up at the spire!
+    let targetX = targetPos.x;
+    let targetZ = targetPos.z;
+    if (Math.hypot(targetPos.x - 80, targetPos.z - 15) < 16) {
+      targetX = 55;
+      targetZ = 18;
+    }
+
+    const terrainY = getTerrainHeight(targetX, targetZ) + 1.7;
+    const dest = { x: targetX, y: terrainY, z: targetZ };
+
+    // Find nearby landmark if any
+    const nearbyLm = landmarks.find(
+      (lm) => Math.hypot(lm.position.x - targetPos.x, lm.position.z - targetPos.z) < 60
+    );
+    const label = destinationLabel || nearbyLm?.name || 'Wilderness Destination';
+
     if (teleportHandlerRef.current) {
       teleportHandlerRef.current(dest);
     }
-    setPlayerState((prev) => ({
-      ...prev,
-      position: dest,
-    }));
+
+    setPlayerState((prev) => {
+      const discovered = new Set(prev.discoveredLandmarks || []);
+      if (nearbyLm) {
+        discovered.add(nearbyLm.id);
+      }
+      return {
+        ...prev,
+        position: dest,
+        isInsideMine: false,
+        discoveredLandmarks: Array.from(discovered),
+      };
+    });
+
+    if (nearbyLm) {
+      setLandmarks((prev) =>
+        prev.map((lm) => (lm.id === nearbyLm.id ? { ...lm, discovered: true } : lm))
+      );
+    }
+
     setIsMapOpen(false);
     setIsClaimDeedOpen(false);
     setIsTortillaFlatOpen(false);
     soundEngine.playFootstep();
-    if (destinationLabel) {
-      showBanner(`⚡ Fast-traveled to "${destinationLabel}"!`);
-    }
+    const travelDist = Math.hypot(targetPos.x - playerState.position.x, targetPos.z - playerState.position.z);
+    const distStr = formatUsgsDistance(travelDist, worldScaleMode).formatted;
+    showBanner(`⚡ Fast-traveled to "${label}" (${distStr})!`);
   };
 
   // Restart Expedition after Fatal Death (lose all gold & claims, start over at Tortilla Flat)
@@ -1491,6 +1555,7 @@ export default function App() {
         onUpdateVigilance={setVigilanceStatus}
         areGogglesActive={areGogglesActive}
         onToggleGoggles={handleToggleGoggles}
+        worldScaleMode={worldScaleMode}
       />
 
       {/* Compass & Diurnal Cycle HUD with Day/Night Illumination Toggle & Endless Coordinates */}
@@ -1505,6 +1570,8 @@ export default function App() {
           isInsideMine={false}
           onToggleDayNight={handleToggleDayNight}
           playerCoords={{ x: playerState.position.x, y: playerState.position.y, z: playerState.position.z }}
+          worldScaleMode={worldScaleMode}
+          onToggleWorldScaleMode={handleToggleWorldScaleMode}
         />
       )}
 
@@ -1671,7 +1738,7 @@ export default function App() {
             </div>
 
             <p className="text-stone-700 text-sm leading-relaxed mb-4">
-              Deep in the rugged volcanic crags of Arizona&apos;s Superstition Mountains lies America&apos;s most notorious treasure: the fabled lost gold mine of German immigrant Jacob Waltz. You begin your journey at the historic settlement of <strong>Tortilla Flat</strong> on the south bank of the Salt River Canyon.
+              Deep in the rugged volcanic crags of Arizona&apos;s Superstition Mountains lies America&apos;s most notorious treasure: the fabled lost gold mine of German immigrant Jacob Waltz. You begin your journey at the historic settlement of <strong>Tortilla Flat</strong> nestled along the banks of Tortilla Creek on the Apache Trail.
             </p>
 
             <div className="bg-[#e4d4b3] p-3.5 rounded-xl border border-[#c2aa83] text-xs text-stone-800 space-y-2 mb-6 font-sans">
@@ -1724,6 +1791,9 @@ export default function App() {
         onFastTravel={handleFastTravel}
         activeClaim={playerState.activeClaim}
         territoryClaims={registeredClaims}
+        onClearAllClaims={handleClearAllClaims}
+        worldScaleMode={worldScaleMode}
+        onToggleWorldScaleMode={handleToggleWorldScaleMode}
       />
 
       {/* Field Journal & Clues Modal */}
@@ -1736,7 +1806,6 @@ export default function App() {
           setIsJournalOpen(false);
           setIsGuidebookOpen(true);
         }}
-        onFastTravel={handleFastTravel}
       />
 
       {/* Prospector's Field Guidebook & Shoring Lore */}
@@ -1902,6 +1971,7 @@ export default function App() {
         onListClaimForSale={handleListClaimForSale}
         onCancelListing={handleCancelListing}
         onTradeOfferResponse={handleTradeOfferResponse}
+        onClearAllClaims={handleClearAllClaims}
       />
 
       {/* Pop-up Dialog when a Claim is Staked: Prompt to build a mine & customize title */}
