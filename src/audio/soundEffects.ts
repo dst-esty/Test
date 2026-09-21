@@ -1341,6 +1341,195 @@ class SoundEngine {
     });
   }
 
+  /**
+   * Unique, haunting whispering sound effect played when uncovering scattered skull clues
+   * in the Superstition wilderness (Dr. Adolph Ruth's severed skull, James Cravey's ridge skull,
+   * headless skeleton in the box canyon).
+   *
+   * Features:
+   * 1. Low sub-bass infrasonic dread swell (39Hz -> 31Hz with binaural beating).
+   * 2. Double-formant vocal tract breath filters generating eerie sibilant whispers
+   *    ("...shhh... Ruth... stay away... the heads...").
+   * 3. Resonant wind blowing across hollow cranial cavities and eye sockets.
+   * 4. Ghostly diminished chord dissonance (D#4, F#4, A4, C5) that dissolves slowly.
+   * 5. Stereo panning shift drifting across the listener's ears.
+   */
+  public playSkullWhisperDiscovery() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const sampleRate = this.ctx.sampleRate;
+    const duration = 4.2;
+
+    // Master whisper bus with gentle lowpass to prevent harsh distortion
+    const masterBus = this.ctx.createGain();
+    masterBus.gain.setValueAtTime(0.42, t);
+    masterBus.connect(this.ctx.destination);
+
+    // 1. Infrasonic Dread Swell (Sub-bass cold chill)
+    const subOsc1 = this.ctx.createOscillator();
+    const subOsc2 = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+
+    subOsc1.type = 'sine';
+    subOsc1.frequency.setValueAtTime(39.0, t);
+    subOsc1.frequency.exponentialRampToValueAtTime(32.0, t + 3.5);
+
+    subOsc2.type = 'sine';
+    subOsc2.frequency.setValueAtTime(37.5, t); // 1.5Hz binaural beating
+    subOsc2.frequency.exponentialRampToValueAtTime(31.2, t + 3.5);
+
+    subGain.gain.setValueAtTime(0.001, t);
+    subGain.gain.linearRampToValueAtTime(0.35, t + 0.6);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + 3.8);
+
+    subOsc1.connect(subGain);
+    subOsc2.connect(subGain);
+    subGain.connect(masterBus);
+
+    subOsc1.start(t);
+    subOsc1.stop(t + 4.0);
+    subOsc2.start(t);
+    subOsc2.stop(t + 4.0);
+
+    // 2. Ghostly Hollow Cranial Cavity Tone (Wind whistling through empty eye sockets)
+    // Eerie diminished harmony: D#4 (311.1Hz), F#4 (369.9Hz), A4 (440Hz), C5 (523.2Hz)
+    const eerieTones = [
+      { freq: 155.56, delay: 0.05, duration: 3.8, gain: 0.10 }, // low root
+      { freq: 311.13, delay: 0.20, duration: 3.5, gain: 0.13 }, // Eb4
+      { freq: 369.99, delay: 0.40, duration: 3.2, gain: 0.12 }, // F#4
+      { freq: 440.0, delay: 0.65, duration: 2.9, gain: 0.09 },  // A4
+      { freq: 523.25, delay: 0.90, duration: 2.6, gain: 0.07 }, // C5
+    ];
+
+    eerieTones.forEach((tone) => {
+      if (!this.ctx) return;
+      const startTime = t + tone.delay;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const bpf = this.ctx.createBiquadFilter();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(tone.freq, startTime);
+      // Spectral pitch droop (ghostly wail)
+      osc.frequency.exponentialRampToValueAtTime(tone.freq * 0.96, startTime + tone.duration);
+
+      bpf.type = 'bandpass';
+      bpf.frequency.setValueAtTime(tone.freq, startTime);
+      bpf.Q.setValueAtTime(8.0, startTime); // Narrow resonant peak like bone cavity
+
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.linearRampToValueAtTime(tone.gain, startTime + 0.4);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + tone.duration);
+
+      osc.connect(bpf);
+      bpf.connect(gain);
+      gain.connect(masterBus);
+
+      osc.start(startTime);
+      osc.stop(startTime + tone.duration + 0.1);
+    });
+
+    // 3. Multi-Layered Sibilant Phantom Whispers (Shaped Noise Formants)
+    const whisperDuration = 3.6;
+    const bufferLength = Math.floor(sampleRate * whisperDuration);
+    const whisperBuffer = this.ctx.createBuffer(1, bufferLength, sampleRate);
+    const data = whisperBuffer.getChannelData(0);
+
+    let b0 = 0, b1 = 0, b2 = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      const sec = i / sampleRate;
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      const pink = (b0 + b1 + b2) * 0.22;
+
+      // Organic whisper rhythmic breathing pulses ("shhh... huuuuh... ssshh...")
+      const pulse1 = Math.exp(-Math.pow((sec - 0.7) / 0.35, 2));
+      const pulse2 = Math.exp(-Math.pow((sec - 1.6) / 0.45, 2));
+      const pulse3 = Math.exp(-Math.pow((sec - 2.6) / 0.55, 2));
+      const envelope = pulse1 * 0.9 + pulse2 * 1.0 + pulse3 * 0.75;
+
+      const tremor = 1.0 + Math.sin(sec * 18.0) * 0.12;
+      data[i] = pink * envelope * tremor;
+    }
+
+    const whisperSource = this.ctx.createBufferSource();
+    whisperSource.buffer = whisperBuffer;
+
+    // Filter A: Oral Formant (Vowel-like resonance)
+    const formantFilter = this.ctx.createBiquadFilter();
+    formantFilter.type = 'bandpass';
+    formantFilter.frequency.setValueAtTime(950, t);
+    formantFilter.frequency.exponentialRampToValueAtTime(1450, t + 1.2);
+    formantFilter.frequency.exponentialRampToValueAtTime(800, t + 2.5);
+    formantFilter.Q.setValueAtTime(4.5, t);
+
+    // Filter B: Sibilant High Whisper ("shhh/sss" consonant friction)
+    const sibilantFilter = this.ctx.createBiquadFilter();
+    sibilantFilter.type = 'bandpass';
+    sibilantFilter.frequency.setValueAtTime(3600, t);
+    sibilantFilter.frequency.linearRampToValueAtTime(4400, t + 1.5);
+    sibilantFilter.frequency.linearRampToValueAtTime(3200, t + 3.0);
+    sibilantFilter.Q.setValueAtTime(3.8, t);
+
+    const whisperGain = this.ctx.createGain();
+    whisperGain.gain.setValueAtTime(0.001, t);
+    whisperGain.gain.linearRampToValueAtTime(0.46, t + 0.5);
+    whisperGain.gain.exponentialRampToValueAtTime(0.001, t + whisperDuration);
+
+    whisperSource.connect(formantFilter);
+    whisperSource.connect(sibilantFilter);
+    formantFilter.connect(whisperGain);
+    sibilantFilter.connect(whisperGain);
+
+    // Spatial stereo panning if supported
+    try {
+      if (typeof this.ctx.createStereoPanner === 'function') {
+        const panner = this.ctx.createStereoPanner();
+        // Whispers drift across the stereo panorama
+        panner.pan.setValueAtTime(-0.55, t);
+        panner.pan.linearRampToValueAtTime(0.55, t + whisperDuration);
+        whisperGain.connect(panner);
+        panner.connect(masterBus);
+      } else {
+        whisperGain.connect(masterBus);
+      }
+    } catch {
+      whisperGain.connect(masterBus);
+    }
+
+    whisperSource.start(t);
+    whisperSource.stop(t + whisperDuration + 0.1);
+
+    // 4. Ghostly Bell Shimmer (Chilled wind chime over bleached bones)
+    const chimeTimes = [0.15, 0.85, 1.75];
+    chimeTimes.forEach((chimeTime, i) => {
+      if (!this.ctx) return;
+      const cTime = t + chimeTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1864.66 + i * 220, cTime); // A#6
+      osc.frequency.exponentialRampToValueAtTime(1400, cTime + 0.9);
+
+      gain.gain.setValueAtTime(0.05 / (i + 1), cTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, cTime + 0.85);
+
+      osc.connect(gain);
+      gain.connect(masterBus);
+      osc.start(cTime);
+      osc.stop(cTime + 0.9);
+    });
+  }
+
+  public playHauntingSkullWhisper() {
+    this.playSkullWhisperDiscovery();
+  }
+
   public playDetectorBeep(distanceNormalized: number) {
     if (this.isMuted) return;
     this.init();

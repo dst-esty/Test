@@ -125,32 +125,44 @@ async function startServer() {
       "Keep yer eyes peeled for red hematite float in the dry washes, pardner! Where there's hematite and black magnetic sand, heavy yellow gold is resting right on the bedrock.",
       "Weaver's Needle casts a long shadow when the sun drops low. The old Peralta maps claim that shadow points straight to the sealed shaft, but mind the canyon sidewinders!",
       "Jacob Waltz was a secretive German devil. He'd come into town with coarse high-grade ore wrapped in buckskin, pay his tab in raw nuggets, and disappear before dawn into the needle spires.",
+      "By gum... Adolph Ruth thought his Mexican maps would protect him, but those volcanic canyons have eyes. Finding his skull nearly a mile from his camp with two rifle slugs through the bone—that wasn't no panther or thirst, pardner. That was cold execution by someone guarding the Dutchman's secret.",
+      "I seen searchers lose their wits, but losing your head? That 1947 fellow Cravey flew in on a flying machine and ended up headless in his own bedroll. The Superstitions don't just kill men who seek Waltz's gold—they take their skulls as warnings.",
     ],
     barkeep_hank: [
       "Welcome into the Saloon, friend! Dust your boots and pull up a cedar stool. Fresh canteens and hot salt-pork beans are on the counter whenever you need replenishment.",
       "I hear all kinds of talk over these floorboards. Just yesterday a team from Phoenix swore they spotted ancient carved stone markers high above Peters Canyon!",
       "Rule number one out here: never head into the Superstition canyons without at least two full canteens and a pack of matches. The desert heat has claimed many a brave prospector.",
+      "Old-timers say Jacob Waltz swore on his deathbed that anyone who tracked his drift would lose their head. Folk laughed until Dr. Ruth came with his Mexican parchment, wrote 'Veni, Vidi, Vici' in his diary, and ended up decapitated in Needle Canyon.",
+      "Miners drink their whiskey fast when the wind howls off Weaver's Needle. Too many headless skeletons have been hauled out of those box canyons for folks to treat the Dutchman's curse like a fairy tale.",
     ],
     hostler_silas: [
       "Treat yer pack burro kindly and she'll haul two hundred pounds of quartz ore without a whimper! Feed 'em desert oats and check their hooves after rocky scree scrambles.",
       "A good burro can scent a subterranean water seep half a mile off. If she stops and snorts at dry wash gravel, start diggin'—there's water underneath!",
+      "Even the burros get skittish near Needle Canyon wash where they found Ruth's skull caught in the mesquite. Animals know when blood has soaked into the canyon sand.",
     ],
     sheriff_wyatt: [
       "Keep your sidearm holstered on the boardwalk, traveler. We keep lawful order here in Tortilla Flat, and every legitimate mining claim deed must be respected under territorial statute.",
       "Watch the high ridges if you venture east toward Needle Canyon. Outlaws and Apache lookouts know those canyons better than any mapmaker.",
+      "Dr. Ruth's case is the darkest ledger in territorial history. The autopsy showed two distinct bullet penetrations through the temples—close-range ambush rifle fire. The killer took the Peralta maps from Ruth's vest, but left his gold pocket watch and cash intact. It was an assassination for the mine's coordinates, plain and simple.",
+      "Cravey's headless body in the box canyon proved the curse didn't die with Ruth. When a skull is found perched atop a sheer ridge hundreds of feet above the skeleton, that's not wolves—that's human malice.",
     ],
     assayer_walker: [
       "Pure placer gold is malleable and does not tarnish in nitric acid. Pyrite will shatter beneath a prospector's hammer, but genuine 24-karat gold flattens into a rich leaf.",
       "Bring me any mineral specimens you chip from bedrock veins. I can calculate the Troy ounces per ton and verify if your vein is commercially viable.",
+      "Dr. Erwin Ruth acquired genuine 1848 Peralta maps from Senor Ramirez in Sonora. When his father Adolph entered the mountains, he wrote he had located the mine drift 200 feet across from a cave. Someone silenced him before he could register a claim, scattering his skull across the divide.",
+      "Notice how the victims' gold watches and wallets were left untouched? The murderer was not an ordinary thief. They wanted the Peralta maps and the Dutchman's bonanza.",
     ],
     stage_jedediah: [
       "Stagecoach runs dawn and dusk across the canyon pass. Hang onto yer hat when we whip around Fish Creek Hill—it's a thousand-foot drop to the canyon floor!",
+      "I hauled search parties out toward First Water when Dr. Ruth vanished in '31. When Brownie Holmes' hound dragged that bullet-riddled skull out of the catclaw brush, even hardened stage drivers turned pale.",
     ],
     clara_miller: [
       "If you're parched and your canteen runs dry, look for the ribbed barrel cactus. Cut the cap off and mash the pulp for cool liquid that will save your life.",
+      "Poor Dr. Ruth... he was an elderly government examiner with a crippled hip and a wooden cane. What kind of monster shoots a helpless old man through the temples for a scrap of paper?",
     ],
     gus_blacksmith: [
       "I temper every pickaxe with cold canyon spring water and high-carbon steel! A dull pick will break your wrist on granite, but my iron will slice through quartz like butter.",
+      "A lot of men have carried my picks up toward Weaver's Needle and never came back down. If you venture into the east ravine, watch the cliff edges above you—that's where the snipers waited.",
     ],
   };
 
@@ -257,22 +269,40 @@ async function startServer() {
   // Townfolk Frontier Interactive Chat & AI Response API (powered by gemini-3.8-flash + gemini-3.1-flash-tts-preview)
   app.post("/api/townfolk/chat", async (req, res) => {
     try {
-      const { characterId, characterName, userQuestion, voiceName } = req.body;
+      const { characterId, characterName, userQuestion, voiceName, curseContext } = req.body;
       if (!userQuestion || typeof userQuestion !== "string") {
         return res.status(400).json({ error: "userQuestion is required" });
       }
 
       const charKey = characterId || "old_dusty_pete";
-      const systemPrompt = NPC_PROMPTS[charKey] || "You are an 1880s Arizona Territory frontier miner in Tortilla Flat. Answer in 2-3 sentences.";
+      let systemPrompt = NPC_PROMPTS[charKey] || "You are an 1880s Arizona Territory frontier miner in Tortilla Flat. Answer in 2-3 sentences.";
       const fallbacks = NPC_FALLBACKS[charKey] || NPC_FALLBACKS.old_dusty_pete;
+
+      // Inject Curse of the Lost Dutchman context if player has discovered curse-related relics
+      if (curseContext && (curseContext.stage > 0 || (curseContext.discoveredCurseClues && curseContext.discoveredCurseClues.length > 0))) {
+        systemPrompt += `\n[HISTORICAL LORE - CURSE OF THE LOST DUTCHMAN & RUTH TRAGEDY]:
+The prospector has discovered grim physical evidence of the Superstition Mountains curse:
+- Curse Stage: ${curseContext.stageName || "Active Investigation"} (Stage ${curseContext.stage || 1} of 3)
+- Clues Discovered: ${curseContext.discoveredCurseClues ? curseContext.discoveredCurseClues.join(", ") : "Ruth Camp, Needle Canyon Skull, Cravey bivouac"}
+- Forensic Reality: In June 1931, Dr. Adolph Ruth entered with genuine Mexican Peralta maps. His headless skeleton was later found in East Ravine with the maps stolen, and his severed skull was recovered nearly a mile away in Needle Canyon wash bearing two high-powered rifle bullet execution holes through the temples! In 1947, James Cravey was found headless in his sleeping bag, his skull left on an overlooking cliff.
+- The player is asking you about this curse or related canyon deaths. Respond with solemn, authentic 1880s Western dread, reflecting on the Ruth family's fate and the macabre pattern of severed skulls.`;
+      }
+
+      const isCurseQuery = /ruth|skull|curse|cravey|head|decapitat|murder|bullet|veni|massacre/i.test(userQuestion);
 
       const ai = getGeminiClient();
       if (!ai) {
-        // Deterministic thematic fallback
-        const reply = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        // Deterministic thematic fallback - prioritize curse-specific fallback lines if user asked a curse query
+        let selectedFallback = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        if (isCurseQuery) {
+          const curseLines = fallbacks.filter((l) => /ruth|skull|curse|cravey|head|bullet/i.test(l));
+          if (curseLines.length > 0) {
+            selectedFallback = curseLines[Math.floor(Math.random() * curseLines.length)];
+          }
+        }
         return res.json({
           status: "ok",
-          reply,
+          reply: selectedFallback,
           audioPcmBase64: null,
           note: "Fallback dialogue (API key unset)",
         });

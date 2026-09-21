@@ -26,6 +26,7 @@ export const RDRColorGradeShader = {
     uWarmth: { value: 1.08 },
     uGrainIntensity: { value: 0.022 },
     uGogglesActive: { value: 0.0 },
+    uCurseIntensity: { value: 0.0 },
     uResolution: { value: new THREE.Vector2(1920, 1080) },
   },
   vertexShader: /* glsl */ `
@@ -45,6 +46,7 @@ export const RDRColorGradeShader = {
     uniform float uWarmth;
     uniform float uGrainIntensity;
     uniform float uGogglesActive;
+    uniform float uCurseIntensity;
     uniform vec2 uResolution;
 
     varying vec2 vUv;
@@ -68,7 +70,37 @@ export const RDRColorGradeShader = {
     }
 
     void main() {
-      vec4 baseColor = texture2D(tDiffuse, vUv);
+      // 0. Screen-Space Chromatic Aberration & Supernatural Shimmer (Curse of the Lost Dutchman)
+      vec4 baseColor;
+      if (uCurseIntensity > 0.001) {
+        vec2 centerOffset = vUv - vec2(0.5);
+        float dist = length(centerOffset);
+
+        // Subtle supernatural shimmering displacement waves
+        float shimmerX = sin(vUv.y * 64.0 + uTime * 4.5) * cos(vUv.x * 48.0 - uTime * 3.2);
+        float shimmerY = cos(vUv.x * 60.0 + uTime * 4.0) * sin(vUv.y * 54.0 + uTime * 2.8);
+        vec2 shimmerOffset = vec2(shimmerX, shimmerY) * (0.0025 * uCurseIntensity);
+
+        // Radial chromatic dispersion (splitting Red and Blue channels towards the screen corners)
+        float pulse = 0.90 + 0.10 * sin(uTime * 2.6);
+        float spread = (dist * 0.026 + 0.004) * uCurseIntensity * pulse;
+        vec2 normDir = normalize(centerOffset + vec2(0.0001));
+        vec2 chromaticOffset = normDir * spread;
+
+        vec2 uvR = clamp(vUv + chromaticOffset + shimmerOffset, 0.001, 0.999);
+        vec2 uvG = clamp(vUv + shimmerOffset * 0.35, 0.001, 0.999);
+        vec2 uvB = clamp(vUv - chromaticOffset - shimmerOffset * 0.65, 0.001, 0.999);
+
+        float r = texture2D(tDiffuse, uvR).r;
+        float g = texture2D(tDiffuse, uvG).g;
+        float b = texture2D(tDiffuse, uvB).b;
+        float a = texture2D(tDiffuse, uvG).a;
+
+        baseColor = vec4(r, g, b, a);
+      } else {
+        baseColor = texture2D(tDiffuse, vUv);
+      }
+
       vec3 hdr = baseColor.rgb;
 
       // 1. ACES Filmic Tone Mapping (Converts HDR bloom & light emitters smoothly to SDR without color channel clipping/flipping)
@@ -167,6 +199,17 @@ export const RDRColorGradeShader = {
       float vignette = smoothstep(0.75, 0.3, dist * (uVignetteIntensity * 2.2));
       col *= mix(1.0, vignette, uVignetteIntensity);
 
+      // Curse of the Dutchman: Supernatural cold sepia/crimson edge vignette and desaturation
+      if (uCurseIntensity > 0.001) {
+        float curseEdge = smoothstep(0.32, 0.82, dist) * uCurseIntensity;
+        vec3 curseEdgeTint = vec3(0.08, 0.015, 0.02); // eerie dark umber / dried blood
+        col = mix(col, curseEdgeTint, curseEdge * 0.45);
+
+        // Slight desaturation as the curse drains warmth
+        float l = dot(col, vec3(0.299, 0.587, 0.114));
+        col = mix(col, vec3(l), uCurseIntensity * 0.16);
+      }
+
       // 6. Subtle 35mm Film Grain (Breaks banding on desert sky gradients & adds physical camera grit)
       float grain = (hash(vUv * 400.0 + fract(uTime * 17.1)) - 0.5) * uGrainIntensity;
       col += grain * (0.6 + 0.4 * lum);
@@ -181,7 +224,13 @@ export interface PostProcessingPipeline {
   bloomPass: UnrealBloomPass;
   colorGradePass: ShaderPass;
   resize: (width: number, height: number) => void;
-  update: (delta: number, timeOfDay: number, quality: GraphicsQuality, areGogglesActive?: boolean) => void;
+  update: (
+    delta: number,
+    timeOfDay: number,
+    quality: GraphicsQuality,
+    areGogglesActive?: boolean,
+    curseIntensity?: number
+  ) => void;
   dispose: () => void;
 }
 
@@ -242,10 +291,19 @@ export function createPostProcessingPipeline(
       bloomPass.resolution.set(w, h);
       colorGradePass.uniforms.uResolution.value.set(w, h);
     },
-    update: (delta: number, timeOfDay: number, quality: GraphicsQuality, areGogglesActive?: boolean) => {
+    update: (
+      delta: number,
+      timeOfDay: number,
+      quality: GraphicsQuality,
+      areGogglesActive?: boolean,
+      curseIntensity?: number
+    ) => {
       totalTime += delta;
       colorGradePass.uniforms.uTime.value = totalTime;
       colorGradePass.uniforms.uTimeOfDay.value = timeOfDay;
+
+      // Curse of the Dutchman chromatic aberration & screen-space shimmer
+      colorGradePass.uniforms.uCurseIntensity.value = Math.max(0.0, Math.min(1.0, curseIntensity || 0.0));
 
       // Smooth optical transition into the goggles
       const targetGoggles = areGogglesActive ? 1.0 : 0.0;

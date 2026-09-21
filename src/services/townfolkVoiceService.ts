@@ -335,19 +335,24 @@ class TownfolkVoiceService {
   public async askQuestion(
     characterId: string,
     arg1: string,
-    arg2?: string,
-    arg3?: string
+    arg2?: string | any,
+    arg3?: string,
+    curseContext?: any
   ): Promise<{ reply: string; hasAudio: boolean }> {
     const profile = NPC_VOICE_PROFILES[characterId];
     let characterName = profile?.name || 'Townfolk';
     let role = profile?.role || 'Settler';
     let question = arg1;
+    let actualCurseContext = curseContext;
 
-    if (arg2 && arg3) {
-      // 4 argument form: (characterId, characterName, role, question)
+    if (typeof arg2 === 'string' && arg3) {
+      // 4 argument form: (characterId, characterName, role, question, curseContext)
       characterName = arg1;
       role = arg2;
       question = arg3;
+    } else if (typeof arg2 === 'object' && arg2 !== null) {
+      // 3 argument form: (characterId, question, curseContext)
+      actualCurseContext = arg2;
     }
 
     try {
@@ -360,6 +365,7 @@ class TownfolkVoiceService {
           characterRole: role,
           userQuestion: question,
           voiceName: profile?.geminiVoice || 'Puck',
+          curseContext: actualCurseContext,
         }),
       });
 

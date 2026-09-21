@@ -71,6 +71,34 @@ import { ApacheSmokeSignalSystem } from '../world/apacheSmokeSignals';
 import { SurfaceAnalysisResult, analyzeSurfaceAtPosition } from '../world/prospectingAnalysis';
 import { ProspectorGogglesOverlay } from './ProspectorGogglesOverlay';
 import { WorldScaleMode } from '../world/superstitionTopography';
+import { Skull } from 'lucide-react';
+import { isScatteredSkullClue } from '../services/curseNarrativeEngine';
+
+/**
+ * Authentic Historic & Forensic Locations of Scattered Skulls & Headless Remains
+ * across the Superstition Mountains wilderness (Curse of the Lost Dutchman).
+ */
+interface ScatteredSkullLocation {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  detectionRange: number; // outer range (meters) where subtle shimmering & chromatic fringe begin
+  coreRange: number;      // inner core (meters) where aberration and dread reach peak intensity
+}
+
+const HISTORIC_SKULL_LOCATIONS: ScatteredSkullLocation[] = [
+  // 1. Dr. Adolph Ruth's Severed Skull (Needle Canyon Wash catclaw thicket)
+  { id: 'ruth_skull_site', name: "Dr. Ruth's Severed Skull", x: 108, z: -28, detectionRange: 42, coreRange: 8 },
+  // 2. Dr. Adolph Ruth's Last Camp & Headless Skeleton (East Ravine of Black Top Mesa)
+  { id: 'ruth_death_camp', name: "Dr. Ruth's Headless Camp", x: 48, z: -42, detectionRange: 42, coreRange: 8 },
+  // 3. James Cravey's 1947 Headless Skeleton Bivouac in sleeping bag
+  { id: 'cravey_headless_site', name: "James Cravey's Headless Bivouac", x: 95, z: -115, detectionRange: 42, coreRange: 8 },
+  // 4. James Cravey's Bleached Skull perched on overlooking sniper ridge
+  { id: 'cravey_ridge_skull', name: "Cravey's Ridge Skull", x: 104, z: -105, detectionRange: 38, coreRange: 7 },
+  // 5. 1848 Peralta Massacre Grounds Bleached Spanish Skull
+  { id: 'massacre_spanish_skull', name: "Peralta Massacre Grounds Skull", x: -40, z: 90, detectionRange: 38, coreRange: 7 },
+];
 
 interface WorldCanvasProps {
   playerState: PlayerState;
@@ -527,6 +555,11 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   const qualityRef = useRef<GraphicsQuality>(graphicsQuality);
   qualityRef.current = graphicsQuality;
   const postProcessingRef = useRef<PostProcessingPipeline | null>(null);
+
+  // Curse of the Lost Dutchman - Screen-space chromatic aberration & shimmering effect refs
+  const curseIntensityRef = useRef<number>(0.0);
+  const curseOverlayRef = useRef<HTMLDivElement | null>(null);
+  const curseTextRef = useRef<HTMLSpanElement | null>(null);
 
   const currentDprRef = useRef<number>(1.0);
   const fpsTrackerRef = useRef<{ frames: number; time: number; lowFpsCount: number }>({
@@ -5068,6 +5101,46 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             }
           }
         }
+        // 10. Dr. Adolph Ruth's Last Camp & Headless Skeleton (48X, -42Z)
+        else if (Math.hypot(curX - 48, curZ - (-42)) < 16) {
+          if (!discoveredSummitsRef.current.has('ruth_death_camp')) {
+            discoveredSummitsRef.current.add('ruth_death_camp');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('💀 Historic Tragedy: Dr. Adolph Ruth\'s Last Camp (1931) • Headless skeletal remains of the Washington examiner found with his famous "Veni, Vidi, Vici" notebook. His skull was discovered 3/4 mile away in Needle Canyon!');
+            }
+          }
+        }
+        // 11. The Severed Skull of Dr. Adolph Ruth (108X, -28Z)
+        else if (Math.hypot(curX - 108, curZ - (-28)) < 16) {
+          if (!discoveredSummitsRef.current.has('ruth_skull_site')) {
+            discoveredSummitsRef.current.add('ruth_skull_site');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('☠️ Needle Canyon Discovery: The Severed Skull of Dr. Adolph Ruth • Discovered in December 1931 by Brownie Holmes\' hound with two execution rifle holes through the temples!');
+            }
+          }
+        }
+        // 12. James Cravey's 1947 Helicopter Bivouac & Headless Remains (95X, -115Z)
+        else if (Math.hypot(curX - 95, curZ - (-115)) < 16) {
+          if (!discoveredSummitsRef.current.has('cravey_headless_site')) {
+            discoveredSummitsRef.current.add('cravey_headless_site');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('💀 Historic Mystery: James Cravey\'s 1947 Helicopter Bivouac • Headless skeleton found in sleeping bag months after chartering a helicopter into the canyon!');
+            }
+          }
+        }
+        // 13. The Dick Holmes Clues & 1891 Candle Box of Gold (78X, -48Z)
+        else if (Math.hypot(curX - 78, curZ - (-48)) < 16) {
+          if (!discoveredSummitsRef.current.has('dick_holmes_site')) {
+            discoveredSummitsRef.current.add('dick_holmes_site');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('✨ Historic Legend: Dick Holmes Clues & 1891 Candle Box • Discovered the "Face in the Rock" pass and the wooden candle box with ~48 lbs of wire gold ore from Jacob Waltz\'s deathbed!');
+            }
+          }
+        }
       }
 
       // Vertical Gravity, Ladder Climbing, and Ground Clamping
@@ -6531,6 +6604,69 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         renderer.shadowMap.autoUpdate = true;
       }
 
+      // Curse of the Lost Dutchman: Evaluate screen-space chromatic aberration & shimmer near skull clues
+      let maxCurseProximity = 0;
+      let closestSkullName = '';
+      const curPx = playerPos.current.x;
+      const curPz = playerPos.current.z;
+
+      // 1. Evaluate proximity to historic skull / headless skeletal sites
+      for (let sIdx = 0; sIdx < HISTORIC_SKULL_LOCATIONS.length; sIdx++) {
+        const site = HISTORIC_SKULL_LOCATIONS[sIdx];
+        const dist = Math.hypot(curPx - site.x, curPz - site.z);
+        if (dist < site.detectionRange) {
+          const norm = 1.0 - Math.max(0, Math.min(1.0, (dist - site.coreRange) / (site.detectionRange - site.coreRange)));
+          // Quadratic ease-in for atmospheric buildup
+          const prox = norm * norm;
+          if (prox > maxCurseProximity) {
+            maxCurseProximity = prox;
+            closestSkullName = site.name;
+          }
+        }
+      }
+
+      // 2. Also evaluate any dynamic clues / landmarks passed via props
+      if (clues && landmarks) {
+        for (let cIdx = 0; cIdx < clues.length; cIdx++) {
+          const clue = clues[cIdx];
+          if (isScatteredSkullClue(clue.id)) {
+            const lm = landmarks.find((l) => l.id === clue.landmarkId);
+            if (lm) {
+              const dist = Math.hypot(curPx - lm.position.x, curPz - lm.position.z);
+              const detRange = Math.max(lm.radius * 2.5, 40);
+              const coreR = Math.max(lm.radius * 0.5, 7);
+              if (dist < detRange) {
+                const norm = 1.0 - Math.max(0, Math.min(1.0, (dist - coreR) / (detRange - coreR)));
+                const prox = norm * norm;
+                if (prox > maxCurseProximity) {
+                  maxCurseProximity = prox;
+                  closestSkullName = lm.name;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Smooth interpolation for chromatic aberration & shimmering waves
+      const curseLerpRate = maxCurseProximity > curseIntensityRef.current ? delta * 3.8 : delta * 2.0;
+      curseIntensityRef.current += (maxCurseProximity - curseIntensityRef.current) * Math.min(1.0, curseLerpRate);
+      const currentCurse = curseIntensityRef.current;
+
+      // Update screen-space HUD overlay directly without triggering React re-renders
+      if (curseOverlayRef.current) {
+        if (currentCurse > 0.015) {
+          curseOverlayRef.current.style.display = 'block';
+          curseOverlayRef.current.style.opacity = Math.min(1.0, currentCurse * 1.35).toFixed(3);
+          if (curseTextRef.current && closestSkullName) {
+            curseTextRef.current.textContent = `Curse of the Lost Dutchman • ${closestSkullName} Nearby`;
+          }
+        } else {
+          curseOverlayRef.current.style.display = 'none';
+          curseOverlayRef.current.style.opacity = '0';
+        }
+      }
+
       // Render scene via cinematic post-processing pipeline or fallback to standard renderer
       if (postProcessingRef.current) {
         try {
@@ -6538,7 +6674,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             delta,
             timeOfDayRef.current,
             qualityRef.current,
-            Boolean(areGogglesActiveRef.current)
+            Boolean(areGogglesActiveRef.current),
+            currentCurse
           );
           postProcessingRef.current.composer.render();
         } catch (compErr) {
@@ -6947,6 +7084,36 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           </div>
         </div>
       )}
+
+      {/* Curse of the Lost Dutchman - Screen-Space Chromatic Aberration & Supernatural Shimmer Overlay */}
+      <div
+        ref={curseOverlayRef}
+        id="curse-shimmer-overlay"
+        className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+        style={{ opacity: 0, display: 'none' }}
+      >
+        {/* Subtle Radial Chromatic Fringe & Edge Desaturation Vignette */}
+        <div className="absolute inset-0 bg-radial from-transparent via-transparent to-red-950/40 mix-blend-multiply pointer-events-none" />
+        <div className="absolute inset-0 bg-radial from-transparent via-transparent to-stone-950/60 pointer-events-none" />
+
+        {/* Supernatural Shimmer Border & Pulsing Ghostly Halo */}
+        <div className="absolute inset-0 border-[2px] border-red-900/30 animate-pulse pointer-events-none" />
+
+        {/* Screen-Edge Chromatic Separation Accents */}
+        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-red-600/30 via-transparent to-cyan-500/30 blur-[1px] pointer-events-none" />
+        <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-cyan-500/30 via-transparent to-red-600/30 blur-[1px] pointer-events-none" />
+
+        {/* Eerie Proximity Indicator Banner */}
+        <div className="absolute top-18 left-1/2 -translate-x-1/2 flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-stone-950/85 border border-red-900/70 shadow-[0_0_20px_rgba(185,28,28,0.3)] backdrop-blur-xs select-none pointer-events-none">
+          <Skull className="w-4 h-4 text-red-400 animate-pulse drop-shadow-[0_0_8px_rgba(248,113,113,0.8)]" />
+          <span
+            ref={curseTextRef}
+            className="font-mono text-xs tracking-wider text-red-200/95 font-semibold uppercase drop-shadow"
+          >
+            Curse of the Lost Dutchman • Bleached Remains Nearby
+          </span>
+        </div>
+      </div>
 
       {/* Authentic Dual-Lens Prospector Goggles Analysis Overlay */}
       <ProspectorGogglesOverlay

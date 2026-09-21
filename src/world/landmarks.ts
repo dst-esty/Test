@@ -5,6 +5,8 @@ import { buildTortillaFlatSettlement } from './tortillaFlat';
 import { buildMalapaisMountainSummit, buildPistolCanyonGorge } from './malapaisPistol';
 import { buildPetersCanyonPinchAndBivouac } from './petersCanyonPinch';
 import { buildSuperstitionPeaksAndSprings } from './superstitionPeaks';
+import { buildRuthMysteryAndSkeletons } from './ruthMysteryAndSkeletons';
+import { buildDickHolmesCluesSite } from './dickHolmesCluesSite';
 
 export interface LandmarkMeshes {
   weaversNeedle: THREE.Group;
@@ -28,6 +30,11 @@ export interface LandmarkMeshes {
   squawBoxCanyon?: THREE.Group;
   petersCanyonAndCave?: THREE.Group;
   petersMesa?: THREE.Group;
+  ruthCamp?: THREE.Group;
+  ruthSkull?: THREE.Group;
+  craveySite?: THREE.Group;
+  massacreSkeletons?: THREE.Group;
+  dickHolmesSite?: THREE.Group;
   waterRefillPoints: THREE.Vector3[];
 }
 
@@ -1083,6 +1090,21 @@ export function createLandmarkStructures(
   // ==========================================
   const peakMeshes = buildSuperstitionPeaksAndSprings(scene, waterRefillPoints);
 
+  // ==========================================
+  // 14. Curse of the Lost Dutchman & The Adolph Ruth Mystery (1931)
+  // Dr. Ruth's East Ravine camp & headless skeleton, severed skull in Needle Canyon wash,
+  // 1947 James Cravey helicopter bivouac, and 1848 Peralta Massacre wash remains
+  // ==========================================
+  const ruthMystery = buildRuthMysteryAndSkeletons(scene);
+
+  // ==========================================
+  // 15. The Dick Holmes Clues & The 1891 Candle Box of Gold
+  // Location: Needle Canyon Trail Divide & The "Face in the Rock" Pass (78X, -48Z)
+  // Recreating the authentic 1891 deathbed clues, candle box of wire gold ore,
+  // the natural "Face in the Rock" profile, and the Holmes Manuscript field folio.
+  // ==========================================
+  const dickHolmesData = buildDickHolmesCluesSite(scene);
+
   return {
     weaversNeedle: needleGroup,
     trailhead: trailheadGroup,
@@ -1105,6 +1127,11 @@ export function createLandmarkStructures(
     squawBoxCanyon: peakMeshes.squawBoxCanyon,
     petersCanyonAndCave: peakMeshes.petersCanyonAndCave,
     petersMesa: peakMeshes.petersMesa,
+    ruthCamp: ruthMystery.ruthCamp,
+    ruthSkull: ruthMystery.ruthSkull,
+    craveySite: ruthMystery.craveySite,
+    massacreSkeletons: ruthMystery.massacreSkeletons,
+    dickHolmesSite: dickHolmesData.rootGroup,
     waterRefillPoints,
   };
 }

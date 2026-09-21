@@ -36,6 +36,7 @@ import { isMobileDevice } from './utils/device';
 import { safeLocalStorage } from './utils/storage';
 import { VigilanceStatus } from './services/apacheVigilanceService';
 import { WorldScaleMode, formatUsgsDistance } from './world/superstitionTopography';
+import { isScatteredSkullClue } from './services/curseNarrativeEngine';
 
 export default function App() {
   // Player State
@@ -1107,7 +1108,13 @@ export default function App() {
   // Handle clue discovery
   const handleDiscoverClue = useCallback(
     (clueId: string, landmarkId: string) => {
-      soundEngine.playDiscovery();
+      const isSkull = isScatteredSkullClue(clueId);
+      if (isSkull) {
+        soundEngine.playSkullWhisperDiscovery();
+        showBanner('💀 Haunting whispers drift down the canyon as scattered bleached remains are uncovered...');
+      } else {
+        soundEngine.playDiscovery();
+      }
 
       setClues((prev) =>
         prev.map((c) => (c.id === clueId ? { ...c, discovered: true } : c))
@@ -1130,7 +1137,7 @@ export default function App() {
         multiplayer.broadcastDiscovery(targetLm.name, targetLm.shortDesc);
       }
     },
-    [clues, landmarks]
+    [clues, landmarks, showBanner]
   );
 
   // Multiplayer Actions
@@ -1921,6 +1928,7 @@ export default function App() {
           npc={activeDialogueNPC}
           isOpen={Boolean(activeDialogueNPC)}
           onClose={() => setActiveDialogueNPC(null)}
+          clues={clues}
           onShowBanner={showBanner}
         />
       )}
