@@ -495,7 +495,7 @@ class SoundEngine {
     source.stop(t + duration);
   }
 
-  public updateWeatherAmbiance(weather: WeatherType, isUnderground: boolean = false) {
+  public updateWeatherAmbiance(weather: WeatherType, isUnderground: boolean = false, isHunkeredDown: boolean = false) {
     if (!this.ctx || this.isMuted) return;
     const t = this.ctx.currentTime;
     let targetGain = 0.06;
@@ -505,11 +505,11 @@ class SoundEngine {
       targetGain = 0.02;
       targetFreq = 220;
     } else if (weather === 'sandstorm') {
-      targetGain = 0.16; // Howling desert dust storm
-      targetFreq = 780;
+      targetGain = isHunkeredDown ? 0.07 : 0.17; // Muffled while hunkered down in canvas/bandana
+      targetFreq = isHunkeredDown ? 290 : 820; // Lower low-pass cutoff when crouched to ground
     } else if (weather === 'storm') {
-      targetGain = 0.13; // Monsoon rain and storm winds
-      targetFreq = 560;
+      targetGain = isHunkeredDown ? 0.06 : 0.13;
+      targetFreq = isHunkeredDown ? 260 : 560;
     } else if (weather === 'light_rain') {
       targetGain = 0.08; // Gentle desert shower
       targetFreq = 480;
@@ -517,8 +517,8 @@ class SoundEngine {
       targetGain = 0.05; // Calm evening breeze
       targetFreq = 360;
     } else {
-      targetGain = 0.06;
-      targetFreq = 400;
+      targetGain = isHunkeredDown ? 0.03 : 0.06;
+      targetFreq = isHunkeredDown ? 250 : 400;
     }
 
     if (this.windGain) {
@@ -527,6 +527,135 @@ class SoundEngine {
     if (this.windFilter) {
       this.windFilter.frequency.setTargetAtTime(targetFreq, t, 0.6);
     }
+  }
+
+  /**
+   * Sound effect played when prospector hunkers down against a sandstorm or weather gale:
+   * Heavy canvas blanket rustle, bandana cinching, and low muffled protective breathing.
+   */
+  public playHunkerDown() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // 1. Coarse canvas fabric rustle (shaped filtered noise burst)
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.45);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.22));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuffer;
+
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.setValueAtTime(680, t);
+    noiseFilter.frequency.exponentialRampToValueAtTime(320, t + 0.4);
+    noiseFilter.Q.setValueAtTime(2.2, t);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.001, t);
+    noiseGain.gain.linearRampToValueAtTime(0.24, t + 0.06);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.42);
+
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.ctx.destination);
+    noise.start(t);
+
+    // 2. Low ground thud / knee drop
+    const thud = this.ctx.createOscillator();
+    const thudGain = this.ctx.createGain();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(110, t);
+    thud.frequency.exponentialRampToValueAtTime(45, t + 0.28);
+    thudGain.gain.setValueAtTime(0.2, t);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+
+    thud.connect(thudGain);
+    thudGain.connect(this.ctx.destination);
+    thud.start(t);
+    thud.stop(t + 0.3);
+  }
+
+  /**
+   * Sound effect played when standing back up from hunker stance:
+   * Crisp leather/canvas shake, dust brushing off coat.
+   */
+  public playStandUp() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.35);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.15));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(800, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.18, t + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    noise.start(t);
+  }
+
+  /**
+   * Ominous low distant rumble and howling gust played when a Haboob/sandstorm approaches the valley.
+   */
+  public playSandstormWarning() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // Deep sub rumble (volcanic canyon wind resonance)
+    const rumble = this.ctx.createOscillator();
+    const rumbleGain = this.ctx.createGain();
+    rumble.type = 'sine';
+    rumble.frequency.setValueAtTime(58, t);
+    rumble.frequency.linearRampToValueAtTime(74, t + 1.2);
+    rumble.frequency.linearRampToValueAtTime(48, t + 2.8);
+
+    rumbleGain.gain.setValueAtTime(0.001, t);
+    rumbleGain.gain.linearRampToValueAtTime(0.28, t + 0.8);
+    rumbleGain.gain.exponentialRampToValueAtTime(0.001, t + 3.0);
+
+    rumble.connect(rumbleGain);
+    rumbleGain.connect(this.ctx.destination);
+    rumble.start(t);
+    rumble.stop(t + 3.1);
+
+    // High eerie desert whistle
+    const whistle = this.ctx.createOscillator();
+    const whistleGain = this.ctx.createGain();
+    whistle.type = 'triangle';
+    whistle.frequency.setValueAtTime(380, t + 0.2);
+    whistle.frequency.linearRampToValueAtTime(520, t + 1.4);
+    whistle.frequency.linearRampToValueAtTime(310, t + 2.6);
+
+    whistleGain.gain.setValueAtTime(0.001, t + 0.2);
+    whistleGain.gain.linearRampToValueAtTime(0.09, t + 1.0);
+    whistleGain.gain.exponentialRampToValueAtTime(0.001, t + 2.8);
+
+    whistle.connect(whistleGain);
+    whistleGain.connect(this.ctx.destination);
+    whistle.start(t + 0.2);
+    whistle.stop(t + 2.9);
   }
 
   public playFootstep() {

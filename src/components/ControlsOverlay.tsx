@@ -20,6 +20,7 @@ import {
   Box,
   ShieldAlert,
   ShieldCheck,
+  Shield,
   Shovel,
   DollarSign,
   Layers,
@@ -130,6 +131,7 @@ interface ControlsOverlayProps {
   onConsumeFood?: (type: 'venison' | 'bighorn' | 'rabbit' | 'provisions') => void;
   onPurchaseProvisions?: (amount: number, goldCost: number) => void;
   onDrinkCanteen?: () => void;
+  onToggleHunkerDown?: () => void;
   vigilanceStatus?: VigilanceStatus | null;
   onOpenTitleScreen?: () => void;
 }
@@ -147,6 +149,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onToggleCamera,
   viewMode,
   onToggleMount,
+  onToggleHunkerDown,
   onDrinkCanteen,
   onDig,
   interactionPrompt,
@@ -351,6 +354,9 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           e.preventDefault();
           onToggleMount();
         }
+      } else if (e.code === 'KeyQ') {
+        e.preventDefault();
+        onToggleHunkerDown?.();
       } else if (e.code === 'Escape') {
         if (isVigilanceModalOpen) {
           e.preventDefault();
@@ -363,7 +369,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isVigilanceModalOpen, isInventoryOpen, toggleHud, onToggleGoggles, playerState.isRidingMount, onToggleMount]);
+  }, [isVigilanceModalOpen, isInventoryOpen, toggleHud, onToggleGoggles, playerState.isRidingMount, onToggleMount, onToggleHunkerDown]);
 
   const tools: { id: PlayerState['equippedTool']; label: string; icon: React.ReactNode; key: string }[] = [
     { id: 'hands', label: 'Bare Hands', icon: <Hand className="w-4 h-4" />, key: '~' },
@@ -746,6 +752,22 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             </div>
           )}
 
+          {/* Hunkered Down Survival Status Pill */}
+          {playerState.isHunkeredDown && (playerState.health || 0) > 0 && (
+            <div
+              id="hud-hunkered-down-badge"
+              onClick={onToggleHunkerDown}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/90 border border-amber-400/80 shadow-[0_0_15px_rgba(245,158,11,0.5)] backdrop-blur-md text-[10px] font-mono text-amber-200 select-none animate-fade-in ${
+                onToggleHunkerDown ? 'cursor-pointer hover:bg-amber-900 active:scale-95' : ''
+              }`}
+              title="Hunkered down in survival stance behind bedroll & neckerchief! Resisting desert sandstorms and gale dehydration. Click or press [Q] to stand."
+            >
+              <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="font-bold tracking-wide">HUNKERED DOWN [Q] • DEHYDRATION -80%</span>
+              {onToggleHunkerDown && <span className="text-[9px] text-amber-300 underline ml-0.5">STAND</span>}
+            </div>
+          )}
+
           {/* Desert Shade Recovery Badge Pill */}
           {playerState.isInShade && !playerState.isExhausted && (playerState.vigour ?? 100) >= 20 && (playerState.health || 0) > 0 && (
             <div
@@ -1006,6 +1028,37 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                     }`}
                   >
                     {playerState.isRidingMount ? 'Dismount [M]' : 'Mount [M]'}
+                  </span>
+                </button>
+              )}
+
+              {/* Survival Hunker Down / Stand button */}
+              {onToggleHunkerDown && (
+                <button
+                  id="action-hunker-down-btn"
+                  onClick={() => {
+                    onToggleHunkerDown();
+                    setIsSupplyCollapsed(true);
+                  }}
+                  className={`w-full mt-2 flex items-center justify-between px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold text-[11px] shadow-md ${
+                    playerState.isHunkeredDown
+                      ? 'border-amber-400 bg-amber-600/90 text-stone-950 shadow-[0_0_12px_rgba(245,158,11,0.5)]'
+                      : 'border-amber-600/60 bg-stone-850 hover:bg-stone-800 text-amber-200 hover:text-amber-100 hover:border-amber-400'
+                  }`}
+                  title="Hunker Down into protective survival crouch behind bedroll [Q]"
+                >
+                  <div className="flex items-center gap-1.5 truncate">
+                    <Shield className="w-3.5 h-3.5" />
+                    <span className="truncate">
+                      {playerState.isHunkeredDown ? 'Hunkered Down' : 'Hunker Down'}
+                    </span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-mono shrink-0 ml-1 ${
+                      playerState.isHunkeredDown ? 'text-stone-950 font-bold' : 'text-amber-400'
+                    }`}
+                  >
+                    {playerState.isHunkeredDown ? 'Stand [Q]' : 'Hunker [Q]'}
                   </span>
                 </button>
               )}
@@ -1592,7 +1645,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                       }}
                       className="pointer-events-auto px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/40 text-[10px] text-amber-300 font-bold border border-amber-500/40 cursor-pointer transition active:scale-95"
                     >
-                      {isAimingRifle ? `SCOPED ${scopeZoom ? scopeZoom.toFixed(1) + 'X' : ''}` : '[V / RMB] AIM'}
+                      {isAimingRifle ? `SCOPED ${scopeZoom ? scopeZoom.toFixed(1) + 'X' : ''}` : '[V] SCOPE'}
                     </button>
                     <span className="text-sm font-bold text-amber-300">
                       {playerState.ammo} <span className="text-[10px] font-normal text-stone-400">ROUNDS</span>
@@ -2196,6 +2249,33 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               >
                 <span className="text-base leading-none">⬆️</span>
                 <span className="text-[9px] font-mono font-bold tracking-wider uppercase mt-0.5">JUMP</span>
+              </button>
+            )}
+
+            {/* Mobile Hunker Down / Stand button */}
+            {onToggleHunkerDown && (
+              <button
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onToggleHunkerDown();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleHunkerDown();
+                }}
+                className={`w-13 h-13 landscape:w-12 landscape:h-12 rounded-full border-2 shadow-xl backdrop-blur-md flex flex-col items-center justify-center transition-all active:scale-95 touch-manipulation cursor-pointer ${
+                  playerState.isHunkeredDown
+                    ? 'bg-amber-600 border-amber-300 text-stone-950 font-bold shadow-[0_0_20px_rgba(245,158,11,0.6)]'
+                    : 'bg-stone-900/85 border-amber-500/70 text-amber-200'
+                }`}
+                title="Hunker Down / Stand Up [Q]"
+                aria-label="Hunker Down or Stand Up"
+              >
+                <span className="text-base leading-none">🛡️</span>
+                <span className="text-[8px] font-mono font-bold tracking-wider uppercase mt-0.5">
+                  {playerState.isHunkeredDown ? 'STAND' : 'HUNKER'}
+                </span>
               </button>
             )}
 

@@ -1,13 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { WeatherType } from '../types';
-import { CloudRain, Wind, Sun, CloudLightning, Sunset, Cloud } from 'lucide-react';
+import { CloudRain, Wind, Sun, CloudLightning, Sunset, Cloud, Shield } from 'lucide-react';
 import { multiplayer } from '../multiplayer/multiplayerService';
+import { dynamicWeatherEngine } from '../services/dynamicWeatherEngine';
 
 interface WeatherCanvasOverlayProps {
   weather: WeatherType;
   timeOfDay: number;
   isUnderground?: boolean;
   lightningFlashIntensity?: number;
+  isHunkeredDown?: boolean;
+  onToggleHunkerDown?: () => void;
+  onTriggerSandstorm?: () => void;
 }
 
 interface RainDroplet {
@@ -45,10 +49,18 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
   timeOfDay,
   isUnderground = false,
   lightningFlashIntensity = 0,
+  isHunkeredDown = false,
+  onToggleHunkerDown,
+  onTriggerSandstorm,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [badgeVisible, setBadgeVisible] = useState(true);
   const badgeTimerRef = useRef<number | null>(null);
+  const isHunkeredDownRef = useRef(isHunkeredDown);
+
+  useEffect(() => {
+    isHunkeredDownRef.current = isHunkeredDown;
+  }, [isHunkeredDown]);
 
   // Smooth weather transition alphas (0.0 to 1.0)
   const alphasRef = useRef({
@@ -158,24 +170,43 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
         const gust = 1.0 + 0.35 * Math.sin(gustPhaseRef.current * 0.8) * Math.sin(gustPhaseRef.current * 1.7);
 
         // A. Atmospheric dusty lens vignette
+        const isHunkered = isHunkeredDownRef.current;
         const grad = ctx.createRadialGradient(
           width / 2,
           height / 2,
-          Math.min(width, height) * 0.28,
+          Math.min(width, height) * (isHunkered ? 0.20 : 0.28),
           width / 2,
           height / 2,
-          Math.max(width, height) * 0.72
+          Math.max(width, height) * (isHunkered ? 0.65 : 0.72)
         );
         grad.addColorStop(0, 'rgba(180, 95, 35, 0)');
-        grad.addColorStop(0.5, `rgba(195, 110, 45, ${0.12 * a * gust})`);
-        grad.addColorStop(1, `rgba(165, 80, 25, ${0.48 * a * gust})`);
+        grad.addColorStop(0.5, `rgba(195, 110, 45, ${(isHunkered ? 0.08 : 0.12) * a * gust})`);
+        grad.addColorStop(1, `rgba(165, 80, 25, ${(isHunkered ? 0.65 : 0.48) * a * gust})`);
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, width, height);
 
+        // A-2. If Hunkered Down: Protective canvas blanket & neckerchief bandana vignette around edges
+        if (isHunkered) {
+          const shelterGrad = ctx.createRadialGradient(
+            width / 2,
+            height / 2,
+            Math.min(width, height) * 0.35,
+            width / 2,
+            height / 2,
+            Math.max(width, height) * 0.75
+          );
+          shelterGrad.addColorStop(0, 'rgba(40, 22, 10, 0)');
+          shelterGrad.addColorStop(0.6, 'rgba(50, 28, 14, 0.35)');
+          shelterGrad.addColorStop(1, 'rgba(28, 15, 8, 0.88)');
+          ctx.fillStyle = shelterGrad;
+          ctx.fillRect(0, 0, width, height);
+        }
+
         // B. Whipping horizontal sand dust streaks
         ctx.save();
+        const grainIntensity = isHunkered ? 0.38 : 1.0;
         for (const g of sandGrainsRef.current) {
-          g.x += g.speed * gust * dt;
+          g.x += g.speed * gust * (isHunkered ? 0.75 : 1.0) * dt;
           g.y += (Math.sin(g.x * 0.01 + gustPhaseRef.current) * 35) * dt;
 
           if (g.x > width + g.len) {
@@ -183,11 +214,11 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
             g.y = Math.random() * height;
           }
 
-          ctx.strokeStyle = `${g.color}${g.alpha * a * gust})`;
+          ctx.strokeStyle = `${g.color}${g.alpha * a * gust * grainIntensity})`;
           ctx.lineWidth = g.width;
           ctx.beginPath();
           ctx.moveTo(g.x, g.y);
-          ctx.lineTo(g.x - g.len * (0.8 + gust * 0.3), g.y - 2);
+          ctx.lineTo(g.x - g.len * (0.8 + gust * 0.3) * (isHunkered ? 0.65 : 1.0), g.y - 2);
           ctx.stroke();
         }
         ctx.restore();
@@ -419,6 +450,7 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
     const curIdx = sequence.indexOf(weather);
     const nextWeather = sequence[(curIdx + 1) % sequence.length];
     multiplayer.changeWeather(nextWeather);
+    dynamicWeatherEngine.syncWeather(nextWeather);
   };
 
   return (
@@ -428,6 +460,72 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
         id="dynamic-weather-screen-canvas"
         className="absolute inset-0 pointer-events-none z-10 w-full h-full"
       />
+
+      {/* Sandstorm Haboob Survival Action Banner */}
+      {weather === 'sandstorm' && !isUnderground && (
+        <div className="absolute top-18 sm:top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-auto select-none max-w-[95vw] sm:max-w-xl transition-all animate-fade-in">
+          {isHunkeredDown ? (
+            <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-stone-950/90 border-2 border-amber-500/80 shadow-[0_0_25px_rgba(245,158,11,0.45)] backdrop-blur-md text-amber-200 font-sans">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center shrink-0">
+                <Shield className="w-5 h-5 text-amber-300" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-amber-300 uppercase tracking-wider font-mono">
+                    Hunkered Down
+                  </span>
+                  <span className="text-[10px] bg-amber-500/20 text-amber-200 border border-amber-400/30 px-1.5 py-0.2 rounded font-mono font-bold">
+                    -80% Thirst Drain
+                  </span>
+                </div>
+                <p className="text-[11px] text-stone-300 leading-tight mt-0.5 truncate">
+                  Bracing low behind bedroll & neckerchief against the dust gale.
+                </p>
+              </div>
+              {onToggleHunkerDown && (
+                <button
+                  id="weather-stand-up-btn"
+                  onClick={onToggleHunkerDown}
+                  className="px-3 py-1.5 rounded-xl bg-stone-850 hover:bg-stone-800 border border-amber-400/60 text-amber-200 font-mono text-xs font-bold transition-all active:scale-95 shadow-md cursor-pointer shrink-0"
+                  title="Stand back up [Q]"
+                >
+                  Stand [Q]
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-red-950/95 via-stone-950/95 to-red-950/95 border-2 border-red-500 shadow-[0_0_30px_rgba(239,68,68,0.7)] backdrop-blur-md text-red-100 font-sans animate-pulse">
+              <div className="w-8 h-8 rounded-xl bg-red-600/30 border border-red-400/60 flex items-center justify-center shrink-0">
+                <Wind className="w-5 h-5 text-red-400 animate-spin" style={{ animationDuration: '4s' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-red-400 uppercase tracking-wider font-mono">
+                    Haboob Dust Storm!
+                  </span>
+                  <span className="text-[10px] bg-red-600/40 text-red-200 border border-red-400/50 px-1.5 py-0.2 rounded font-mono font-bold animate-bounce">
+                    3.5x Dehydration Surge
+                  </span>
+                </div>
+                <p className="text-[11px] text-stone-300 leading-tight mt-0.5 truncate">
+                  Choking sand wall parches throat! Hunker down or seek cave/tent shelter.
+                </p>
+              </div>
+              {onToggleHunkerDown && (
+                <button
+                  id="weather-hunker-down-btn"
+                  onClick={onToggleHunkerDown}
+                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-stone-950 font-mono text-xs font-bold shadow-lg transition-all active:scale-95 cursor-pointer shrink-0 flex items-center gap-1.5"
+                  title="Hunker Down into protective survival crouch [Q]"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>Hunker [Q]</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Synchronized Meteorological Status Pill (Interactive to cycle weather / summon rain) */}
       <div

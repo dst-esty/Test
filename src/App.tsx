@@ -21,6 +21,8 @@ import { TownfolkDialogueOverlay, DialogueNPCInfo } from './components/TownfolkD
 import { GameOverModal } from './components/GameOverModal';
 import { CompassHUD } from './components/CompassHUD';
 import { CinematicSplash } from './components/CinematicSplash';
+import { WeatherCanvasOverlay } from './components/WeatherCanvasOverlay';
+import { dynamicWeatherEngine } from './services/dynamicWeatherEngine';
 import { INITIAL_LANDMARKS, INITIAL_CLUES } from './world/clues';
 import { soundEngine } from './audio/soundEffects';
 import { westernMusic } from './audio/westernMusic';
@@ -474,6 +476,38 @@ export default function App() {
   // Universal Synchronized Sky & Weather Instance
   const [timeOfDay, setTimeOfDay] = useState<number>(() => multiplayer.getUniversalTimeOfDay());
   const [weather, setWeather] = useState<WeatherType>(() => multiplayer.getUniversalWeather());
+
+  // Register dynamic weather events (sandstorms, haboobs, and dust warnings)
+  useEffect(() => {
+    dynamicWeatherEngine.setHandlers({
+      onWeatherChange: (newWeather) => {
+        setWeather(newWeather);
+        multiplayer.changeWeather(newWeather);
+      },
+      onBanner: (message) => {
+        showBanner(message);
+      },
+    });
+  }, [showBanner]);
+
+  const toggleHunkerRef = useRef<(() => void) | null>(null);
+  const handleToggleHunkerDown = useCallback(() => {
+    if (toggleHunkerRef.current) {
+      toggleHunkerRef.current();
+    } else {
+      setPlayerState((prev) => {
+        const next = !prev.isHunkeredDown;
+        if (next) {
+          soundEngine.playHunkerDown();
+          showBanner("🛡️ Hunkered Down! Bracing against the elements in canvas bedroll & neckerchief.");
+        } else {
+          soundEngine.playStandUp();
+          showBanner("Standing up from hunker stance.");
+        }
+        return { ...prev, isHunkeredDown: next };
+      });
+    }
+  }, [showBanner]);
 
   // World Scale Mode: '1:1' (True USGS 7.5-minute Quadrangle Scale) vs 'compact'
   const [worldScaleMode, setWorldScaleMode] = useState<WorldScaleMode>(() => {
@@ -1588,6 +1622,19 @@ export default function App() {
         areGogglesActive={areGogglesActive}
         onToggleGoggles={handleToggleGoggles}
         worldScaleMode={worldScaleMode}
+        onRegisterToggleHunkerHandler={(fn) => {
+          toggleHunkerRef.current = fn;
+        }}
+        onToggleHunkerDown={handleToggleHunkerDown}
+      />
+
+      {/* Dynamic Weather Screen Atmosphere & Haboob Sandstorm Overlay */}
+      <WeatherCanvasOverlay
+        weather={weather}
+        timeOfDay={timeOfDay}
+        isUnderground={playerState.isInsideMine}
+        isHunkeredDown={playerState.isHunkeredDown}
+        onToggleHunkerDown={handleToggleHunkerDown}
       />
 
       {/* Compass & Diurnal Cycle HUD with Day/Night Illumination Toggle & Endless Coordinates */}
@@ -1633,6 +1680,7 @@ export default function App() {
         nearestLandmark={nearestLandmark}
         isAimingRifle={isAimingRifle}
         scopeZoom={rifleScopeZoom}
+        onToggleHunkerDown={handleToggleHunkerDown}
         onToggleAimRifle={() => {
           if (toggleScopeHandlerRef.current) toggleScopeHandlerRef.current();
         }}

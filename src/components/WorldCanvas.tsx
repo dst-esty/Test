@@ -26,6 +26,7 @@ import { CavalryPatrolManager } from '../world/cavalryPatrol';
 import { AtmosphereManager } from '../world/atmosphere';
 import { MineBuildingSystem, STRUCTURE_BLUEPRINTS, validateStructurePlacement } from '../world/mineBuilding';
 import { soundEngine } from '../audio/soundEffects';
+import { dynamicWeatherEngine } from '../services/dynamicWeatherEngine';
 import { createRifleModel } from '../world/rifleModel';
 import {
   ClaimInfo,
@@ -180,6 +181,8 @@ interface WorldCanvasProps {
   areGogglesActive?: boolean;
   onToggleGoggles?: () => void;
   worldScaleMode?: WorldScaleMode;
+  onRegisterToggleHunkerHandler?: (fn: () => void) => void;
+  onToggleHunkerDown?: () => void;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
@@ -259,6 +262,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   areGogglesActive = false,
   onToggleGoggles,
   worldScaleMode = '1:1',
+  onRegisterToggleHunkerHandler,
+  onToggleHunkerDown,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
@@ -600,6 +605,37 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   const renderFrameCount = useRef<number>(0);
   const wasUndergroundRef = useRef<boolean>(false);
   const isWindowFocusedRef = useRef<boolean>(true);
+  const isHunkeredDownRef = useRef<boolean>(playerState.isHunkeredDown ?? false);
+
+  const executeToggleHunker = useCallback(() => {
+    if (isGameOverRef.current) return;
+    const next = !isHunkeredDownRef.current;
+    isHunkeredDownRef.current = next;
+    setPlayerState((prev) => ({ ...prev, isHunkeredDown: next }));
+    if (next) {
+      soundEngine.playHunkerDown();
+      if (onShowBanner) {
+        onShowBanner("🛡️ Hunkered Down! Bracing against the elements in canvas bedroll & neckerchief.");
+      }
+    } else {
+      soundEngine.playStandUp();
+      if (onShowBanner) {
+        onShowBanner("Standing up from hunker stance.");
+      }
+    }
+  }, [onShowBanner, setPlayerState]);
+
+  useEffect(() => {
+    if (onRegisterToggleHunkerHandler) {
+      onRegisterToggleHunkerHandler(executeToggleHunker);
+    }
+  }, [onRegisterToggleHunkerHandler, executeToggleHunker]);
+
+  useEffect(() => {
+    if (typeof playerState.isHunkeredDown === 'boolean') {
+      isHunkeredDownRef.current = playerState.isHunkeredDown;
+    }
+  }, [playerState.isHunkeredDown]);
 
   // Dynamic quality adjustment without rebuilding scene
   useEffect(() => {
@@ -2928,10 +2964,21 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      if (e.code === 'KeyQ') {
+        e.preventDefault();
+        executeToggleHunker();
+      }
+
       if (e.code === 'KeyE') {
         checkInteractions(true);
       }
       if (e.code === 'Space') {
+        if (isHunkeredDownRef.current) {
+          isHunkeredDownRef.current = false;
+          setPlayerState((prev) => ({ ...prev, isHunkeredDown: false }));
+          soundEngine.playStandUp();
+          if (onShowBanner) onShowBanner("Standing up from hunker stance.");
+        }
         const uLayers = undergroundLayersRef.current;
         const activeHoleMgr = (uLayers?.currentLevel || 0) > 0 ? uLayers?.holeManager : foliageManagerRef.current?.mountainHoleManager;
         const nearRaise = activeHoleMgr?.isNearRaiseLadder(playerPos.current, 1.45);
@@ -3175,6 +3222,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     };
 
     const isLockPending = { current: false };
+    const lastLeftClickTimeRef = { current: 0 };
 
     const safeRequestPointerLock = () => {
       if (isUIOpenRef.current || isGameOverRef.current) return;
@@ -3258,6 +3306,29 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       if (isUIOpenRef.current || isGameOverRef.current) return;
 
       if (e.button === 2) {
+        // Right click: return to cursor immediately by releasing pointer lock (even in fullscreen!)
+        const isCurrentlyLocked = document.pointerLockElement === renderer.domElement || isPointerLocked.current;
+        if (isCurrentlyLocked) {
+          e.preventDefault();
+          if (document.exitPointerLock) {
+            try {
+              document.exitPointerLock();
+            } catch {
+              // ignore
+            }
+          }
+          isPointerLocked.current = false;
+          if (isAimingRifleRef.current) {
+            isAimingRifleRef.current = false;
+            setIsAimingRifle(false);
+            if (onAimingRifleChange) onAimingRifleChange(false, targetZoomRef.current);
+          }
+          if (onShowBanner) {
+            onShowBanner("🖱️ Cursor unlocked. Click 3D canvas anytime to resume camera control.");
+          }
+          return;
+        }
+
         if (playerStateRef.current.carriedObject) {
           executePlaceRock();
           return;
@@ -3280,8 +3351,52 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
 
       if (e.button !== 0) return; // Left click only
 
+      const now = performance.now();
+      const timeSinceLastClick = now - lastLeftClickTimeRef.current;
+
+      // Two rapid left clicks (< 380ms) while pointer lock is active:
+      // Instantly release pointer lock to bring the cursor up so players can click UI icons without pressing Esc!
+      const isCurrentlyLocked = document.pointerLockElement === renderer.domElement || isPointerLocked.current;
+      if (isCurrentlyLocked && timeSinceLastClick > 25 && timeSinceLastClick < 380) {
+        lastLeftClickTimeRef.current = 0;
+        if (document.exitPointerLock) {
+          try {
+            document.exitPointerLock();
+          } catch {
+            // ignore
+          }
+        }
+        isPointerLocked.current = false;
+        if (onShowBanner) {
+          onShowBanner("🖱️ Cursor unlocked. Click 3D canvas anytime to resume camera control.");
+        }
+        return;
+      }
+
+      lastLeftClickTimeRef.current = now;
+
       safeRequestPointerLock();
       executePrimaryAction();
+    };
+
+    const handleDblClick = (e: MouseEvent) => {
+      if (e.button === 0) {
+        const isCurrentlyLocked = document.pointerLockElement === renderer.domElement || isPointerLocked.current;
+        if (isCurrentlyLocked) {
+          lastLeftClickTimeRef.current = 0;
+          if (document.exitPointerLock) {
+            try {
+              document.exitPointerLock();
+            } catch {
+              // ignore
+            }
+          }
+          isPointerLocked.current = false;
+          if (onShowBanner) {
+            onShowBanner("🖱️ Cursor unlocked. Click 3D canvas anytime to resume camera control.");
+          }
+        }
+      }
     };
 
     const executeJumpAction = () => {
@@ -3385,6 +3500,27 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
 
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
+      // Right click: return to cursor immediately by releasing pointer lock (even in fullscreen!)
+      const isCurrentlyLocked = document.pointerLockElement === renderer.domElement || isPointerLocked.current;
+      if (isCurrentlyLocked) {
+        if (document.exitPointerLock) {
+          try {
+            document.exitPointerLock();
+          } catch {
+            // ignore
+          }
+        }
+        isPointerLocked.current = false;
+        if (isAimingRifleRef.current) {
+          isAimingRifleRef.current = false;
+          setIsAimingRifle(false);
+          if (onAimingRifleChange) onAimingRifleChange(false, targetZoomRef.current);
+        }
+        if (onShowBanner) {
+          onShowBanner("🖱️ Cursor unlocked. Click 3D canvas anytime to resume camera control.");
+        }
+        return;
+      }
       if (playerStateRef.current.carriedObject) {
         executePlaceRock();
         return;
@@ -3497,7 +3633,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     document.addEventListener('pointerlockerror', handlePointerLockError);
     renderer.domElement.addEventListener('mousedown', handleMouseDown);
+    renderer.domElement.addEventListener('dblclick', handleDblClick);
     renderer.domElement.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('contextmenu', handleContextMenu);
     renderer.domElement.addEventListener('touchstart', handleTouchStart);
     renderer.domElement.addEventListener('touchmove', handleTouchMove);
     renderer.domElement.addEventListener('touchend', handleTouchEnd);
@@ -4855,6 +4993,11 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      const isHunkered = isHunkeredDownRef.current;
+      if (isHunkered) {
+        allowSprint = false;
+      }
+
       const isSprinting = !isGameOverRef.current && allowSprint && (keys['ShiftLeft'] || keys['ShiftRight']);
       
       // Speed calculation: In 1:1 True Wilderness scale, pony sprint gallop hits up to 32 m/s (~72 mph)
@@ -4871,7 +5014,11 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           baseSprintSpeed = isOneToOne ? 19.5 : 15.0; // Steady trot!
         }
       }
-      const moveSpeed = (isSprinting ? baseSprintSpeed : baseWalkSpeed) * encumbranceFactor * delta;
+      let moveSpeed = (isSprinting ? baseSprintSpeed : baseWalkSpeed) * encumbranceFactor * delta;
+      if (isHunkered) {
+        // Prone survival crawl while bracing against dust storm
+        moveSpeed = (isOneToOne ? 2.0 : 1.5) * delta;
+      }
 
       const forward = new THREE.Vector3(-Math.sin(playerYaw.current), 0, -Math.cos(playerYaw.current));
       const right = new THREE.Vector3(Math.cos(playerYaw.current), 0, -Math.sin(playerYaw.current));
@@ -4995,11 +5142,28 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         // In 1:1 scale, riding provides 85% hydration relief so players can make long multi-kilometer treks!
         if (!isGameOverRef.current) {
           const isRaining = weather === 'storm' || weather === 'light_rain';
+          const isSandstorm = weather === 'sandstorm' && !isUnderground;
+          const isHunkered = isHunkeredDownRef.current;
+          const isInShade = isInShadeRef.current;
+
           const rainRelief = isRaining ? 0.2 : 1.0;
           const ridingRelief = isRiding ? (isOneToOne ? 0.15 : 0.45) : 1.0;
           const sprintDrain = isOneToOne ? 0.22 : 0.35;
           const walkDrain = isOneToOne ? 0.08 : 0.12;
-          const drainRate = (isSprinting ? sprintDrain : walkDrain) * delta * rainRelief * ridingRelief;
+
+          let sandstormThirstMultiplier = 1.0;
+          if (isSandstorm) {
+            if (isHunkered) {
+              // Hunkered down behind bedroll and bandana: mouth shielded, thirst drain drops to 0.25x (or 0.15x in shade/cave)
+              sandstormThirstMultiplier = isInShade ? 0.15 : 0.25;
+            } else {
+              // Exposed upright to blowing Haboob gale: 3.5x dehydration surge!
+              sandstormThirstMultiplier = 3.5;
+            }
+          }
+
+          const baseDrain = isSprinting ? sprintDrain : (isHunkered ? walkDrain * 0.4 : walkDrain);
+          const drainRate = baseDrain * delta * rainRelief * ridingRelief * sandstormThirstMultiplier;
           currentHydrationRef.current = Math.max(0, currentHydrationRef.current - drainRate);
 
           // Low hydration warning (< 20%)
@@ -5264,7 +5428,14 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             }
           } else {
             // Out under the blazing direct desert sun
-            if (!isMoving) {
+            if (isHunkeredDownRef.current) {
+              // Hunkered down in survival stance: breathing slow, head tucked into canvas roll (+12.0/s)
+              currentVigourRef.current = Math.min(100, currentVigourRef.current + 12.0 * delta);
+              if (isExhaustedRef.current && currentVigourRef.current >= 30) {
+                isExhaustedRef.current = false;
+                soundEngine.playVigourRestored();
+              }
+            } else if (!isMoving) {
               // Stationary in sun: labored, sluggish recovery (+3.5/s)
               currentVigourRef.current = Math.min(100, currentVigourRef.current + 3.5 * delta);
               if (isExhaustedRef.current && currentVigourRef.current >= 40) {
@@ -5648,6 +5819,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
 
       // Sync character model position and rotation (Third Person)
       const saddleHeightOffset = isRiding ? (playerStateRef.current.ownedMount === 'burro' ? 0.75 : 0.95) : 0;
+      const isHunkeredRig = isHunkeredDownRef.current && !isRiding;
       if (localPlayerRigRef.current) {
         const rig = localPlayerRigRef.current;
         rig.root.position.set(
@@ -5657,6 +5829,11 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         );
         rig.root.rotation.y = playerYaw.current;
         rig.root.visible = viewMode === 'third';
+        if (isHunkeredRig) {
+          rig.root.scale.set(1.0, 0.52, 1.0);
+        } else {
+          rig.root.scale.set(1.0, 1.0, 1.0);
+        }
 
         // Synchronize equipped tool & rock carrying
         rig.setEquippedTool(
@@ -5685,6 +5862,11 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         );
         characterMeshRef.current.rotation.y = playerYaw.current;
         characterMeshRef.current.visible = viewMode === 'third';
+        if (isHunkeredRig) {
+          characterMeshRef.current.scale.set(1.0, 0.52, 1.0);
+        } else {
+          characterMeshRef.current.scale.set(1.0, 1.0, 1.0);
+        }
       }
 
       // Sync lantern point light
@@ -5708,7 +5890,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         camera.lookAt(deathPos.current.x, deathPos.current.y + 0.5, deathPos.current.z);
       } else if (viewMode === 'first') {
         camera.position.copy(playerPos.current);
-        if (isRiding) {
+        if (isHunkeredDownRef.current && !isRiding) {
+          camera.position.y -= 0.65;
+        } else if (isRiding) {
           camera.position.y += saddleHeightOffset;
         }
 
@@ -5809,10 +5993,11 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             camera.position.set(camX, camY, camZ);
             camera.lookAt(playerPos.current.x, playerPos.current.y + 0.25, playerPos.current.z);
           } else {
-            const maxDistBehind = isRiding ? 5.4 : 4.2;
-            const camYOffset = isRiding ? 2.4 : 1.8;
-            const lookTargetY = playerPos.current.y + (isRiding ? 0.9 : 0.3);
-            const headY = playerPos.current.y + (isRiding ? 1.6 : 1.2);
+            const isHunkered = isHunkeredDownRef.current && !isRiding;
+            const maxDistBehind = isHunkered ? 2.8 : (isRiding ? 5.4 : 4.2);
+            const camYOffset = isHunkered ? 1.05 : (isRiding ? 2.4 : 1.8);
+            const lookTargetY = playerPos.current.y + (isHunkered ? -0.15 : (isRiding ? 0.9 : 0.3));
+            const headY = playerPos.current.y + (isHunkered ? 0.6 : (isRiding ? 1.6 : 1.2));
 
             // Compute camera vector behind character
             const dirBehindX = Math.sin(playerYaw.current);
@@ -6411,6 +6596,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       // 5a-3. Tortilla Flat Ambient Settlement Noise (Chatter, Horses Chuffing, Tack Jingle, Porch Creaks)
       const isPlayerInsideMine = (playerStateRef.current.currentMineLevel || 0) > 0;
       soundEngine.updateTownAmbiance(playerPos.current.x, playerPos.current.z, delta, isPlayerInsideMine);
+      soundEngine.updateWeatherAmbiance(weather, isUnderground, isHunkeredDownRef.current);
 
       // 5b. Atmospheric sky, clouds, and weather updates
       if (atmosphereManagerRef.current) {
@@ -6421,6 +6607,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           hemiLightRef.current || undefined
         );
       }
+
+      // 5b-1. Dynamic Weather Engine lifecycle tick (Haboob sandstorms, gale warnings)
+      dynamicWeatherEngine.update(delta, isUnderground, isHunkeredDownRef.current);
 
       // 5b-2. Sonoran Desert Hydrology, Water Table & Arroyos
       if (hydrologyEngineRef.current) {
@@ -6899,7 +7088,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         resizeObserver.disconnect();
       }
       renderer.domElement.removeEventListener('mousedown', handleMouseDown);
+      renderer.domElement.removeEventListener('dblclick', handleDblClick);
       renderer.domElement.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('contextmenu', handleContextMenu);
       renderer.domElement.removeEventListener('touchstart', handleTouchStart);
       renderer.domElement.removeEventListener('touchmove', handleTouchMove);
       renderer.domElement.removeEventListener('touchend', handleTouchEnd);

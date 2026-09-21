@@ -1270,19 +1270,19 @@ export class AtmosphereManager {
       finalCloudOpacity = THREE.MathUtils.lerp(finalCloudOpacity, 0.94, sw);
     }
 
-    // Sandstorm Haboob override blend
+    // Sandstorm Haboob override blend (Severe low visibility & blinding ochre dust wall)
     if (dustW > 0.001) {
-      finalZenith.lerp(new THREE.Color(0x563418), dustW);
-      finalHorizon.lerp(new THREE.Color(0x744926), dustW);
-      finalFogColor.lerp(new THREE.Color(0xa66336), dustW);
-      finalFogDensity = THREE.MathUtils.lerp(finalFogDensity, 0.0055, dustW);
-      finalSunColor.lerp(new THREE.Color(0xdf8445), dustW);
-      finalSunIntensity = THREE.MathUtils.lerp(finalSunIntensity, 0.90, dustW);
-      finalHemiSky.lerp(new THREE.Color(0xca7740), dustW);
-      finalHemiGround.lerp(new THREE.Color(0x603418), dustW);
-      finalCloudTop.lerp(new THREE.Color(0xa66336), dustW);
-      finalCloudBase.lerp(new THREE.Color(0x6e3b1c), dustW);
-      finalCloudOpacity = THREE.MathUtils.lerp(finalCloudOpacity, 0.98, dustW);
+      finalZenith.lerp(new THREE.Color(0x4a2810), dustW);
+      finalHorizon.lerp(new THREE.Color(0x6e3c1a), dustW);
+      finalFogColor.lerp(new THREE.Color(0x944f24), dustW);
+      finalFogDensity = THREE.MathUtils.lerp(finalFogDensity, 0.0165, dustW); // Severe visibility drop (~55-70m)
+      finalSunColor.lerp(new THREE.Color(0xd97534), dustW);
+      finalSunIntensity = THREE.MathUtils.lerp(finalSunIntensity, 0.35, dustW); // Choking dust obscures the sun
+      finalHemiSky.lerp(new THREE.Color(0xba6832), dustW);
+      finalHemiGround.lerp(new THREE.Color(0x4d260f), dustW);
+      finalCloudTop.lerp(new THREE.Color(0x944f24), dustW);
+      finalCloudBase.lerp(new THREE.Color(0x5c2e12), dustW);
+      finalCloudOpacity = THREE.MathUtils.lerp(finalCloudOpacity, 0.99, dustW);
     }
 
     // Light rain override blend

@@ -232,6 +232,7 @@ export interface PlayerState {
   maxVigour?: number; // default 100
   isInShade?: boolean; // whether player is resting in desert shade
   isExhausted?: boolean; // whether player is out of vigour/breath
+  isHunkeredDown?: boolean; // whether player is crouched/prone in survival hunker stance
   shadeReason?: string; // descriptive source of shade (canopy, canyon wall, mine portal, etc.)
   isSprinting: boolean;
   isInsideMine: boolean;
