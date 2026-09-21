@@ -25,6 +25,7 @@ import {
   Sun,
   Key,
   ShieldCheck,
+  Clock,
 } from 'lucide-react';
 import { PlayerState, Vector3D, TerritoryClaim, TortillaFlatTab } from '../types';
 import { soundEngine } from '../audio/soundEffects';
@@ -42,7 +43,7 @@ interface TortillaFlatModalProps {
   initialTab?: TortillaFlatTab;
   onOpenTownfolkDialogue?: (npc: DialogueNPCInfo) => void;
   timeOfDay?: number;
-  onSleepInHotel?: (paymentMethod: 'cash' | 'gold') => boolean | void;
+  onSleepInHotel?: (paymentMethod: 'cash' | 'gold', isSuite?: boolean, targetTime?: number) => boolean | void;
 }
 
 export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
@@ -61,6 +62,8 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
   const [activeTab, setActiveTab] = useState<TortillaFlatTab>(initialTab);
   const [editingMountName, setEditingMountName] = useState(false);
   const [customNameInput, setCustomNameInput] = useState('');
+  const [hotelTargetTime, setHotelTargetTime] = useState<'dawn' | 'evening'>('dawn');
+  const [hotelRoomTier, setHotelRoomTier] = useState<'standard' | 'suite'>('standard');
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -638,163 +641,230 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
           {/* TAB: SUPERSTITION HOTEL & BOARDING ROOMS */}
           {activeTab === 'hotel' && (
             <div className="space-y-4">
-              <div className="p-4 bg-gradient-to-r from-amber-950/70 via-stone-900 to-amber-950/70 border-2 border-amber-600/70 rounded-xl space-y-2 relative overflow-hidden">
-                <div className="flex items-center justify-between">
+              {/* Hotel Sanctuary Header with Day/Night Status */}
+              <div className="p-4 bg-gradient-to-r from-amber-950/80 via-stone-900 to-amber-950/80 border-2 border-amber-600/70 rounded-xl space-y-2 relative overflow-hidden shadow-lg">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2.5">
-                    <div className="p-2 bg-amber-900/80 border border-amber-500 rounded-lg text-amber-300">
+                    <div className="p-2.5 bg-amber-900/90 border border-amber-500 rounded-lg text-amber-300 shadow-md">
                       <Bed className="w-6 h-6" />
                     </div>
                     <div>
-                      <h3 className="font-bold font-serif text-amber-100 text-base">
-                        Superstition Hotel & Miner's Boarding House
+                      <h3 className="font-bold font-serif text-amber-100 text-base flex items-center gap-2">
+                        Superstition Hotel & Miner's Boarding Sanctuary
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-300 border border-amber-600/50">
+                          Est. 1879
+                        </span>
                       </h3>
                       <p className="text-xs text-amber-300/80 font-serif">
-                        Historic Second-Floor Rooms • Feather Beds • Cast-Iron Stove • Salt River Canyon
+                        Second-Floor Boarding • Hot Artesian Spring Baths • Feather Beds • Cast-Iron Stove
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border bg-stone-950/80">
+
+                  {/* Day/Night Status Indicator */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-mono border bg-stone-950/90 shadow-inner">
                     {(timeOfDay >= 19.5 || timeOfDay < 5.5) ? (
                       <>
-                        <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                        <Moon className="w-4 h-4 text-indigo-400 animate-pulse" />
                         <span className="text-indigo-300 font-bold">NIGHTTIME</span>
+                        <span className="text-[10px] text-stone-400 border-l border-stone-700 pl-1.5">Freezing Mountain Air</span>
                       </>
                     ) : (
                       <>
-                        <Sun className="w-3.5 h-3.5 text-amber-400" />
+                        <Sun className="w-4 h-4 text-amber-400 animate-spin-slow" />
                         <span className="text-amber-300 font-bold">DAYTIME</span>
+                        <span className="text-[10px] text-stone-400 border-l border-stone-700 pl-1.5">
+                          {timeOfDay >= 17.5 ? 'Golden Alpenglow' : 'Sonoran Sun'}
+                        </span>
                       </>
                     )}
                   </div>
                 </div>
+
                 <p className="text-xs text-stone-300 leading-relaxed font-serif pt-1">
-                  Upstairs above the Superstition Saloon, clean pine boarding rooms offer a comfortable feather tick, heavy wool blankets, a private brass skeleton key, and a washbasin of pure artesian spring water. Sleeping in a hotel room protects you from nighttime desert hypothermia, predator ambushes, and fully replenishes your vital energy until 6:00 AM dawn.
+                  Upstairs above the Superstition Saloon, clean pine boarding rooms offer refuge from the unforgiving Sonoran desert. Resting inside the hotel completely shields you from nighttime mountain hypothermia, wandering predators, and bandit ambushes, fully restoring Health, Hydration, and replenishing your canteen with mountain spring water.
                 </p>
               </div>
 
-              {/* Room Rates & Sleep Actions */}
+              {/* Step 1: Select Room Tier & Departure Schedule */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Cash Payment Card */}
-                <div className="p-4 bg-stone-950 border border-amber-900/60 rounded-xl flex flex-col justify-between space-y-3">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-serif font-bold text-amber-200 text-sm flex items-center gap-1.5">
-                        <DollarSign className="w-4 h-4 text-emerald-400" />
-                        Rent with Legal Tender Cash
-                      </span>
-                      <span className="text-emerald-400 font-mono font-bold text-sm">$2.00 / night</span>
-                    </div>
-                    <p className="text-xs text-stone-400 mt-1">
-                      Pay standard territorial rate with your pocket cash ($2.00).
-                    </p>
-                    <div className="mt-2 text-[11px] font-mono text-stone-400">
-                      Your Cash Balance: <span className="text-emerald-300 font-bold">${cash.toFixed(2)}</span>
-                    </div>
+                {/* Room Tier: Standard Miner's Bunk */}
+                <div
+                  onClick={() => setHotelRoomTier('standard')}
+                  className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
+                    hotelRoomTier === 'standard'
+                      ? 'bg-amber-950/50 border-amber-500 shadow-md ring-1 ring-amber-400/30'
+                      : 'bg-stone-950/60 border-stone-800 hover:border-amber-800/60'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-serif font-bold text-amber-200 text-sm flex items-center gap-1.5">
+                      <Bed className="w-4 h-4 text-amber-400" />
+                      Standard Miner's Bunk
+                    </span>
+                    <span className="text-emerald-400 font-mono font-bold text-xs">$2.00 or 0.10 oz</span>
                   </div>
-
-                  <button
-                    onClick={() => {
-                      if (onSleepInHotel) {
-                        onSleepInHotel('cash');
-                      } else {
-                        if (cash < 2.0) {
-                          if (onShowBanner) onShowBanner("⚠️ Need $2.00 cash to rent a room! Cash in gold at the Assayer counter.");
-                          return;
-                        }
-                        soundEngine.playHotelRest();
-                        onUpdatePlayerState((prev) => ({
-                          ...prev,
-                          cashDollars: Math.max(0, (prev.cashDollars || 0) - 2.0),
-                          health: 100,
-                          hydration: 100,
-                          canteenOunces: 32,
-                        }));
-                        if (onShowBanner) onShowBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health & Hydration fully restored.");
-                        onClose();
-                      }
-                    }}
-                    disabled={cash < 2.0}
-                    className={`w-full py-2.5 px-4 rounded-lg font-serif text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
-                      cash >= 2.0
-                        ? 'bg-emerald-700 hover:bg-emerald-600 text-emerald-50 hover:scale-[1.02]'
-                        : 'bg-stone-800 text-stone-500 cursor-not-allowed'
-                    }`}
-                  >
-                    <Bed className="w-4 h-4" />
-                    <span>Rent Room & Sleep until Dawn ($2.00 Cash)</span>
-                  </button>
+                  <p className="text-[11px] text-stone-300 font-serif leading-snug">
+                    Comfortable feather tick, wool blanket, iron wood stove, and washbasin. Fully restores Health and Hydration.
+                  </p>
                 </div>
 
-                {/* Gold Dust Payment Card */}
-                <div className="p-4 bg-stone-950 border border-amber-900/60 rounded-xl flex flex-col justify-between space-y-3">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-serif font-bold text-amber-200 text-sm flex items-center gap-1.5">
-                        <Coins className="w-4 h-4 text-amber-400" />
-                        Rent with Raw Gold Ore
-                      </span>
-                      <span className="text-amber-300 font-mono font-bold text-sm">0.10 oz Gold</span>
-                    </div>
-                    <p className="text-xs text-stone-400 mt-1">
-                      Direct barter with placer gold dust or crushed bonanza quartz.
-                    </p>
-                    <div className="mt-2 text-[11px] font-mono text-stone-400">
-                      Your Gold Dust: <span className="text-amber-300 font-bold">{gold.toFixed(1)} oz</span>
-                    </div>
+                {/* Room Tier: Proprietor's Master Suite */}
+                <div
+                  onClick={() => setHotelRoomTier('suite')}
+                  className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
+                    hotelRoomTier === 'suite'
+                      ? 'bg-amber-950/50 border-amber-500 shadow-md ring-1 ring-amber-400/30'
+                      : 'bg-stone-950/60 border-stone-800 hover:border-amber-800/60'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-serif font-bold text-amber-200 text-sm flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      Master Suite & Artesian Bath
+                    </span>
+                    <span className="text-emerald-400 font-mono font-bold text-xs">$5.00 or 0.25 oz</span>
                   </div>
+                  <p className="text-[11px] text-stone-300 font-serif leading-snug">
+                    Private parlor, brass bedstead, and hot cedar soaking tub. Grants <strong className="text-amber-200">Well-Rested Buff</strong> (+sprint stamina & slow thirst)!
+                  </p>
+                </div>
+              </div>
 
+              {/* Step 2: Choose Wake-up Time (Dawn vs Dusk) */}
+              <div className="p-3 bg-stone-950 border border-amber-900/40 rounded-xl space-y-2">
+                <span className="text-xs font-serif font-bold text-amber-300 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                  Departure Wake-up Schedule:
+                </span>
+                <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => {
-                      if (onSleepInHotel) {
-                        onSleepInHotel('gold');
-                      } else {
-                        if (gold < 0.1) {
-                          if (onShowBanner) onShowBanner("⚠️ Need 0.10 oz gold ore to pay for a hotel room!");
-                          return;
-                        }
-                        soundEngine.playHotelRest();
-                        onUpdatePlayerState((prev) => ({
-                          ...prev,
-                          goldFound: Math.max(0, (prev.goldFound || 0) - 0.1),
-                          health: 100,
-                          hydration: 100,
-                          canteenOunces: 32,
-                        }));
-                        if (onShowBanner) onShowBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health & Hydration fully restored.");
-                        onClose();
-                      }
-                    }}
-                    disabled={gold < 0.1}
-                    className={`w-full py-2.5 px-4 rounded-lg font-serif text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
-                      gold >= 0.1
-                        ? 'bg-amber-700 hover:bg-amber-600 text-stone-950 hover:scale-[1.02]'
-                        : 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                    type="button"
+                    onClick={() => setHotelTargetTime('dawn')}
+                    className={`py-2 px-3 rounded-lg text-xs font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      hotelTargetTime === 'dawn'
+                        ? 'bg-amber-700 text-stone-950 shadow-md border border-amber-400'
+                        : 'bg-stone-900 text-stone-300 hover:bg-stone-800 border border-stone-700'
                     }`}
                   >
-                    <Coins className="w-4 h-4" />
-                    <span>Pay with Gold Dust (0.10 oz Gold)</span>
+                    <Sun className="w-3.5 h-3.5 text-amber-300" />
+                    <span>6:00 AM Sunrise Dawn</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHotelTargetTime('evening')}
+                    className={`py-2 px-3 rounded-lg text-xs font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      hotelTargetTime === 'evening'
+                        ? 'bg-amber-700 text-stone-950 shadow-md border border-amber-400'
+                        : 'bg-stone-900 text-stone-300 hover:bg-stone-800 border border-stone-700'
+                    }`}
+                  >
+                    <Moon className="w-3.5 h-3.5 text-indigo-300" />
+                    <span>6:00 PM Cool Twilight (Siesta)</span>
                   </button>
                 </div>
               </div>
+
+              {/* Step 3: Payment Buttons (Cash vs Gold Barter) */}
+              {(() => {
+                const isSuite = hotelRoomTier === 'suite';
+                const requiredCash = isSuite ? 5.0 : 2.0;
+                const requiredGold = isSuite ? 0.25 : 0.10;
+                const targetHour = hotelTargetTime === 'dawn' ? 6.0 : 18.0;
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Pay with Cash */}
+                    <div className="p-3.5 bg-stone-950 border border-amber-900/60 rounded-xl flex flex-col justify-between space-y-2.5">
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-serif font-bold text-amber-200 text-xs flex items-center gap-1">
+                            <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                            Pay Legal Tender Cash
+                          </span>
+                          <span className="text-emerald-400 font-mono font-bold text-sm">
+                            ${requiredCash.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-stone-400 mt-1">
+                          Available: <span className="text-emerald-300 font-bold">${cash.toFixed(2)}</span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          if (onSleepInHotel) {
+                            onSleepInHotel('cash', isSuite, targetHour);
+                          }
+                        }}
+                        disabled={cash < requiredCash}
+                        className={`w-full py-2.5 px-3 rounded-lg font-serif text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
+                          cash >= requiredCash
+                            ? 'bg-emerald-700 hover:bg-emerald-600 text-emerald-50 hover:scale-[1.02]'
+                            : 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                        }`}
+                      >
+                        <Key className="w-3.5 h-3.5" />
+                        <span>Book with Cash (${requiredCash.toFixed(2)})</span>
+                      </button>
+                    </div>
+
+                    {/* Pay with Gold Dust */}
+                    <div className="p-3.5 bg-stone-950 border border-amber-900/60 rounded-xl flex flex-col justify-between space-y-2.5">
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-serif font-bold text-amber-200 text-xs flex items-center gap-1">
+                            <Coins className="w-3.5 h-3.5 text-amber-400" />
+                            Barter with Raw Gold Ore
+                          </span>
+                          <span className="text-amber-300 font-mono font-bold text-sm">
+                            {requiredGold.toFixed(2)} oz
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-stone-400 mt-1">
+                          Available: <span className="text-amber-300 font-bold">{gold.toFixed(1)} oz</span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          if (onSleepInHotel) {
+                            onSleepInHotel('gold', isSuite, targetHour);
+                          }
+                        }}
+                        disabled={gold < requiredGold}
+                        className={`w-full py-2.5 px-3 rounded-lg font-serif text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
+                          gold >= requiredGold
+                            ? 'bg-amber-700 hover:bg-amber-600 text-stone-950 hover:scale-[1.02]'
+                            : 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                        }`}
+                      >
+                        <Coins className="w-3.5 h-3.5" />
+                        <span>Barter with Gold ({requiredGold.toFixed(2)} oz)</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Room Amenities & Night Safety */}
               <div className="p-3 bg-stone-950/80 border border-stone-800 rounded-xl space-y-2">
                 <div className="text-xs font-serif font-bold text-amber-300 flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  Hotel Amenities Included with Every Stay
+                  Sanctuary Amenities Included with Every Stay
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-stone-300 font-serif">
                   <div className="p-2 bg-stone-900/60 rounded border border-stone-800 flex items-center gap-2">
                     <Sun className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>Advances time to 6:00 AM Sunrise</span>
+                    <span>Synchronized World Clock</span>
                   </div>
                   <div className="p-2 bg-stone-900/60 rounded border border-stone-800 flex items-center gap-2">
                     <Heart className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                    <span>Full 100% Health Recovery</span>
+                    <span>100% Health & Stamina Reset</span>
                   </div>
                   <div className="p-2 bg-stone-900/60 rounded border border-stone-800 flex items-center gap-2">
                     <Droplets className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                    <span>100% Hydration & Canteen Refill</span>
+                    <span>Canteen Refilled (32 oz Pure Water)</span>
                   </div>
                 </div>
               </div>

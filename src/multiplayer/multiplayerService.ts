@@ -504,6 +504,21 @@ class MultiplayerService {
       });
     }
   }
+
+  public requestTimeChange(timeOfDay: number, reason: 'hotel_rest' | 'camp_rest' | 'toggle' = 'toggle') {
+    this.state.universalTimeOfDay = timeOfDay;
+    this.sendRaw({
+      type: 'time:change',
+      timeOfDay,
+      reason,
+    });
+    if (this.handlers.onWeatherSync) {
+      this.handlers.onWeatherSync({
+        weather: this.state.universalWeather,
+        timeOfDay,
+      });
+    }
+  }
 }
 
 export const multiplayer = new MultiplayerService();

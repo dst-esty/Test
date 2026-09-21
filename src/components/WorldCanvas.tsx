@@ -515,6 +515,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   const currentHydrationRef = useRef<number>(playerState.hydration ?? 100);
   const currentHealthRef = useRef<number>(playerState.health ?? 100);
   const hasTriggeredLowHydrationWarningRef = useRef<boolean>(false);
+  const hasLeftTownRef = useRef<boolean>(false);
+  const expeditionStartingGoldRef = useRef<number>(0);
+  const lastNightColdWarningTimeRef = useRef<number>(0);
   const lastMultiplayerSyncTime = useRef<number>(0);
   const interactionCheckTick = useRef<number>(0);
   const renderFrameCount = useRef<number>(0);
@@ -4818,7 +4821,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           const isRaining = weather === 'storm' || weather === 'light_rain';
           const rainRelief = isRaining ? 0.2 : 1.0;
           const ridingRelief = isRiding ? 0.45 : 1.0;
-          const drainRate = (isSprinting ? 0.35 : 0.12) * delta * rainRelief * ridingRelief;
+          const rawGoldWeight = playerStateRef.current.goldFound || 0;
+          const isWellRested = Boolean(playerStateRef.current.wellRestedUntil && Date.now() < playerStateRef.current.wellRestedUntil);
+          const encumbranceFactor = isRiding ? 1.0 : (1.0 + Math.min(0.85, (rawGoldWeight / 20) * 0.25));
+          const wellRestedRelief = isWellRested ? 0.7 : 1.0;
+          const drainRate = (isSprinting ? 0.35 : 0.12) * delta * rainRelief * ridingRelief * encumbranceFactor * wellRestedRelief;
           currentHydrationRef.current = Math.max(0, currentHydrationRef.current - drainRate);
 
           // Low hydration warning (< 20%)
@@ -4857,6 +4864,39 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const curX = playerPos.current.x;
         const curZ = playerPos.current.z;
         const curY = playerPos.current.y;
+
+        // High-Stakes Expedition Tracking & Return to Tortilla Flat Sanctuary
+        const isInWilderness = curZ > -170 || Math.hypot(curX, curZ - (-246)) > 115;
+        const isInTortillaFlat = curZ < -210 && Math.abs(curX) < 95;
+
+        if (isInWilderness && !hasLeftTownRef.current) {
+          hasLeftTownRef.current = true;
+          expeditionStartingGoldRef.current = playerStateRef.current.goldFound || 0;
+        } else if (isInTortillaFlat && hasLeftTownRef.current) {
+          hasLeftTownRef.current = false;
+          const currentGold = playerStateRef.current.goldFound || 0;
+          const goldCarriedBack = Math.max(0, currentGold - expeditionStartingGoldRef.current);
+          if (goldCarriedBack >= 0.1) {
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner(`🏆 Expedition Safely Returned to Tortilla Flat! You carried ${goldCarriedBack.toFixed(1)} oz of raw mountain gold back across the canyons. Visit Assayer Hiram Walker or store your haul at the Hotel!`);
+            }
+          }
+        }
+
+        // Nighttime Desert Cold & Hypothermia Hazard in Wilderness
+        const isNight = timeOfDay >= 19.5 || timeOfDay < 5.5;
+        if (isNight && isInWilderness && !isUnderground) {
+          const nearLitFire = (playerStateRef.current.builtStructures || []).some(
+            (s) => (s.type === 'campfire' || s.type === 'prospector_camp') && s.isLit && Math.hypot(curX - s.position.x, curZ - s.position.z) < 8.0
+          );
+          if (!nearLitFire && Date.now() - lastNightColdWarningTimeRef.current > 110000) {
+            lastNightColdWarningTimeRef.current = Date.now();
+            if (onShowBanner) {
+              onShowBanner('🥶 Freezing Mountain Night: Desert temperatures plunge below freezing! Light a campfire or return to the Superstition Hotel to stay warm.');
+            }
+          }
+        }
 
         // 1. Peters Mesa Plateau (NW Tableland, elevation > 32m)
         if (curX < -175 && curX > -240 && curZ > 130 && curZ < 205 && curY > 32) {

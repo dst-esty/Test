@@ -469,6 +469,7 @@ export default function App() {
   const handleSleepUntilDawn = useCallback(() => {
     soundEngine.playCampfire();
     setTimeOfDay(6.0); // 6:00 AM Sunrise
+    multiplayer.requestTimeChange(6.0, 'camp_rest');
     setPlayerState((prev) => {
       const updatedStructures = (prev.builtStructures || []).map((s) => {
         if (s.type === 'campfire' || s.type === 'prospector_camp') {
@@ -492,35 +493,45 @@ export default function App() {
     showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Campfire consumed ~8h of wood fuel.");
   }, [showBanner]);
 
-  const handleSleepInHotel = useCallback((paymentMethod: 'cash' | 'gold') => {
+  const handleSleepInHotel = useCallback((paymentMethod: 'cash' | 'gold', isSuite: boolean = false, targetTime: number = 6.0) => {
     const cash = playerState.cashDollars || 0;
     const gold = playerState.goldFound || 0;
+    const cashCost = isSuite ? 5.0 : 2.0;
+    const goldCost = isSuite ? 0.25 : 0.10;
 
     if (paymentMethod === 'cash') {
-      if (cash < 2.0) {
-        showBanner("⚠️ Not enough cash to rent a room! ($2.00 required). Cash in gold at the Assayer counter.");
+      if (cash < cashCost) {
+        showBanner(`⚠️ Not enough cash to rent this room! ($${cashCost.toFixed(2)} required). Cash in gold at the Assayer counter.`);
         return false;
       }
     } else {
-      if (gold < 0.1) {
-        showBanner("⚠️ Not enough gold ore to barter for a room! (0.10 oz required).");
+      if (gold < goldCost) {
+        showBanner(`⚠️ Not enough gold ore to barter! (${goldCost.toFixed(2)} oz required).`);
         return false;
       }
     }
 
     soundEngine.playHotelRest();
-    setTimeOfDay(6.0); // 6:00 AM Sunrise
+    setTimeOfDay(targetTime);
+    multiplayer.requestTimeChange(targetTime, 'hotel_rest');
+
+    const wellRestedDurationMs = isSuite ? 25 * 60 * 1000 : 10 * 60 * 1000;
     setPlayerState((prev) => ({
       ...prev,
-      cashDollars: paymentMethod === 'cash' ? Math.max(0, (prev.cashDollars || 0) - 2.0) : prev.cashDollars,
-      goldFound: paymentMethod === 'gold' ? Math.max(0, (prev.goldFound || 0) - 0.1) : prev.goldFound,
+      cashDollars: paymentMethod === 'cash' ? Math.max(0, (prev.cashDollars || 0) - cashCost) : prev.cashDollars,
+      goldFound: paymentMethod === 'gold' ? Math.max(0, (prev.goldFound || 0) - goldCost) : prev.goldFound,
       health: 100,
       hydration: 100,
       canteenOunces: 32,
+      wellRestedUntil: Date.now() + wellRestedDurationMs,
     }));
 
     setIsTortillaFlatOpen(false);
-    showBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health and Hydration fully replenished.");
+    showBanner(
+      isSuite
+        ? `🛁 Soaked in artesian spring bath and slept peacefully until ${targetTime === 6.0 ? '6:00 AM Dawn' : '6:00 PM Dusk'}! Well-Rested Prospector buff active (+stamina & hydration preservation).`
+        : `🌅 Rested comfortably in the Superstition Hotel until ${targetTime === 6.0 ? '6:00 AM Dawn' : '6:00 PM Dusk'}! Health and Hydration fully replenished.`
+    );
     return true;
   }, [playerState.cashDollars, playerState.goldFound, showBanner]);
 
@@ -529,6 +540,7 @@ export default function App() {
       const isDay = prev >= 5.5 && prev < 19.5;
       const nextTime = isDay ? 21.0 : 9.5;
       soundEngine.playCampfire();
+      multiplayer.requestTimeChange(nextTime, 'toggle');
       showBanner(
         isDay
           ? "🌌 Night has fallen over Tortilla Flat! Main street is illuminated with festive string lights, flickering torches, and warm boardwalk lanterns."
@@ -1724,6 +1736,7 @@ export default function App() {
           setIsJournalOpen(false);
           setIsGuidebookOpen(true);
         }}
+        onFastTravel={handleFastTravel}
       />
 
       {/* Prospector's Field Guidebook & Shoring Lore */}

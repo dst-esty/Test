@@ -289,6 +289,7 @@ export interface PlayerState {
     waterOz?: number;
     woodPlanks?: number;
   };
+  wellRestedUntil?: number; // timestamp until when well-rested buff applies (+stamina, slower thirst)
 }
 
 export type GraphicsQuality = 'performance' | 'balanced' | 'high';
