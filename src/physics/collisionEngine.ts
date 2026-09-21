@@ -40,8 +40,8 @@ export const LANDMARK_OBSTACLES: LandmarkObstacle[] = [
   { name: 'Concord Stagecoach', x: 0, z: -252, radius: 2.0, height: 3.2 },
   { name: 'Tortilla Creek Freight Depot', x: 13.0, z: -298, radius: 4.8, height: 7.0 },
   { name: 'Tortilla Creek Timber Pier & Landing', x: -2.0, z: -304, radius: 3.8, height: 4.0 },
-  // 6. Pistol Canyon Sun-Bleached Granite Table Boulder & Tinaja
-  { name: 'Pistol Canyon Table Boulder', x: -46, z: -130, radius: 2.2, height: 2.5 },
+  // 6. Pistol Canyon Sun-Bleached Granite Table Boulder & Tinaja (perched on northern gravel bench)
+  { name: 'Pistol Canyon Table Boulder', x: 180, z: -160.8, radius: 1.1, height: 2.5 },
 ];
 
 export const PLAYER_COLLISION_RADIUS = 0.42;
@@ -115,9 +115,9 @@ export function testPositionCollision(
   const isBluffSpringsGap = Math.hypot(candX - (-190), candZ - (-20)) < 34; // Bluff Springs Gap (West)
   const isNeedleCanyonChasm = candX > 110 && candX < 185 && candZ > -70 && candZ < 150; // Needle Canyon chasm
   const isFishCreekCanyon = candX < -40 && candX > -180 && candZ < -170 && candZ > -300; // Fish Creek Canyon
-  const isPistolCanyon = candX > -85 && candX < -15 && candZ < -55 && candZ > -195; // Pistol Canyon box gorge
-  const isPetersCanyon = candX < -130 && candX > -180 && candZ <= -75 && candZ >= -308; // Peters Canyon drainage gorge
-  const isPetersMesa = Math.hypot(candX - (-105), candZ - (-155)) < 44; // Peters Mesa tableland
+  const isPistolCanyon = candX >= 128 && candX <= 224 && candZ <= -124 && candZ >= -210; // Pistol Canyon deep slot gorge ascending into Peters Mesa
+  const isPetersCanyon = candX >= 205 && candX <= 275 && candZ <= -165 && candZ >= -335; // Peters Canyon drainage gorge
+  const isPetersMesa = Math.hypot(candX - 135, candZ - (-125)) < 46; // Peters Mesa tableland
   const isMalapaisRidge = Math.hypot((candX - 78) / 58, (candZ - (-216)) / 66) < 1.25; // Malapais Mountain massif & summits
   const isMalapaisWestRavine =
     candX >= 16 &&

@@ -408,6 +408,7 @@ export function buildMalapaisMountainSummit(scene: THREE.Scene): THREE.Group {
 /**
  * Builds Pistol Canyon Gorge features.
  * Topographically authentic:
+ * - Real-world tributary canyon branching from Peters Canyon and ascending into Peters Mesa
  * - "Roy Bradford's Lost 1870s Colt Army Pistol" on sun-bleached granite boulder
  * - Brass cartridge casings and prospector's expedition field diary
  * - Bedrock Tinaja plunge-pool with clear spring water (refill point)
@@ -418,8 +419,8 @@ export function buildPistolCanyonGorge(
   waterRefillPoints: THREE.Vector3[]
 ): THREE.Group {
   const group = new THREE.Group();
-  const canyonX = -46;
-  const canyonZ = -130;
+  const canyonX = 180;
+  const canyonZ = -163;
   const canyonY = getTerrainHeight(canyonX, canyonZ);
 
   group.position.set(canyonX, canyonY, canyonZ);
@@ -462,12 +463,12 @@ export function buildPistolCanyonGorge(
     roughness: 0.9,
   });
 
-  // 1. Large Sun-Bleached Granite Table Boulder
+  // 1. Large Sun-Bleached Granite Table Boulder (perched along northern wash bench)
   const tableBoulder = new THREE.Mesh(
     new THREE.DodecahedronGeometry(1.4, 1),
     boulderMat
   );
-  tableBoulder.position.set(0, 0.45, 0);
+  tableBoulder.position.set(0, 0.45, 2.2);
   tableBoulder.scale.set(1.5, 0.7, 1.2);
   tableBoulder.castShadow = true;
   tableBoulder.receiveShadow = true;
@@ -475,7 +476,7 @@ export function buildPistolCanyonGorge(
 
   // 2. Roy Bradford's Lost 1870s Colt Single Action Army Revolver
   const pistolGroup = new THREE.Group();
-  pistolGroup.position.set(0.1, 0.96, -0.05);
+  pistolGroup.position.set(0.1, 0.96, 2.15);
   pistolGroup.rotation.y = -0.45;
 
   // Revolver Frame
@@ -522,9 +523,9 @@ export function buildPistolCanyonGorge(
 
   // 3. Scattered .45 Colt Brass Cartridge Casings
   const cartridgePositions = [
-    { x: -0.35, z: 0.15, rot: 0.6 },
-    { x: -0.28, z: 0.22, rot: 1.8 },
-    { x: 0.42, z: 0.1, rot: -0.9 },
+    { x: -0.35, z: 2.35, rot: 0.6 },
+    { x: -0.28, z: 2.42, rot: 1.8 },
+    { x: 0.42, z: 2.3, rot: -0.9 },
   ];
 
   cartridgePositions.forEach((cp) => {
@@ -540,7 +541,7 @@ export function buildPistolCanyonGorge(
 
   // 4. Weathered Prospector's Field Journal (Roy Bradford, 1920)
   const journalGroup = new THREE.Group();
-  journalGroup.position.set(-0.32, 0.94, -0.2);
+  journalGroup.position.set(-0.32, 0.94, 2.0);
   journalGroup.rotation.y = 0.25;
 
   const journalCover = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.03, 0.42), journalLeatherMat);
@@ -554,19 +555,22 @@ export function buildPistolCanyonGorge(
 
   // 5. Natural Bedrock Tinaja (Spring Plunge-Pool for Canteen Refills)
   const tinajaGroup = new THREE.Group();
-  tinajaGroup.position.set(-3.5, -0.1, 2.5);
+  const tinajaX = canyonX - 2.8;
+  const tinajaZ = canyonZ + 1.8;
+  const tinajaY = getTerrainHeight(tinajaX, tinajaZ);
+  tinajaGroup.position.set(-2.8, tinajaY - canyonY, 1.8);
 
   // Basin Ring of polished river stones
   const basinMat = new THREE.MeshStandardMaterial({ color: 0x483a30, roughness: 0.85 });
   for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
-    const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.8, 1), basinMat);
-    stone.position.set(Math.cos(a) * 2.2, 0.2, Math.sin(a) * 2.0);
-    stone.scale.set(1.2, 0.5, 1.0);
+    const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7, 1), basinMat);
+    stone.position.set(Math.cos(a) * 1.8, 0.2, Math.sin(a) * 1.6);
+    stone.scale.set(1.1, 0.5, 0.9);
     tinajaGroup.add(stone);
   }
 
   // Water Surface
-  const waterGeo = new THREE.CircleGeometry(2.1, 16);
+  const waterGeo = new THREE.CircleGeometry(1.7, 16);
   const waterMat = new THREE.MeshStandardMaterial({
     color: 0x228899,
     roughness: 0.1,
@@ -582,11 +586,14 @@ export function buildPistolCanyonGorge(
   group.add(tinajaGroup);
 
   // Add tinaja coordinates to water refill points
-  waterRefillPoints.push(new THREE.Vector3(canyonX - 3.5, canyonY + 0.2, canyonZ + 2.5));
+  waterRefillPoints.push(new THREE.Vector3(tinajaX, tinajaY + 0.2, tinajaZ));
 
   // 6. Weathered Cedar Trail Post & Sign
   const signGroup = new THREE.Group();
-  signGroup.position.set(2.8, 0, -2.2);
+  const signX = canyonX + 2.2;
+  const signZ = canyonZ - 1.6;
+  const signY = getTerrainHeight(signX, signZ);
+  signGroup.position.set(2.2, signY - canyonY, -1.6);
 
   const signPost = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 2.2, 6), cedarSignMat);
   signPost.position.set(0, 1.1, 0);

@@ -1189,6 +1189,56 @@ export const MapModal: React.FC<MapModalProps> = ({
               );
             })()}
 
+            {/* 7e2. Pistol Canyon (Historic tributary canyon to Peters Canyon running up into Peters Mesa) */}
+            {(() => {
+              return (
+                <g>
+                  {/* Tributary wash carving from Peters Canyon into Peters Mesa */}
+                  <path
+                    d={`M ${toSvgX(218)} ${toSvgY(-200)} Q ${toSvgX(180)} ${toSvgY(-163)} ${toSvgX(135)} ${toSvgY(-128)}`}
+                    fill="none"
+                    stroke="#0284c7"
+                    strokeWidth="1.8"
+                    strokeDasharray="4 2"
+                    opacity="0.85"
+                  />
+                  <text
+                    x={toSvgX(180)}
+                    y={toSvgY(-163) - 7}
+                    fill="#0369a1"
+                    fontSize={Math.max(7.5, Math.min(10, toSvgDist(8.5)))}
+                    fontFamily="serif"
+                    fontStyle="italic"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    transform={`rotate(-24 ${toSvgX(180)} ${toSvgY(-163) - 7})`}
+                  >
+                    Pistol Canyon (Tributary)
+                  </text>
+                  {/* Colt Revolver & Bedrock Tinaja Landmark Marker */}
+                  <circle
+                    cx={toSvgX(180)}
+                    cy={toSvgY(-163)}
+                    r={Math.max(3.0, toSvgDist(2.4))}
+                    fill="#b45309"
+                    stroke="#ffffff"
+                    strokeWidth="1.2"
+                  />
+                  <text
+                    x={toSvgX(180) + 6}
+                    y={toSvgY(-163) + 3.5}
+                    fill="#78350f"
+                    fontSize={Math.max(6.5, Math.min(8.5, toSvgDist(7)))}
+                    fontFamily="serif"
+                    fontWeight="bold"
+                    textAnchor="start"
+                  >
+                    Colt Tinaja
+                  </text>
+                </g>
+              );
+            })()}
+
             {/* 7f. Tortilla Creek (flows through Tortilla Canyon & Tortilla Flat at x = 0, z = -252) */}
             {(() => {
               return (

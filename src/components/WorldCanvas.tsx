@@ -5004,22 +5004,22 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           }
         }
         // 6. Pistol Canyon Box Gorge (Historic Lost Dutchman Tributary)
-        else if (Math.abs(curX - (-46)) < 18 && curZ < -80 && curZ > -175 && curY < 24) {
+        else if ((Math.hypot(curX - 180, curZ - (-163)) < 26) || (curX >= 146 && curX <= 218 && Math.abs(curZ - (-136 + ((curX - 146) / 69) * (-59))) < 16 && curY < 32)) {
           if (!discoveredSummitsRef.current.has('pistol_canyon')) {
             discoveredSummitsRef.current.add('pistol_canyon');
             soundEngine.playDiscovery();
             if (onShowBanner) {
-              onShowBanner("🏜️ Canyon Discovered: Pistol Canyon • Rugged slot gorge below Peters Mesa! Site of Roy Bradford's lost 1920s Colt revolver.");
+              onShowBanner("🏜️ Canyon Discovered: Pistol Canyon • Rugged tributary gorge to Peters Canyon climbing into Peters Mesa! Site of Roy Bradford's lost 1920s Colt revolver.");
             }
           }
         }
         // 7. Peters Canyon Drainage Gorge (USGS Mormon Flat Dam & Weavers Needle Quads)
-        else if (Math.abs(curX - (-155)) < 22 && curZ <= -75 && curZ >= -308 && curY < 24) {
+        else if ((Math.hypot(curX - 243, curZ - (-267)) < 32) || (curZ <= -175 && curZ >= -330 && Math.abs(curX - (243 + (curZ - (-267)) * -0.34)) < 22 && curY < 26)) {
           if (!discoveredSummitsRef.current.has('peters_canyon')) {
             discoveredSummitsRef.current.add('peters_canyon');
             soundEngine.playDiscovery();
             if (onShowBanner) {
-              onShowBanner('🏜️ Canyon Discovered: Peters Canyon • Rugged canyon wash flanked by Peters Mesa rimrock, draining north toward Canyon Lake!');
+              onShowBanner('🏜️ Canyon Discovered: Peters Canyon (Pete\'s Canyon) • Rugged canyon wash flanked by Peters Mesa rimrock, draining north toward Canyon Lake!');
             }
           }
         }

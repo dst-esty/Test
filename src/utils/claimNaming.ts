@@ -113,8 +113,8 @@ const LANDMARK_ANCHORS: LandmarkAnchor[] = [
   },
   {
     name: 'Pistol Canyon',
-    x: -46,
-    z: -130,
+    x: 180,
+    z: -163,
     templates: [
       'Pistol Canyon Gorge Claim',
       'Apache Tears Quartz Claim',
@@ -125,8 +125,8 @@ const LANDMARK_ANCHORS: LandmarkAnchor[] = [
   },
   {
     name: 'Peters Mesa',
-    x: -105,
-    z: -155,
+    x: 135,
+    z: -125,
     templates: [
       'Peters Mesa Basalt Lode',
       'Peter Henderson Old Pasture Claim',
@@ -137,8 +137,8 @@ const LANDMARK_ANCHORS: LandmarkAnchor[] = [
   },
   {
     name: 'Peters Canyon',
-    x: -155,
-    z: -160,
+    x: 243,
+    z: -267,
     templates: [
       'Peters Canyon Wash Placer',
       'Canyon Lake Drainage Lode',

@@ -160,9 +160,9 @@ export const TINAJAS: TinajaPool[] = [
   {
     id: 'pistol_canyon_tinaja',
     name: 'Pistol Canyon Bedrock Tinaja',
-    x: -46,
-    z: -130,
-    radius: 4.5,
+    x: 180,
+    z: -163,
+    radius: 3.2,
     maxDepth: 1.6,
     waterLevel: 0.50,
     isPerennial: true,

@@ -188,11 +188,15 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   const distToFishCreek = Math.abs(z - fishCreekCurve);
   const fishCreekCarve = computeCanyonCarve(distToFishCreek, z, 4.0, 24.0, -295, -165, 22.0, 15.0);
 
-  // Canyon G: Pistol Canyon (Historic box canyon tributary between Peters Mesa & Malapais Mountain)
-  // Famous site where Dutch Hunter Roy Bradford lost his revolver in the 1920s while searching for the Lost Dutchman Mine
-  const pistolCanyonX = -46 + Math.sin(z * 0.026 - 1.1) * 20 + Math.cos(z * 0.012) * 9;
-  const distToPistolCanyon = Math.abs(x - pistolCanyonX);
-  const pistolCanyonCarve = computeCanyonCarve(distToPistolCanyon, z, 4.2, 25.0, -196, -55, 18.0, 15.5);
+  // Canyon G: Pistol Canyon (Historic tributary canyon to Peters Canyon running up into Peters Mesa)
+  // Deep, narrow slot-box canyon branching from Peters Canyon (218, -200) and carving southwest directly into Peters Mesa (135, -128).
+  // Site where Dutch Hunter Roy Bradford lost his Colt revolver in the 1920s while searching for the Lost Dutchman Mine.
+  const tPistol = Math.max(0, Math.min(1, (x - 135.0) / 83.0));
+  const pistolBaseZ = -128.0 + tPistol * (-70.0);
+  const pistolMeander = Math.sin((x - 135.0) * 0.055) * 4.2 + Math.cos((x - 135.0) * 0.028) * 1.5 - 1.5;
+  const pistolAxisZ = pistolBaseZ + pistolMeander;
+  const distToPistolCanyon = Math.abs(z - pistolAxisZ);
+  const pistolCanyonCarve = computeCanyonCarve(distToPistolCanyon, x, 1.9, 6.8, 130.0, 218.0, 6.0, 14.0);
 
   // Canyon H1: La Barge Canyon & Upper Box (Central Superstitions Primary Waterway)
   // Originates in the southern highlands (z: 40, x: 80), flows north right past Charlebois Spring (z: -75, x: 65),
@@ -477,7 +481,7 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   }
 
   // 7. Malapais Mountain Massif (USGS Elev. 4,229 ft / 1,289m - Historic "Black Mountain")
-  // Prominent volcanic basalt massif north of Weaver's Needle (80, 15) & east of Pistol Canyon (-46, -130).
+  // Prominent volcanic basalt massif north of Weaver's Needle (80, 15) and east of La Barge Canyon.
   // Matches USGS Weavers Needle 7.5-minute topographic quadrangle & authentic geological surveys:
   // - Main South Peak (USGS 4,229 ft) basalt mesa tableland at (95, -205)
   // - North Peak (USGS 4,159 ft) volcanic dome at (96, -242) separated by North Col saddle (95.5, -223)
@@ -689,6 +693,15 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     }
   }
 
+  // 12b. Pistol Canyon Flanking Cliffs (Sheer volcanic breccia walls rising 20-30m above the narrow slot corridor)
+  let pistolWallsElev = 0;
+  if (x >= 135.0 && x <= 220.0 && distToPistolCanyon >= 2.2 && distToPistolCanyon < 22.0) {
+    const wallProg = Math.sin(Math.max(0, Math.min(1, (x - 135.0) / 85.0)) * Math.PI);
+    const wallCross = Math.sin(Math.max(0, Math.min(1, (distToPistolCanyon - 2.2) / 19.8)) * Math.PI);
+    const wallTexture = Math.sin(x * 0.12) * Math.cos(z * 0.12) * 2.5;
+    pistolWallsElev = Math.pow(wallCross, 0.6) * wallProg * (22.0 + wallTexture);
+  }
+
   let rawHeight =
     (rawElev + totalCanyonCarve + arroyo + needleBase + springDepression + mineRidge + saltRiverCarve) *
       trailheadFlatten +
@@ -699,7 +712,8 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     battleshipMtnElev +
     minersNeedleElev +
     superstitionPeakElev +
-    petersMesaElev;
+    petersMesaElev +
+    pistolWallsElev;
 
   // 13. Traversable Canyon Wash Bed Guarantees:
   // 13A. La Barge Canyon & Upper Box Wash Bed Gradient
@@ -752,8 +766,27 @@ export function getBaseTerrainHeight(x: number, z: number): number {
     }
     const southFade = Math.min(1.0, Math.max(0.0, (-175.0 - z) / 12.0));
     const northFade = Math.min(1.0, Math.max(0.0, (z - (-330.0)) / 10.0));
-    const maxCut = Math.max(0, rawHeight - petersWashBed);
-    rawHeight = rawHeight - crossFactor * southFade * northFade * maxCut;
+    const blendWeight = crossFactor * southFade * northFade;
+    rawHeight = rawHeight * (1.0 - blendWeight) + petersWashBed * blendWeight;
+  }
+
+  // 13D. Pistol Canyon Wash Bed & Sheer Slot Gorge (Ascends southwest from Peters Canyon into Peters Mesa)
+  if (x >= 126.0 && x <= 222.0 && distToPistolCanyon < 7.0) {
+    // Wash bed ascends smoothly from Peters Canyon confluence (20.5m) up through deep slot narrows into Peters Mesa plateau (56.2m)
+    const pistolWashBed = 56.2 - tPistol * 35.7;
+    let crossFactor = 0;
+    const floorW = 1.9;
+    const rimW = 6.8;
+    if (distToPistolCanyon <= floorW) {
+      crossFactor = 1.0;
+    } else {
+      const t = (distToPistolCanyon - floorW) / (rimW - floorW);
+      crossFactor = 1.0 - t * t * (3.0 - 2.0 * t);
+    }
+    const mesaFade = Math.min(1.0, Math.max(0.0, (x - 126.0) / 6.0));
+    const petersFade = Math.min(1.0, Math.max(0.0, (222.0 - x) / 5.0));
+    const blendWeight = crossFactor * mesaFade * petersFade;
+    rawHeight = rawHeight * (1.0 - blendWeight) + pistolWashBed * blendWeight;
   }
 
   // Level out the Tortilla Flat town terrace smoothly to an elevated, dry 7.5m (or sloping river trail)
@@ -2555,8 +2588,11 @@ export function createTerrainMesh(): THREE.Mesh {
     // Color computation
     const distToSpring = Math.hypot(vx - (-70), vz - (-20));
     const distToMalapais = Math.hypot(vx - 95, vz - (-205));
-    const pistolCanyonX = -46 + Math.sin(vz * 0.026 - 1.1) * 20 + Math.cos(vz * 0.012) * 9;
-    const distToPistol = Math.abs(vx - pistolCanyonX);
+    const tPistolV = Math.max(0, Math.min(1, (vx - 135.0) / 83.0));
+    const pistolBaseZV = -128.0 + tPistolV * (-70.0);
+    const pistolMeanderV = Math.sin((vx - 135.0) * 0.055) * 4.2 + Math.cos((vx - 135.0) * 0.028) * 1.5 - 1.5;
+    const pistolAxisZV = pistolBaseZV + pistolMeanderV;
+    const distToPistol = Math.abs(vz - pistolAxisZV);
 
     let r = 0.82;
     let g = 0.63;
@@ -2596,8 +2632,8 @@ export function createTerrainMesh(): THREE.Mesh {
         g = 0.22 + basaltNoise * 0.8 + strata * 0.5;
         b = 0.19 + basaltNoise * 0.6 + strata * 0.3;
       }
-    } else if (distToPistol < 24 && vz <= -58 && vz >= -192) {
-      // Pistol Canyon: sheer volcanic breccia walls and sun-bleached alluvial wash gravel
+    } else if (vx >= 132.0 && vx <= 222.0 && distToPistol < 7.2) {
+      // Pistol Canyon: sheer volcanic breccia walls and sun-bleached alluvial wash gravel ascending into Peters Mesa
       if (slope > 0.65) {
         // Red-purple volcanic breccia canyon walls
         r = 0.68 + Math.sin(vy * 0.85) * 0.07;
