@@ -2295,6 +2295,124 @@ export function generateTerrainNoiseTexture(size = 256): THREE.DataTexture {
   return texture;
 }
 
+/**
+ * Generates a seamless tileable 512x512 PBR ground detail texture for authentic Sonoran Desert terrain:
+ * - Channels R & G: High-frequency tangent normal vectors (dx, dy) capturing:
+ *   1. Angular scree, volcanic talus gravel, and jagged desert pavement chips
+ *   2. Desiccation mud-cracks and hardpan caliche shrinkage fissures
+ *   3. Delicate wind-blown sand wash ripples along arroyo floors
+ * - Channel B: Cavity Ambient Occlusion (AO), darkening recessed cracks and gaps between pebbles
+ * - Channel A: Mineral distribution mask (translucent quartz sparkles vs weathered dark basalt flecks)
+ */
+export function generateDesertGroundDetailTexture(size = 512): THREE.DataTexture {
+  const heightMap = new Float32Array(size * size);
+
+  // Periodic seamless noise sampler ensuring 100% boundary continuity across UV boundaries
+  function periodicNoise(u: number, v: number, freq: number): number {
+    const x = u * freq;
+    const y = v * freq;
+    const i = Math.floor(x);
+    const j = Math.floor(y);
+    const fx = x - i;
+    const fy = y - j;
+    const sx = fx * fx * (3.0 - 2.0 * fx);
+    const sy = fy * fy * (3.0 - 2.0 * fy);
+
+    const i0 = ((i % freq) + freq) % freq;
+    const i1 = (((i + 1) % freq) + freq) % freq;
+    const j0 = ((j % freq) + freq) % freq;
+    const j1 = (((j + 1) % freq) + freq) % freq;
+
+    const a = hash(i0, j0);
+    const b = hash(i1, j0);
+    const c = hash(i0, j1);
+    const d = hash(i1, j1);
+
+    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+  }
+
+  // Synthesize multi-scale desert ground surface heightfield
+  for (let y = 0; y < size; y++) {
+    const v = y / size;
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+
+      // 1. Angular scree, volcanic talus gravel, and sharp desert pavement stones
+      const g1 = periodicNoise(u, v, 32);
+      const g2 = periodicNoise(u, v, 64);
+      const g3 = periodicNoise(u, v, 128);
+      const gravel = g1 * 0.52 + g2 * 0.33 + g3 * 0.15;
+
+      // 2. Caliche mud desiccation cracks and arroyo sediment fissures
+      const c1 = Math.abs(periodicNoise(u, v, 16) - 0.5) * 2.0;
+      const c2 = Math.abs(periodicNoise(u, v, 32) - 0.5) * 2.0;
+      const fissures = Math.pow(Math.min(c1, c2), 2.4);
+
+      // 3. Delicate desert wash sand ripples
+      const rippleWave = Math.sin((u * 48 + Math.cos(v * 16 * Math.PI * 2) * 1.5) * Math.PI * 2);
+      const ripples = (rippleWave * 0.5 + 0.5) * 0.18;
+
+      heightMap[y * size + x] = gravel * 0.55 + fissures * 0.32 + ripples * 0.13;
+    }
+  }
+
+  const data = new Uint8Array(size * size * 4);
+  const bumpScale = 4.2;
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const xL = (x - 1 + size) % size;
+      const xR = (x + 1) % size;
+      const yD = (y - 1 + size) % size;
+      const yU = (y + 1) % size;
+
+      const hL = heightMap[y * size + xL];
+      const hR = heightMap[y * size + xR];
+      const hD = heightMap[yD * size + x];
+      const hU = heightMap[yU * size + x];
+      const hC = heightMap[y * size + x];
+
+      // Sobel central difference gradient for surface normals
+      const dX = (hR - hL) * bumpScale;
+      const dY = (hU - hD) * bumpScale;
+
+      const len = Math.sqrt(dX * dX + dY * dY + 1.0);
+      const nx = -dX / len;
+      const ny = -dY / len;
+
+      // Cavity Ambient Occlusion: recessed soil fissures and stone undersides get shadowed
+      const laplacian = (hL + hR + hD + hU - 4.0 * hC);
+      const ao = Math.max(0.18, Math.min(1.0, 0.72 + laplacian * 4.2 + (hC - 0.5) * 0.35));
+
+      // Quartz granule & mineral sparkle mask
+      const mineral = (hC > 0.65 && (x * 7 + y * 13) % 17 === 0) ? 1.0 : (hC < 0.25 ? 0.0 : 0.5);
+
+      const idx = (y * size + x) * 4;
+      data[idx] = Math.floor((nx * 0.5 + 0.5) * 255);
+      data[idx + 1] = Math.floor((ny * 0.5 + 0.5) * 255);
+      data[idx + 2] = Math.floor(ao * 255);
+      data[idx + 3] = Math.floor(mineral * 255);
+    }
+  }
+
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+let cachedSharedGroundDetailTexture: THREE.DataTexture | null = null;
+export function getSharedDesertGroundDetailTexture(): THREE.DataTexture {
+  if (!cachedSharedGroundDetailTexture) {
+    cachedSharedGroundDetailTexture = generateDesertGroundDetailTexture(512);
+  }
+  return cachedSharedGroundDetailTexture;
+}
+
 // Shared hole cutout uniforms for terrain shader to prevent geometry tearing in carved tunnels
 // Packed into two compact vec4 arrays (Pos+Radius, Dir+SignedDepth) to strictly respect MAX_FRAGMENT_UNIFORM_VECTORS
 export const MAX_MOUNTAIN_HOLES = 4;
@@ -2413,7 +2531,10 @@ export function applyMountainHoleShaderToMaterial(
  * Creates a photorealistic PBR terrain material using GLSL shaders for slope-based rock blending,
  * sedimentary cliff strata, desert varnish, and dynamic mountain excavation portal cutouts.
  */
-export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THREE.MeshStandardMaterial {
+export function createRealisticTerrainMaterial(
+  noiseTexture: THREE.Texture,
+  groundDetailTexture: THREE.Texture = getSharedDesertGroundDetailTexture()
+): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.88,
@@ -2423,10 +2544,11 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
     shadowSide: THREE.FrontSide,
   });
 
-  material.customProgramCacheKey = () => 'superstition_terrain_material_v6_rdr';
+  material.customProgramCacheKey = () => 'superstition_terrain_material_v7_pbr_scree_detail';
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTerrainNoise = { value: noiseTexture };
+    shader.uniforms.uGroundDetail = { value: groundDetailTexture };
     shader.uniforms.uMountainHolePosRadius = terrainHoleUniforms.uMountainHolePosRadius;
     shader.uniforms.uMountainHoleDirDepth = terrainHoleUniforms.uMountainHoleDirDepth;
     shader.uniforms.uMountainHoleCount = terrainHoleUniforms.uMountainHoleCount;
@@ -2451,11 +2573,27 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
       '#include <common>',
       `#include <common>
       uniform sampler2D uTerrainNoise;
+      uniform sampler2D uGroundDetail;
       uniform vec4 uMountainHolePosRadius[4];
       uniform vec4 uMountainHoleDirDepth[4];
       uniform int uMountainHoleCount;
       varying highp vec3 vWorldPos;
-      varying highp vec3 vWorldNormal;`
+      varying highp vec3 vWorldNormal;
+
+      mat3 getGroundTBN(vec3 eye_pos, vec3 surf_norm, vec2 uv) {
+        vec3 q0 = dFdx(eye_pos.xyz);
+        vec3 q1 = dFdy(eye_pos.xyz);
+        vec2 st0 = dFdx(uv);
+        vec2 st1 = dFdy(uv);
+        vec3 N = surf_norm;
+        vec3 q1perp = cross(q1, N);
+        vec3 q0perp = cross(N, q0);
+        vec3 T = q1perp * st0.x + q0perp * st1.x;
+        vec3 B = q1perp * st0.y + q0perp * st1.y;
+        float det = max(dot(T, T), dot(B, B));
+        float scale = (det == 0.0) ? 0.0 : inversesqrt(det);
+        return mat3(T * scale, B * scale, N);
+      }`
     );
 
     // Discard terrain fragments inside hollowed mountain excavation tunnels and adits
@@ -2506,6 +2644,20 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
       vec4 texZ_micro = texture2D(uTerrainNoise, vWorldPos.xy * 0.28);
       vec4 rockTexMicro = texX_micro * blend.x + texY_micro * blend.y + texZ_micro * blend.z;
 
+      // Triplanar sampling of high-frequency PBR ground detail texture (scree gravel, caliche cracks, wash ripples)
+      vec4 dMicroY = texture2D(uGroundDetail, vWorldPos.xz * 1.45);
+      vec4 dMicroX = texture2D(uGroundDetail, vWorldPos.zy * 1.45);
+      vec4 dMicroZ = texture2D(uGroundDetail, vWorldPos.xy * 1.45);
+
+      vec4 dMedY = texture2D(uGroundDetail, vWorldPos.xz * 0.26);
+      vec4 dMedX = texture2D(uGroundDetail, vWorldPos.zy * 0.26);
+      vec4 dMedZ = texture2D(uGroundDetail, vWorldPos.xy * 0.26);
+
+      vec4 detailY = dMicroY * 0.65 + dMedY * 0.35;
+      vec4 detailX = dMicroX * 0.65 + dMedX * 0.35;
+      vec4 detailZ = dMicroZ * 0.65 + dMedZ * 0.35;
+      vec4 groundDetailSample = detailX * blend.x + detailY * blend.y + detailZ * blend.z;
+
       // Red Dead Redemption-style Arizona geological strata (Coconino sandstone, Supai terracing, Hermit shale, Iron-oxide silt)
       float strataWarp = rockTexMacro.r * 1.8 + rockTexMicro.g * 0.35;
       float fineBanding = sin(vWorldPos.y * 3.4 + strataWarp * 2.5) * 0.5 + 0.5;
@@ -2534,6 +2686,22 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
       // Slope-based transitions with natural talus apron erosion break
       float slopeFactor = smoothstep(0.22, 0.62, slope);
       diffuseColor.rgb = mix(sandWash, cliffRock, slopeFactor);
+
+      // Apply ground detail Cavity Ambient Occlusion (darkens crevices between pebbles & dried earth fissures)
+      float cavityAO = groundDetailSample.b;
+      diffuseColor.rgb *= (0.72 + cavityAO * 0.28);
+
+      // Natural Sonoran mineral flecks: crushed quartz crystals & weathered dark basalt chips
+      float mineralFleck = groundDetailSample.a;
+      vec3 calicheWhite = vec3(0.92, 0.88, 0.78);
+      vec3 darkBasalt = vec3(0.16, 0.14, 0.13);
+      if (mineralFleck > 0.82) {
+        float qFactor = (mineralFleck - 0.82) * 3.5;
+        diffuseColor.rgb = mix(diffuseColor.rgb, calicheWhite, clamp(qFactor, 0.0, 0.45) * (1.0 - slopeFactor * 0.5));
+      } else if (mineralFleck < 0.22) {
+        float bFactor = (0.22 - mineralFleck) * 3.0;
+        diffuseColor.rgb = mix(diffuseColor.rgb, darkBasalt, clamp(bFactor, 0.0, 0.55));
+      }
       `
     );
 
@@ -2544,6 +2712,35 @@ export function createRealisticTerrainMaterial(noiseTexture: THREE.Texture): THR
       float rockRoughness = mix(0.72, 0.95, rockTexMicro.g);
       float varnishGloss = (1.0 - rockTexMacro.a * 0.3);
       roughnessFactor = mix(0.96, rockRoughness * varnishGloss, smoothstep(0.2, 0.68, slope));
+
+      // Detail roughness: quartz crystals and smooth basalt stones catch specular glints; dusty crevices remain matte
+      float detailRough = mix(0.97, 0.42, smoothstep(0.75, 1.0, groundDetailSample.a));
+      roughnessFactor = mix(roughnessFactor, detailRough, 0.32 * (1.0 - slopeFactor * 0.4));
+      `
+    );
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <normal_fragment_maps>',
+      `#include <normal_fragment_maps>
+      // High-frequency PBR normal mapping for scree, gravel, sand ripples, and caliche mud cracks
+      vec2 nY = detailY.xy * 2.0 - 1.0;
+      vec2 nX = detailX.xy * 2.0 - 1.0;
+      vec2 nZ = detailZ.xy * 2.0 - 1.0;
+
+      mat3 tbnY = getGroundTBN(-vViewPosition, normal, vWorldPos.xz);
+      mat3 tbnX = getGroundTBN(-vViewPosition, normal, vWorldPos.zy);
+      mat3 tbnZ = getGroundTBN(-vViewPosition, normal, vWorldPos.xy);
+
+      vec3 mapNy = vec3(nY * 0.70, sqrt(max(0.001, 1.0 - dot(nY * 0.70, nY * 0.70))));
+      vec3 mapNx = vec3(nX * 0.70, sqrt(max(0.001, 1.0 - dot(nX * 0.70, nX * 0.70))));
+      vec3 mapNz = vec3(nZ * 0.70, sqrt(max(0.001, 1.0 - dot(nZ * 0.70, nZ * 0.70))));
+
+      vec3 pertY = normalize(tbnY * mapNy);
+      vec3 pertX = normalize(tbnX * mapNx);
+      vec3 pertZ = normalize(tbnZ * mapNz);
+
+      vec3 finalPerturbedNormal = normalize(pertY * blend.y + pertX * blend.x + pertZ * blend.z);
+      normal = normalize(mix(normal, finalPerturbedNormal, 0.58));
       `
     );
   };
@@ -2739,7 +2936,8 @@ export function createTerrainMesh(): THREE.Mesh {
   geometry.computeVertexNormals();
 
   const noiseTexture = generateTerrainNoiseTexture(256);
-  const material = createRealisticTerrainMaterial(noiseTexture);
+  const groundDetailTexture = getSharedDesertGroundDetailTexture();
+  const material = createRealisticTerrainMaterial(noiseTexture, groundDetailTexture);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.receiveShadow = true;

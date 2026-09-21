@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from './terrain';
+import { createFlutedCylinderGeometry } from './foliage';
 
 /**
  * Builds the authentic real-world landmarks and historical sites from Jacob Emerick's
@@ -183,33 +184,7 @@ export function buildPetersCanyonPinchAndBivouac(
   screeGroup.add(shoeGroup);
 
   // C. Suspicious Triangular Cliff Cave across the ravine
-  const caveGroup = new THREE.Group();
-  const caveX = 145;
-  const caveZ = -235;
-  const caveY = getTerrainHeight(caveX, caveZ);
-  caveGroup.position.set(caveX, caveY, caveZ);
-
-  // Dark triangular hollow carved into the rock face
-  const caveArchMat = new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 0.98 });
-  const caveCone = new THREE.Mesh(
-    new THREE.ConeGeometry(2.4, 4.0, 3),
-    caveArchMat
-  );
-  caveCone.position.set(0, 1.8, 0);
-  caveCone.rotation.z = -Math.PI / 2;
-  caveCone.rotation.y = 0.3;
-  caveGroup.add(caveCone);
-
-  // Stacked prospector debris/dry-laid fieldstones inside entrance
-  for (let s = 0; s < 7; s++) {
-    const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.3, 0), basaltMat);
-    stone.position.set(
-      (Math.random() - 0.5) * 1.2,
-      0.2 + (s % 3) * 0.22,
-      (Math.random() - 0.5) * 1.0
-    );
-    caveGroup.add(stone);
-  }
+  const caveGroup = buildSuspiciousTriangularCave(145, -235);
   rootGroup.add(caveGroup);
 
   rootGroup.add(screeGroup);
@@ -580,4 +555,510 @@ export function buildPetersCanyonPinchAndBivouac(
 
   scene.add(rootGroup);
   return rootGroup;
+}
+
+/**
+ * Builds the authentic, photorealistic Suspicious Triangular Cliff Cave landmark
+ * based on real-world reference photography from Peters Canyon / Malapais North Scree.
+ *
+ * Real-world geological and historical characteristics:
+ * - Imposing weathered volcanic rhyolite/tuff rock bluff with vertical jointing & crags
+ * - Natural gothic/triangular cavern fissure opening with inclined left & right bedrock jambs
+ * - Deep, recessed interior cavern hollow extending 6.5+ meters into the cliff with shadowed void
+ * - Prominent monolithic right buttress with horizontal jointing matching the exact photo formation
+ * - Vibrant chartreuse/yellow-green crustose lichen patinas across the lower rock terraces
+ * - Stacked prospector dry-stone barricade and weathered cedar timber prop across threshold
+ * - Interior prospector campfire hearth, antique rusted pickaxe head, and hidden cache tin
+ * - Foreground Sonoran saguaro cactus and desert sage tufts clinging to the rock shelves
+ */
+export function buildSuspiciousTriangularCave(caveX: number, caveZ: number): THREE.Group {
+  const caveGroup = new THREE.Group();
+  const caveY = getTerrainHeight(caveX, caveZ);
+  caveGroup.position.set(caveX, caveY, caveZ);
+  // Orient outward toward the Peters Canyon approach trail (viewed looking south-southeast)
+  caveGroup.rotation.y = -0.12;
+
+  // -------------------------------------------------------------------------
+  // 1. DEDICATED GEOLOGICAL & HISTORICAL MATERIALS
+  // -------------------------------------------------------------------------
+  // Warm weathered desert red-brown rhyolitic tuff
+  const cliffRhyoliteMat = new THREE.MeshStandardMaterial({
+    color: 0x6e5040,
+    roughness: 0.94,
+    metalness: 0.04,
+  });
+
+  // Sunlit ochre/buff facet highlights
+  const cliffTanMat = new THREE.MeshStandardMaterial({
+    color: 0x8c6d54,
+    roughness: 0.92,
+    metalness: 0.03,
+  });
+
+  // Deep shadowed basalt jointing & crevices
+  const cliffDarkBasaltMat = new THREE.MeshStandardMaterial({
+    color: 0x362b22,
+    roughness: 0.96,
+    metalness: 0.05,
+  });
+
+  // Distinctive chartreuse/yellow-green crustose lichen (exact match to photo!)
+  const cliffLichenMat = new THREE.MeshStandardMaterial({
+    color: 0xa2ae4a,
+    roughness: 0.95,
+    metalness: 0.02,
+  });
+
+  // Dark cavern interior stone
+  const cavernInteriorMat = new THREE.MeshStandardMaterial({
+    color: 0x14100d,
+    roughness: 0.99,
+    metalness: 0.0,
+  });
+
+  // Pure light-absorbing cavern void backplane
+  const cavernVoidMat = new THREE.MeshBasicMaterial({
+    color: 0x050403,
+    side: THREE.DoubleSide,
+  });
+
+  // Weathered prospector cedar timber
+  const prospectorWoodMat = new THREE.MeshStandardMaterial({
+    color: 0x584738,
+    roughness: 0.95,
+  });
+
+  // Antique oxidized iron
+  const rustedRelicMat = new THREE.MeshStandardMaterial({
+    color: 0x483428,
+    roughness: 0.85,
+    metalness: 0.65,
+  });
+
+  // Charred campfire coals & embers
+  const charcoalMat = new THREE.MeshStandardMaterial({
+    color: 0x0e0e0e,
+    roughness: 0.98,
+  });
+
+  // Sonoran ribbed cactus green
+  const saguaroGreenMat = new THREE.MeshStandardMaterial({
+    color: 0x3b572e,
+    roughness: 0.86,
+  });
+
+  // Pale dusty silver-green desert sage foliage
+  const desertSageMat = new THREE.MeshStandardMaterial({
+    color: 0x65775f,
+    roughness: 0.92,
+  });
+
+  // -------------------------------------------------------------------------
+  // 2. THE NATURAL GOTHIC / TRIANGULAR CAVERN PORTAL (Mouth & Jambs)
+  // -------------------------------------------------------------------------
+  // Left Jamb (Angled Bedrock Slabs leaning inward at ~22°)
+  const leftJambLower = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.2, 3.8), cliffRhyoliteMat);
+  leftJambLower.position.set(-1.6, 1.0, 0.5);
+  leftJambLower.rotation.z = -0.38;
+  leftJambLower.rotation.y = 0.12;
+  leftJambLower.castShadow = true;
+  leftJambLower.receiveShadow = true;
+  caveGroup.add(leftJambLower);
+
+  const leftJambMid = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.4, 3.4), cliffTanMat);
+  leftJambMid.position.set(-1.0, 2.4, 0.8);
+  leftJambMid.rotation.z = -0.38;
+  leftJambMid.castShadow = true;
+  leftJambMid.receiveShadow = true;
+  caveGroup.add(leftJambMid);
+
+  const leftJambUpper = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.8, 3.0), cliffRhyoliteMat);
+  leftJambUpper.position.set(-0.4, 3.6, 1.0);
+  leftJambUpper.rotation.z = -0.42;
+  leftJambUpper.castShadow = true;
+  leftJambUpper.receiveShadow = true;
+  caveGroup.add(leftJambUpper);
+
+  // Right Jamb (Angled Bedrock Slabs leaning inward at ~22°)
+  const rightJambLower = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.2, 3.8), cliffRhyoliteMat);
+  rightJambLower.position.set(1.7, 1.0, 0.5);
+  rightJambLower.rotation.z = 0.38;
+  rightJambLower.rotation.y = -0.12;
+  rightJambLower.castShadow = true;
+  rightJambLower.receiveShadow = true;
+  caveGroup.add(rightJambLower);
+
+  const rightJambMid = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.4, 3.4), cliffTanMat);
+  rightJambMid.position.set(1.1, 2.4, 0.8);
+  rightJambMid.rotation.z = 0.38;
+  rightJambMid.castShadow = true;
+  rightJambMid.receiveShadow = true;
+  caveGroup.add(rightJambMid);
+
+  const rightJambUpper = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.8, 3.0), cliffRhyoliteMat);
+  rightJambUpper.position.set(0.4, 3.6, 1.0);
+  rightJambUpper.rotation.z = 0.42;
+  rightJambUpper.castShadow = true;
+  rightJambUpper.receiveShadow = true;
+  caveGroup.add(rightJambUpper);
+
+  // Overhanging Keystone Apex Block (Gothic Point Arch Cap at 4.2m height)
+  const keystoneApex = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.1, 3.2), cliffRhyoliteMat);
+  keystoneApex.position.set(0, 4.35, 0.7);
+  keystoneApex.castShadow = true;
+  keystoneApex.receiveShadow = true;
+  caveGroup.add(keystoneApex);
+
+  // Natural jagged rock nodules along the apex arch
+  const archNodule1 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7, 1), cliffTanMat);
+  archNodule1.position.set(-0.25, 4.15, 0.2);
+  archNodule1.scale.set(1.1, 0.8, 1.2);
+  archNodule1.castShadow = true;
+  caveGroup.add(archNodule1);
+
+  const archNodule2 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.65, 1), cliffRhyoliteMat);
+  archNodule2.position.set(0.28, 4.2, 0.3);
+  archNodule2.scale.set(0.9, 0.7, 1.1);
+  archNodule2.castShadow = true;
+  caveGroup.add(archNodule2);
+
+  // -------------------------------------------------------------------------
+  // 3. RECESSED INTERIOR CAVERN CHAMBER & VOID TUNNEL (6.5m Deep)
+  // -------------------------------------------------------------------------
+  // Left inner cavern tunnel wall (dark rough volcanic stone)
+  const innerWallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4.0, 6.2), cavernInteriorMat);
+  innerWallLeft.position.set(-1.35, 2.0, 3.1);
+  innerWallLeft.rotation.z = -0.20;
+  innerWallLeft.receiveShadow = true;
+  caveGroup.add(innerWallLeft);
+
+  // Right inner cavern tunnel wall
+  const innerWallRight = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4.0, 6.2), cavernInteriorMat);
+  innerWallRight.position.set(1.35, 2.0, 3.1);
+  innerWallRight.rotation.z = 0.20;
+  innerWallRight.receiveShadow = true;
+  caveGroup.add(innerWallRight);
+
+  // Vaulted cleft ceiling
+  const innerCeiling = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.35, 6.2), cavernInteriorMat);
+  innerCeiling.position.set(0, 3.85, 3.1);
+  innerCeiling.castShadow = true;
+  innerCeiling.receiveShadow = true;
+  caveGroup.add(innerCeiling);
+
+  // Cavern stone floor stepping slightly upward into the mountain
+  const innerFloor = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.35, 6.2), cavernInteriorMat);
+  innerFloor.position.set(0, -0.05, 3.1);
+  innerFloor.receiveShadow = true;
+  caveGroup.add(innerFloor);
+
+  // Pitch-black cavern void backplate (absorbs sunlight, creates true cavern depth)
+  const voidBackplate = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 3.8), cavernVoidMat);
+  voidBackplate.position.set(0, 1.9, 6.2);
+  caveGroup.add(voidBackplate);
+
+  // -------------------------------------------------------------------------
+  // 4. THE PROMINENT MONOLITHIC RIGHT BUTTRESS (Exact geological match to photo!)
+  // -------------------------------------------------------------------------
+  // Heavy main vertical column
+  const buttressBase = new THREE.Mesh(new THREE.BoxGeometry(3.6, 6.5, 5.0), cliffRhyoliteMat);
+  buttressBase.position.set(3.5, 3.2, 0.8);
+  buttressBase.castShadow = true;
+  buttressBase.receiveShadow = true;
+  caveGroup.add(buttressBase);
+
+  // Protruding front facet with sunlit tan tone
+  const buttressProw = new THREE.Mesh(new THREE.BoxGeometry(2.8, 5.2, 2.4), cliffTanMat);
+  buttressProw.position.set(3.0, 2.6, -1.2);
+  buttressProw.rotation.y = -0.15;
+  buttressProw.castShadow = true;
+  buttressProw.receiveShadow = true;
+  caveGroup.add(buttressProw);
+
+  // Horizontal bedding fracture crevice 1
+  const bedFracture1 = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.12, 5.2), cliffDarkBasaltMat);
+  bedFracture1.position.set(3.5, 2.2, 0.8);
+  caveGroup.add(bedFracture1);
+
+  // Horizontal bedding fracture crevice 2
+  const bedFracture2 = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.12, 5.2), cliffDarkBasaltMat);
+  bedFracture2.position.set(3.5, 4.5, 0.8);
+  caveGroup.add(bedFracture2);
+
+  // Upper buttress crag top
+  const buttressTop = new THREE.Mesh(new THREE.BoxGeometry(3.2, 4.2, 4.2), cliffRhyoliteMat);
+  buttressTop.position.set(3.6, 7.6, 1.2);
+  buttressTop.castShadow = true;
+  buttressTop.receiveShadow = true;
+  caveGroup.add(buttressTop);
+
+  // -------------------------------------------------------------------------
+  // 5. LEFT CLIFF BUTTRESS & STEPPED CRAGS
+  // -------------------------------------------------------------------------
+  const leftButtressMain = new THREE.Mesh(new THREE.BoxGeometry(3.2, 5.4, 4.8), cliffRhyoliteMat);
+  leftButtressMain.position.set(-3.4, 2.8, 0.8);
+  leftButtressMain.castShadow = true;
+  leftButtressMain.receiveShadow = true;
+  caveGroup.add(leftButtressMain);
+
+  const leftButtressOuter = new THREE.Mesh(new THREE.BoxGeometry(2.8, 4.2, 4.0), cliffTanMat);
+  leftButtressOuter.position.set(-5.4, 2.0, 0.4);
+  leftButtressOuter.castShadow = true;
+  leftButtressOuter.receiveShadow = true;
+  caveGroup.add(leftButtressOuter);
+
+  // -------------------------------------------------------------------------
+  // 6. UPPER CLIFF MASSIF & SKYLINE PINNACLES (Reaching 12.5m elevation)
+  // -------------------------------------------------------------------------
+  // Central cliff face above cave apex
+  const upperCentralWall = new THREE.Mesh(new THREE.BoxGeometry(6.8, 5.5, 5.5), cliffRhyoliteMat);
+  upperCentralWall.position.set(0.2, 7.2, 2.5);
+  upperCentralWall.castShadow = true;
+  upperCentralWall.receiveShadow = true;
+  caveGroup.add(upperCentralWall);
+
+  // Jagged summit pinnacles
+  const pinnacle1 = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 1.4, 3.8, 5), cliffRhyoliteMat);
+  pinnacle1.position.set(-1.2, 10.8, 2.0);
+  pinnacle1.rotation.y = 0.4;
+  pinnacle1.castShadow = true;
+  caveGroup.add(pinnacle1);
+
+  const pinnacle2 = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.6, 4.5, 6), cliffTanMat);
+  pinnacle2.position.set(1.0, 11.2, 2.2);
+  pinnacle2.rotation.y = 0.8;
+  pinnacle2.castShadow = true;
+  caveGroup.add(pinnacle2);
+
+  const pinnacle3 = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 1.1, 3.2, 5), cliffRhyoliteMat);
+  pinnacle3.position.set(2.8, 10.2, 1.8);
+  pinnacle3.rotation.y = -0.3;
+  pinnacle3.castShadow = true;
+  caveGroup.add(pinnacle3);
+
+  // -------------------------------------------------------------------------
+  // 7. VIBRANT LICHEN PATINA TERRACES & TALUS SCREE (Signature Photo Feature)
+  // -------------------------------------------------------------------------
+  // Stepped rock shelves directly below the cave mouth encrusted with chartreuse lichen
+  const lichenShelfCenter = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.2, 2.8), cliffLichenMat);
+  lichenShelfCenter.position.set(0, -0.6, -1.5);
+  lichenShelfCenter.receiveShadow = true;
+  caveGroup.add(lichenShelfCenter);
+
+  const lichenShelfLeft = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.4, 3.4), cliffLichenMat);
+  lichenShelfLeft.position.set(-2.4, -1.4, -2.4);
+  lichenShelfLeft.receiveShadow = true;
+  caveGroup.add(lichenShelfLeft);
+
+  const lichenBoulderCenter = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4, 1), cliffLichenMat);
+  lichenBoulderCenter.position.set(0.8, -1.2, -2.8);
+  lichenBoulderCenter.scale.set(1.5, 0.9, 1.3);
+  lichenBoulderCenter.receiveShadow = true;
+  caveGroup.add(lichenBoulderCenter);
+
+  const lichenShelfRight = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.2, 2.6), cliffLichenMat);
+  lichenShelfRight.position.set(2.8, -0.8, -2.0);
+  lichenShelfRight.receiveShadow = true;
+  caveGroup.add(lichenShelfRight);
+
+  // Loose talus scree boulders tumbling down the slope
+  for (let b = 0; b < 14; b++) {
+    const bRad = 0.35 + (b % 4) * 0.15;
+    const bMat = b % 3 === 0 ? cliffLichenMat : (b % 2 === 0 ? cliffRhyoliteMat : cliffDarkBasaltMat);
+    const boulder = new THREE.Mesh(new THREE.DodecahedronGeometry(bRad, 0), bMat);
+    const bx = (b % 2 === 0 ? 1 : -1) * (0.8 + (b * 0.35));
+    const bz = -2.2 - (b * 0.3);
+    boulder.position.set(bx, -0.6 - (b * 0.16), bz);
+    boulder.rotation.set(b * 0.7, b * 1.1, b * 0.3);
+    boulder.castShadow = true;
+    boulder.receiveShadow = true;
+    caveGroup.add(boulder);
+  }
+
+  // -------------------------------------------------------------------------
+  // 8. PROSPECTOR DRY-LAID FIELDSTONE BARRICADE & HISTORICAL RELICS
+  // -------------------------------------------------------------------------
+  // Stacked prospector fieldstone wall partially choking the threshold
+  const fieldstoneCount = 11;
+  for (let s = 0; s < fieldstoneCount; s++) {
+    const stoneGeo = new THREE.DodecahedronGeometry(0.24 + (s % 3) * 0.08, 0);
+    const stoneMesh = new THREE.Mesh(stoneGeo, s % 2 === 0 ? cliffDarkBasaltMat : cliffRhyoliteMat);
+    const sx = -1.1 + s * 0.22;
+    const sy = 0.16 + (s % 3) * 0.24;
+    const sz = 0.1 + ((s * 7) % 5) * 0.06;
+    stoneMesh.position.set(sx, sy, sz);
+    stoneMesh.rotation.set(s * 0.5, s * 0.9, 0);
+    stoneMesh.castShadow = true;
+    stoneMesh.receiveShadow = true;
+    caveGroup.add(stoneMesh);
+  }
+
+  // Tumbled stones fallen outside the barricade
+  for (let t = 0; t < 5; t++) {
+    const tumbled = new THREE.Mesh(new THREE.DodecahedronGeometry(0.22, 0), cliffRhyoliteMat);
+    tumbled.position.set(-0.6 + t * 0.3, 0.12, -0.4 - (t % 2) * 0.2);
+    tumbled.castShadow = true;
+    caveGroup.add(tumbled);
+  }
+
+  // Weathered hand-hewn juniper timber beam wedged against inner left cleft wall
+  const timberProp = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.065, 0.08, 3.1, 6),
+    prospectorWoodMat
+  );
+  timberProp.position.set(-0.85, 1.45, 0.8);
+  timberProp.rotation.z = -0.28;
+  timberProp.rotation.y = 0.25;
+  timberProp.castShadow = true;
+  caveGroup.add(timberProp);
+
+  // Prospector campfire hearth inside the cavern shelter
+  const hearthGroup = new THREE.Group();
+  hearthGroup.position.set(0.2, 0.15, 2.6);
+  for (let h = 0; h < 7; h++) {
+    const ang = (h / 7) * Math.PI * 2;
+    const hStone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.12, 0), cliffDarkBasaltMat);
+    hStone.position.set(Math.cos(ang) * 0.45, 0.06, Math.sin(ang) * 0.45);
+    hearthGroup.add(hStone);
+  }
+  const charcoalEmbers = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.26, 0.30, 0.05, 8),
+    charcoalMat
+  );
+  charcoalEmbers.position.set(0, 0.04, 0);
+  hearthGroup.add(charcoalEmbers);
+  caveGroup.add(hearthGroup);
+
+  // Antique rusted prospector pickaxe head resting on interior rock ledge
+  const pickaxeGroup = new THREE.Group();
+  pickaxeGroup.position.set(-1.05, 0.42, 1.8);
+  pickaxeGroup.rotation.z = 0.5;
+  pickaxeGroup.rotation.y = 0.3;
+  const pickBlade = new THREE.Mesh(
+    new THREE.TorusGeometry(0.22, 0.03, 5, 10, Math.PI * 0.8),
+    rustedRelicMat
+  );
+  pickaxeGroup.add(pickBlade);
+  const pickEye = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.08, 6), rustedRelicMat);
+  pickaxeGroup.add(pickEye);
+  caveGroup.add(pickaxeGroup);
+
+  // Vintage square prospector cache tin / kerosene can
+  const cacheTin = new THREE.Mesh(
+    new THREE.BoxGeometry(0.28, 0.32, 0.22),
+    rustedRelicMat
+  );
+  cacheTin.position.set(1.15, 0.22, 2.4);
+  cacheTin.rotation.y = 0.4;
+  cacheTin.castShadow = true;
+  caveGroup.add(cacheTin);
+
+  // Faint Peralta Spanish Cross chiseled into the right rock jamb
+  const crossGroup = new THREE.Group();
+  crossGroup.position.set(1.18, 1.6, 0.5);
+  crossGroup.rotation.y = -Math.PI / 2;
+  const crossVert = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.26, 0.015), cliffDarkBasaltMat);
+  crossGroup.add(crossVert);
+  const crossHoriz = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.03, 0.015), cliffDarkBasaltMat);
+  crossHoriz.position.y = 0.04;
+  crossGroup.add(crossHoriz);
+  caveGroup.add(crossGroup);
+
+  // -------------------------------------------------------------------------
+  // 9. DESERT FLORA ACCENTS (Matching Reference Photography)
+  // -------------------------------------------------------------------------
+  // Iconic Lower-Right Saguaro Cactus (standing on the lichen rock terrace)
+  const lowerRightSaguaro = createLedgeSaguaro(4.4, true, saguaroGreenMat);
+  lowerRightSaguaro.position.set(4.6, -0.8, -3.2);
+  lowerRightSaguaro.rotation.y = 0.4;
+  caveGroup.add(lowerRightSaguaro);
+
+  // Upper Ridge Saguaro (silhouetted against the sky)
+  const upperRidgeSaguaro = createLedgeSaguaro(3.2, false, saguaroGreenMat);
+  upperRidgeSaguaro.position.set(-3.6, 7.0, 2.2);
+  upperRidgeSaguaro.rotation.y = -0.2;
+  caveGroup.add(upperRidgeSaguaro);
+
+  // Desert Sage / Brittlebush Tufts nestled in rock crevices
+  const sagePositions = [
+    [-1.8, -0.1, -1.2],
+    [1.6, -0.2, -1.4],
+    [-3.2, 0.2, -0.8],
+    [3.4, 0.3, -1.8],
+    [0.6, -1.1, -3.6],
+    [-2.2, -1.2, -3.2],
+    [-0.8, 1.2, -0.3],
+    [2.1, 1.4, -0.2],
+    [-4.5, 4.2, 1.2],
+  ];
+
+  sagePositions.forEach(([sx, sy, sz], idx) => {
+    const sRad = 0.35 + (idx % 3) * 0.12;
+    const sage = new THREE.Mesh(new THREE.DodecahedronGeometry(sRad, 1), desertSageMat);
+    sage.position.set(sx, sy, sz);
+    sage.scale.set(1.2, 0.6, 1.2);
+    sage.castShadow = true;
+    sage.receiveShadow = true;
+    caveGroup.add(sage);
+  });
+
+  return caveGroup;
+}
+
+/**
+ * Creates a detailed, pleated Sonoran Saguaro cactus for landmark cliff ledges.
+ */
+function createLedgeSaguaro(
+  height: number,
+  hasArms: boolean,
+  mat: THREE.Material
+): THREE.Group {
+  const sagGroup = new THREE.Group();
+
+  // Fluted pleated main trunk
+  const trunkGeo = createFlutedCylinderGeometry(0.30, 0.36, height, 24, 16, 0.07, true);
+  const trunk = new THREE.Mesh(trunkGeo, mat);
+  trunk.position.y = height * 0.5;
+  trunk.castShadow = true;
+  trunk.receiveShadow = true;
+  sagGroup.add(trunk);
+
+  // Brown flower scar apex
+  const tip = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.06, 0.05, 6),
+    new THREE.MeshStandardMaterial({ color: 0x48321e, roughness: 0.9 })
+  );
+  tip.position.y = height + 0.03;
+  sagGroup.add(tip);
+
+  if (hasArms) {
+    // Left upward-curving arm
+    const armHGeo = createFlutedCylinderGeometry(0.18, 0.18, 1.1, 16, 12, 0.05, false);
+    armHGeo.rotateZ(Math.PI / 2);
+    const armH1 = new THREE.Mesh(armHGeo, mat);
+    armH1.position.set(-0.65, height * 0.46, 0);
+    armH1.castShadow = true;
+    sagGroup.add(armH1);
+
+    const armVGeo1 = createFlutedCylinderGeometry(0.16, 0.20, 1.5, 16, 12, 0.05, true);
+    const armV1 = new THREE.Mesh(armVGeo1, mat);
+    armV1.position.set(-1.15, height * 0.46 + 0.75, 0);
+    armV1.castShadow = true;
+    sagGroup.add(armV1);
+
+    // Right upward-curving arm
+    const armH2 = new THREE.Mesh(armHGeo, mat);
+    armH2.position.set(0.60, height * 0.58, 0.08);
+    armH2.rotation.y = 0.2;
+    armH2.castShadow = true;
+    sagGroup.add(armH2);
+
+    const armVGeo2 = createFlutedCylinderGeometry(0.16, 0.20, 1.2, 16, 12, 0.05, true);
+    const armV2 = new THREE.Mesh(armVGeo2, mat);
+    armV2.position.set(1.1, height * 0.58 + 0.60, 0.08);
+    armV2.castShadow = true;
+    sagGroup.add(armV2);
+  }
+
+  return sagGroup;
 }

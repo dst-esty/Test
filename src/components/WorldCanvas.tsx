@@ -15,6 +15,8 @@ import {
 } from '../world/terrain';
 import { createDesertFoliage, GoldDeposit, DesertFoliageManager } from '../world/foliage';
 import { EndlessTerrainManager } from '../world/endlessTerrain';
+import { GroundVegetationScatterManager } from '../world/groundVegetationScatter';
+import { WindBlownGroundDustSystem } from '../world/windBlownGroundDust';
 import { createLandmarkStructures } from '../world/landmarks';
 import { MiningSystem } from '../world/mining';
 import { WildlifeManager } from '../world/wildlife';
@@ -437,6 +439,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   // Subsystems
   const endlessTerrainRef = useRef<EndlessTerrainManager | null>(null);
   const foliageManagerRef = useRef<DesertFoliageManager | null>(null);
+  const groundScatterRef = useRef<GroundVegetationScatterManager | null>(null);
+  const windBlownDustRef = useRef<WindBlownGroundDustSystem | null>(null);
   const mountainDustParticlesRef = useRef<MountainDustParticleSystem | null>(null);
   const movableRockManagerRef = useRef<MovableRockManager | null>(null);
   const mountManagerRef = useRef<MountManager | null>(null);
@@ -464,6 +468,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   const tortillaFlatLightingRef = useRef<((timeOfDay: number, delta: number) => void) | null>(null);
   const timeOfDayRef = useRef(timeOfDay);
   timeOfDayRef.current = timeOfDay;
+  const weatherRef = useRef(weather);
+  weatherRef.current = weather;
 
   // Synchronized player state reference for event callbacks
   const playerStateRef = useRef<PlayerState>(playerState);
@@ -560,6 +566,12 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
 
     if (foliageManagerRef.current) {
       foliageManagerRef.current.setGraphicsQuality(graphicsQuality);
+    }
+    if (groundScatterRef.current) {
+      groundScatterRef.current.setShadowsEnabled(graphicsQuality !== 'performance');
+    }
+    if (windBlownDustRef.current) {
+      windBlownDustRef.current.setQuality(graphicsQuality);
     }
 
     if (sunLightRef.current && rendererRef.current) {
@@ -798,6 +810,17 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     const endlessTerrain = new EndlessTerrainManager(scene, foliage.manager);
     endlessTerrainRef.current = endlessTerrain;
     endlessTerrain.update(playerPos.current, 0.016);
+
+    // 5b. Procedural Ground Vegetation Scatter (3D Saguaro, Ocotillo & Prickly Pear on Terrain Surface with Dynamic Contact Shadows)
+    const groundScatter = new GroundVegetationScatterManager(scene);
+    groundScatterRef.current = groundScatter;
+    groundScatter.setShadowsEnabled(initQuality !== 'performance');
+    groundScatter.update(playerPos.current, timeOfDay, undefined, weather);
+
+    // 5c. Wind-Blown Ground Dust Particle System (subtle low-opacity desert dust near surface)
+    const windBlownDust = new WindBlownGroundDustSystem(scene, getTerrainHeight);
+    windBlownDustRef.current = windBlownDust;
+    windBlownDust.setQuality(initQuality);
 
     const landmarkMeshes = createLandmarkStructures(scene, landmarks);
     if (landmarkMeshes.tortillaFlat?.userData?.updateLighting) {
@@ -4717,6 +4740,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       if (wasUndergroundRef.current !== isUndergroundFrame) {
         wasUndergroundRef.current = isUndergroundFrame;
         foliageManagerRef.current?.setVisible(!isUndergroundFrame);
+        groundScatterRef.current?.setVisible(!isUndergroundFrame);
+        windBlownDustRef.current?.setVisible(!isUndergroundFrame);
       }
 
       // 1. Player Physics & Locomotion (Crisp, Responsive, Ground-Snapped Controls)
@@ -5020,6 +5045,16 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             soundEngine.playDiscovery();
             if (onShowBanner) {
               onShowBanner('🏜️ Canyon Discovered: Peters Canyon (Pete\'s Canyon) • Rugged canyon wash flanked by Peters Mesa rimrock, draining north toward Canyon Lake!');
+            }
+          }
+        }
+        // 8. Suspicious Triangular Cliff Cave (145X, -235Z)
+        else if (Math.hypot(curX - 145, curZ - (-235)) < 18) {
+          if (!discoveredSummitsRef.current.has('suspicious_triangular_cave')) {
+            discoveredSummitsRef.current.add('suspicious_triangular_cave');
+            soundEngine.playDiscovery();
+            if (onShowBanner) {
+              onShowBanner('⛰️ Historic Landmark: Suspicious Triangular Cliff Cave (USGS Elev. 3,210 ft) • Famous gothic-arch fissure carved into volcanic rhyolite with prospector dry-stone barricade!');
             }
           }
         }
@@ -5881,6 +5916,17 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         mountainDustParticlesRef.current.update(delta);
       }
 
+      // 3c. Update Wind-Blown Ground Dust Particle System (subtle low-opacity desert dust near surface)
+      if (windBlownDustRef.current) {
+        windBlownDustRef.current.update(
+          delta,
+          playerPos.current,
+          timeOfDayRef.current,
+          weatherRef.current,
+          Boolean(isUndergroundFrame)
+        );
+      }
+
       // 4. Update Desert Wildlife (Rabbits, Rattlesnakes, Scorpions, Bighorn Sheep, Vultures)
       if (wildlifeManagerRef.current) {
         wildlifeManagerRef.current.update(
@@ -6340,6 +6386,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       if (foliageManagerRef.current) {
         foliageManagerRef.current.updateLOD(playerPos.current);
       }
+      if (groundScatterRef.current) {
+        groundScatterRef.current.update(playerPos.current, timeOfDayRef.current, undefined, weatherRef.current);
+      }
 
       // Update Tortilla Flat historic town night lighting (torches flicker, string lights, lanterns, window radiance)
       if (tortillaFlatLightingRef.current) {
@@ -6615,6 +6664,14 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       if (endlessTerrainRef.current) {
         endlessTerrainRef.current.dispose();
       }
+      if (groundScatterRef.current) {
+        groundScatterRef.current.dispose();
+        groundScatterRef.current = null;
+      }
+      if (windBlownDustRef.current) {
+        windBlownDustRef.current.dispose();
+        windBlownDustRef.current = null;
+      }
       if (mountainDustParticlesRef.current && typeof mountainDustParticlesRef.current.dispose === 'function') {
         mountainDustParticlesRef.current.dispose();
       }
@@ -6681,6 +6738,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   // Update Sun & Atmosphere when timeOfDay or weather changes
   useEffect(() => {
     timeOfDayRef.current = timeOfDay;
+    weatherRef.current = weather;
     if (atmosphereManagerRef.current) {
       atmosphereManagerRef.current.updateAtmosphere(
         timeOfDay,

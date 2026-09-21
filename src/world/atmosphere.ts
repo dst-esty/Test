@@ -546,7 +546,7 @@ function getInterpolatedDiurnalState(time: number, out?: InterpolatedDiurnalStat
   return result;
 }
 
-function getCelestialDirections(time: number): {
+export function getCelestialDirections(time: number): {
   sunDir: THREE.Vector3;
   moonDir: THREE.Vector3;
   sunY: number;
