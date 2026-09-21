@@ -42,6 +42,9 @@ export const LANDMARK_OBSTACLES: LandmarkObstacle[] = [
   { name: 'Tortilla Creek Timber Pier & Landing', x: -2.0, z: -304, radius: 3.8, height: 4.0 },
   // 6. Pistol Canyon Sun-Bleached Granite Table Boulder & Tinaja (perched on northern gravel bench)
   { name: 'Pistol Canyon Table Boulder', x: 180, z: -160.8, radius: 1.1, height: 2.5 },
+  // 7. Peters Canyon Pinch & Jacob Emerick's Bivouac Alcove
+  { name: 'The Pinch Dry Fall Chute', x: 238, z: -285.5, radius: 2.2, height: 5.5 },
+  { name: 'Peters Canyon Bivouac Alcove', x: 217.5, z: -302.8, radius: 2.4, height: 6.0 },
 ];
 
 export const PLAYER_COLLISION_RADIUS = 0.42;

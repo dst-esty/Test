@@ -1239,6 +1239,85 @@ export const MapModal: React.FC<MapModalProps> = ({
               );
             })()}
 
+            {/* 7e3. Malapais Loop Descent Route (Jacob Emerick 2016 Route: Rose Quartz Slope & Lost Horseshoe) */}
+            {(() => {
+              return (
+                <g>
+                  {/* Steep 1,000-ft descent route from Malapais Mountain to Peters Canyon */}
+                  <path
+                    d={`M ${toSvgX(95)} ${toSvgY(-205)} Q ${toSvgX(135)} ${toSvgY(-228)} ${toSvgX(210)} ${toSvgY(-255)}`}
+                    fill="none"
+                    stroke="#d97706"
+                    strokeWidth="1.6"
+                    strokeDasharray="3 3"
+                    opacity="0.8"
+                  />
+                  {/* Rose Quartz Slope & Old Horseshoe marker */}
+                  <circle
+                    cx={toSvgX(135)}
+                    cy={toSvgY(-228)}
+                    r={Math.max(2.8, toSvgDist(2.2))}
+                    fill="#ec4899"
+                    stroke="#ffffff"
+                    strokeWidth="1.2"
+                  />
+                  <text
+                    x={toSvgX(135) + 5}
+                    y={toSvgY(-228) + 3}
+                    fill="#9d174d"
+                    fontSize={Math.max(6.0, Math.min(8.0, toSvgDist(6.5)))}
+                    fontFamily="serif"
+                    fontWeight="bold"
+                    textAnchor="start"
+                  >
+                    Rose Quartz Slope
+                  </text>
+
+                  {/* 7e4. The Pinch of Peter's Canyon (Dry Fall, Two-Foot Ladder & Bighorn Sheep Crags) */}
+                  <circle
+                    cx={toSvgX(238)}
+                    cy={toSvgY(-288)}
+                    r={Math.max(3.2, toSvgDist(2.6))}
+                    fill="#059669"
+                    stroke="#ffffff"
+                    strokeWidth="1.4"
+                  />
+                  <text
+                    x={toSvgX(238) + 6}
+                    y={toSvgY(-288) - 2}
+                    fill="#065f46"
+                    fontSize={Math.max(6.5, Math.min(8.5, toSvgDist(7)))}
+                    fontFamily="serif"
+                    fontWeight="bold"
+                    textAnchor="start"
+                  >
+                    The Pinch (Dry Fall & Ladder)
+                  </text>
+
+                  {/* 7e5. Jacob Emerick's 2016 Bivouac Lean-To & SAR Extraction Site */}
+                  <circle
+                    cx={toSvgX(220)}
+                    cy={toSvgY(-305)}
+                    r={Math.max(3.2, toSvgDist(2.6))}
+                    fill="#dc2626"
+                    stroke="#ffffff"
+                    strokeWidth="1.4"
+                  />
+                  <text
+                    x={toSvgX(220) + 6}
+                    y={toSvgY(-305) + 4}
+                    fill="#991b1b"
+                    fontSize={Math.max(6.5, Math.min(8.5, toSvgDist(7)))}
+                    fontFamily="serif"
+                    fontWeight="bold"
+                    textAnchor="start"
+                  >
+                    Jacob's Bivouac (2016 SAR)
+                  </text>
+                </g>
+              );
+            })()}
+
             {/* 7f. Tortilla Creek (flows through Tortilla Canyon & Tortilla Flat at x = 0, z = -252) */}
             {(() => {
               return (

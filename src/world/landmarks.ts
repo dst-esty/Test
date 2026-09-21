@@ -3,6 +3,7 @@ import { getTerrainHeight } from './terrain';
 import { Landmark } from '../types';
 import { buildTortillaFlatSettlement } from './tortillaFlat';
 import { buildMalapaisMountainSummit, buildPistolCanyonGorge } from './malapaisPistol';
+import { buildPetersCanyonPinchAndBivouac } from './petersCanyonPinch';
 import { buildSuperstitionPeaksAndSprings } from './superstitionPeaks';
 
 export interface LandmarkMeshes {
@@ -17,6 +18,7 @@ export interface LandmarkMeshes {
   tortillaFlat: THREE.Group;
   malapaisMountain?: THREE.Group;
   pistolCanyon?: THREE.Group;
+  petersCanyonPinch?: THREE.Group;
   blackTopMesa?: THREE.Group;
   battleshipMountain?: THREE.Group;
   minersNeedle?: THREE.Group;
@@ -1068,7 +1070,14 @@ export function createLandmarkStructures(
   const pistolGroup = buildPistolCanyonGorge(scene, waterRefillPoints);
 
   // ==========================================
-  // 12. Real-World Superstition Peaks & Oasis Springs
+  // 12. Peters Canyon Pinch, Bighorn Crags & Jacob Emerick's 2016 SAR Bivouac Site
+  // Famous Malapais Loop descent, Rose Quartz slope, the Two-Foot Ladder,
+  // The Pinch dry fall tinaja, and Search & Rescue emergency bivouac lean-to
+  // ==========================================
+  const petersPinchGroup = buildPetersCanyonPinchAndBivouac(scene, waterRefillPoints);
+
+  // ==========================================
+  // 13. Real-World Superstition Peaks & Oasis Springs
   // Black Top Mesa (arrastra & basalt rim), Battleship Mountain (knife prow),
   // Miners Needle (eyelet crags), Charlebois Spring (cottonwood tinaja)
   // ==========================================
@@ -1086,6 +1095,7 @@ export function createLandmarkStructures(
     tortillaFlat: tortillaGroup,
     malapaisMountain: malapaisGroup,
     pistolCanyon: pistolGroup,
+    petersCanyonPinch: petersPinchGroup,
     blackTopMesa: peakMeshes.blackTopMesa,
     battleshipMountain: peakMeshes.battleshipMountain,
     minersNeedle: peakMeshes.minersNeedle,

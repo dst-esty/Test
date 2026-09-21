@@ -168,6 +168,17 @@ export const TINAJAS: TinajaPool[] = [
     isPerennial: true,
     waterQuality: 'fresh_spring',
   },
+  {
+    id: 'peters_pinch_tinaja',
+    name: "The Pinch of Peter's Canyon Emerald Tinaja",
+    x: 238,
+    z: -288,
+    radius: 2.8,
+    maxDepth: 1.8,
+    waterLevel: 0.75,
+    isPerennial: true,
+    waterQuality: 'fresh_spring',
+  },
 ];
 
 export class DesertHydrologyEngine {
