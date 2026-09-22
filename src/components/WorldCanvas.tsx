@@ -794,12 +794,28 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     }
   }, [playerState.position.x, playerState.position.z]);
 
-  // Sync tool lights (Lantern)
+  // Sync tool lights (Lantern & Nocturnal Eye-Adaptation Aura)
   useEffect(() => {
     if (playerLightRef.current) {
       const isLantern = playerState.equippedTool === 'lantern';
-      playerLightRef.current.visible = isLantern;
-      playerLightRef.current.intensity = isLantern ? 2.5 : 0;
+      const isNight = timeOfDay >= 19.5 || timeOfDay < 5.5;
+
+      if (isLantern) {
+        playerLightRef.current.visible = true;
+        playerLightRef.current.color.setHex(0xffaa44);
+        playerLightRef.current.intensity = 3.5;
+        playerLightRef.current.distance = 32;
+      } else if (isNight) {
+        // Natural nocturnal eye adaptation / starlight radiance around the prospector
+        // Prevents nearby mining, gold panning, and navigating rocks from feeling pitch black
+        playerLightRef.current.visible = true;
+        playerLightRef.current.color.setHex(0x98b8ec);
+        playerLightRef.current.intensity = 0.85;
+        playerLightRef.current.distance = 20;
+      } else {
+        playerLightRef.current.visible = false;
+        playerLightRef.current.intensity = 0;
+      }
     }
     if (cameraRef.current) {
       // Binoculars zoom FOV
@@ -807,7 +823,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       cameraRef.current.fov = targetFov;
       cameraRef.current.updateProjectionMatrix();
     }
-  }, [playerState.equippedTool]);
+  }, [playerState.equippedTool, timeOfDay]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -1376,6 +1392,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           remoteProspectorsRef.current.set(player.id, rp);
         } else if (rp) {
           rp.setProfile(resolvedName, player.outfitColor);
+          rp.updateData(player);
           const pStatus = friendshipService.getPardnerStatus(player.id, resolvedName);
           rp.setPardnerStatus(pStatus.status === 'pardner');
         }
@@ -1391,6 +1408,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           remoteProspectorsRef.current.set(player.id, rp);
         } else if (rp) {
           rp.setProfile(resolvedName, player.outfitColor);
+          rp.updateData(player);
           const pStatus = friendshipService.getPardnerStatus(player.id, resolvedName);
           rp.setPardnerStatus(pStatus.status === 'pardner');
         }

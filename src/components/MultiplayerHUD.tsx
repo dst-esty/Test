@@ -878,7 +878,14 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                                   Pardner
                                 </span>
                               )}
-                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                              {player.isAfk ? (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800/80 text-slate-300 font-medium border border-slate-600/50 flex items-center gap-1">
+                                  <span>💤</span>
+                                  Resting
+                                </span>
+                              ) : (
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" title="Active"></span>
+                              )}
                             </div>
                             <p className="text-xs text-stone-400 flex items-center gap-2">
                               <span>Tool: {player.activeTool || 'Pickaxe'}</span>

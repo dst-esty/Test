@@ -452,6 +452,7 @@ export interface MultiplayerPlayer {
   carriedRock?: boolean;
   isHunkered?: boolean;
   currentActivity?: string;
+  isAfk?: boolean;
   metadata?: Record<string, any>;
   title?: string;
   badge?: string;

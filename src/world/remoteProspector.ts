@@ -38,6 +38,7 @@ export class RemoteProspector {
   public isAiming: boolean = false;
   public carriedRock: boolean = false;
   public isHunkered: boolean = false;
+  public isAfk: boolean = false;
   public currentActivity: string = 'idle';
 
   private isSwinging: boolean = false;
@@ -46,7 +47,7 @@ export class RemoteProspector {
 
   constructor(player: MultiplayerPlayer) {
     this.id = player.id;
-    this.name = player.name || 'Prospector';
+    this.name = player.displayName || player.name || 'Prospector';
     this.outfitColor = player.outfitColor || '#8c5932';
     this.goldFound = player.goldFound || 0;
     this.health = player.health || 100;
@@ -59,6 +60,7 @@ export class RemoteProspector {
     this.isAiming = Boolean(player.isAiming);
     this.carriedRock = Boolean(player.carriedRock);
     this.isHunkered = Boolean(player.isHunkered);
+    this.isAfk = Boolean(player.isAfk);
     this.currentActivity = player.currentActivity || 'idle';
 
     this.group = new THREE.Group();
@@ -302,6 +304,13 @@ export class RemoteProspector {
     if (typeof data.isHunkered === 'boolean') {
       this.isHunkered = data.isHunkered;
     }
+    if (typeof data.isAfk === 'boolean') {
+      const changed = this.isAfk !== data.isAfk;
+      this.isAfk = data.isAfk;
+      if (changed) {
+        this.updateNameplate(0);
+      }
+    }
     if (data.currentActivity) {
       this.currentActivity = data.currentActivity;
     }
@@ -335,7 +344,13 @@ export class RemoteProspector {
     ctx.stroke();
 
     // Online status icon
-    if (this.isPardner) {
+    if (this.isAfk) {
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('💤', 42, 46);
+    } else if (this.isPardner) {
       ctx.fillStyle = '#fbbf24';
       ctx.font = '24px sans-serif';
       ctx.textAlign = 'center';
@@ -349,15 +364,18 @@ export class RemoteProspector {
     }
 
     // Player Name
-    ctx.fillStyle = this.isPardner ? '#fef08a' : '#fef3c7';
+    ctx.fillStyle = this.isAfk ? '#cbd5e1' : this.isPardner ? '#fef08a' : '#fef3c7';
     ctx.font = 'bold 28px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(this.name, 62, 46);
+    const renderedName = this.isAfk ? `${this.name} [AFK]` : this.name;
+    ctx.fillText(renderedName, 62, 46);
 
     // Live Activity Tag
     let activityTag = 'Resting';
-    if (this.isRiding) {
+    if (this.isAfk) {
+      activityTag = '💤 Desert Shade (AFK)';
+    } else if (this.isRiding) {
       activityTag = '🐎 Mounted Trail Ride';
     } else if (this.isHunkered) {
       activityTag = '🏕️ Hunkered Down';
@@ -479,7 +497,7 @@ export class RemoteProspector {
       swingProgress: this.swingProgress,
       pitch: this.targetPitch,
       carriedRock: this.carriedRock,
-      isHunkered: this.isHunkered,
+      isHunkered: this.isHunkered || this.isAfk,
       isDead: this.health <= 0,
     });
   }

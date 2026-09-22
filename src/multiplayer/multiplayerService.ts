@@ -26,6 +26,7 @@ export type MultiplayerEventHandler = {
     isAiming?: boolean;
     carriedRock?: boolean;
     isHunkered?: boolean;
+    isAfk?: boolean;
     currentActivity?: string;
   }) => void;
   onPlayerProfileUpdated?: (player: MultiplayerPlayer) => void;
@@ -401,6 +402,7 @@ class MultiplayerService {
             isAiming: msg.isAiming,
             carriedRock: msg.carriedRock,
             isHunkered: msg.isHunkered,
+            isAfk: Boolean(msg.isAfk),
             currentActivity: msg.currentActivity,
             ping: 0,
             lastUpdate: Date.now(),
@@ -410,6 +412,7 @@ class MultiplayerService {
           const prev = this.state.players[msg.id];
           const nameChanged = Boolean((msg.displayName || msg.name) && resolvedName !== prev.name);
           const colorChanged = Boolean(msg.outfitColor && msg.outfitColor !== prev.outfitColor);
+          const afkChanged = Boolean(typeof msg.isAfk === 'boolean' && msg.isAfk !== prev.isAfk);
           const metaChanged = Boolean(msg.metadata && JSON.stringify(msg.metadata) !== JSON.stringify(prev.metadata));
           Object.assign(prev, {
             x: msg.x,
@@ -426,6 +429,7 @@ class MultiplayerService {
             isAiming: msg.isAiming,
             carriedRock: msg.carriedRock,
             isHunkered: msg.isHunkered,
+            isAfk: typeof msg.isAfk === 'boolean' ? msg.isAfk : prev.isAfk,
             currentActivity: msg.currentActivity,
             name: resolvedName,
             displayName: resolvedName,
@@ -434,7 +438,7 @@ class MultiplayerService {
             ...(msg.badge ? { badge: msg.badge } : {}),
             ...(msg.metadata ? { metadata: { ...(prev.metadata || {}), ...msg.metadata } } : {}),
           });
-          if (nameChanged || colorChanged || metaChanged) {
+          if (nameChanged || colorChanged || afkChanged || metaChanged) {
             this.notify();
           }
         }
@@ -678,6 +682,27 @@ class MultiplayerService {
     return this.updateProfile(this.getSelfName(), this.getSelfColor(), metadata);
   }
 
+  public setAfk(isAfk: boolean) {
+    if (this.selfId) {
+      if (this.state.players[this.selfId]) {
+        this.state.players[this.selfId].isAfk = isAfk;
+        if (isAfk) {
+          this.state.players[this.selfId].action = 'resting';
+        }
+      }
+      this.notify();
+    }
+    this.sendRaw({
+      type: 'player:afk',
+      isAfk,
+    });
+  }
+
+  public isSelfAfk(): boolean {
+    if (!this.selfId) return false;
+    return Boolean(this.state.players[this.selfId]?.isAfk);
+  }
+
   // Throttled position update (send at ~20Hz to keep network clean and responsive)
   public queuePositionUpdate(data: {
     x: number;
@@ -694,10 +719,13 @@ class MultiplayerService {
     isAiming?: boolean;
     carriedRock?: boolean;
     isHunkered?: boolean;
+    isAfk?: boolean;
     currentActivity?: string;
   }) {
     this.pendingUpdate = data;
     if (!this.throttledUpdateTimer) {
+      const isAfk = typeof data.isAfk === 'boolean' ? data.isAfk : this.isSelfAfk();
+      const delayMs = isAfk ? 2000 : 50; // 0.5Hz heartbeat when AFK to save network/CPU, 20Hz when active
       this.throttledUpdateTimer = setTimeout(() => {
         this.throttledUpdateTimer = null;
         if (this.pendingUpdate) {
@@ -709,10 +737,11 @@ class MultiplayerService {
             displayName: selfName,
             outfitColor: this.getSelfColor(),
             metadata: this.getSelfMetadata(),
+            isAfk: typeof this.pendingUpdate.isAfk === 'boolean' ? this.pendingUpdate.isAfk : this.isSelfAfk(),
             ping: this.currentPing,
           });
         }
-      }, 50); // 20 updates/sec
+      }, delayMs);
     }
   }
 

@@ -19,6 +19,8 @@ import { RockDepotModal } from './components/RockDepotModal';
 import { TortillaFlatModal } from './components/TortillaFlatModal';
 import { TownfolkDialogueOverlay, DialogueNPCInfo } from './components/TownfolkDialogueOverlay';
 import { GameOverModal } from './components/GameOverModal';
+import { IdleSleepModal } from './components/IdleSleepModal';
+import { idleManager } from './services/idleManager';
 import { CompassHUD } from './components/CompassHUD';
 import { CinematicSplash } from './components/CinematicSplash';
 import { WeatherCanvasOverlay } from './components/WeatherCanvasOverlay';
@@ -211,6 +213,8 @@ export default function App() {
   const [gameOverDetails, setGameOverDetails] = useState<GameOverDetails | null>(null);
   const [claimPrompt, setClaimPrompt] = useState<{ id?: string; name: string; position: Vector3D } | null>(null);
   const [payDirtAlert, setPayDirtAlert] = useState<{ ounces: number } | null>(null);
+  const [isIdleAsleep, setIsIdleAsleep] = useState(false);
+  const [isSelfAfk, setIsSelfAfk] = useState(false);
   const payDirtTimerRef = useRef<NodeJS.Timeout | null>(null);
   const restartHandlerRef = useRef<(() => void) | null>(null);
   const teleportHandlerRef = useRef<((pos: Vector3D) => void) | null>(null);
@@ -391,6 +395,7 @@ export default function App() {
   const isAnyModalOpen =
     showSplash ||
     !hasShownWelcome ||
+    isIdleAsleep ||
     isMapOpen ||
     isJournalOpen ||
     isGuidebookOpen ||
@@ -1211,6 +1216,22 @@ export default function App() {
   const handleTrackPlayer = useCallback((p: MultiplayerPlayer) => {
     setTrackedPlayerPos({ x: p.x, y: p.y, z: p.z });
     showBanner(`🧭 Tracking fellow prospector ${p.name} (${Math.round(p.distanceToLocal || 0)}m away)`);
+  }, [showBanner]);
+
+  // Idle and AFK Handling
+  useEffect(() => {
+    const unsubscribe = idleManager.subscribe((status) => {
+      setIsSelfAfk(status.isAfk);
+      setIsIdleAsleep(status.isAsleep);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  const handleWakeUp = useCallback(() => {
+    idleManager.wakeUp();
+    showBanner('☀️ Saddled back up! Resuming your frontier expedition.');
   }, [showBanner]);
 
   // Handle drinking water
@@ -2117,6 +2138,26 @@ export default function App() {
           }}
         />
       )}
+
+      {/* AFK Resting Indicator (Active between 2m and 15m) */}
+      {isSelfAfk && !isIdleAsleep && (
+        <div
+          id="afk-indicator-pill"
+          onClick={handleWakeUp}
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-40 bg-stone-900/90 border border-amber-500/50 text-amber-300 px-4 py-2 rounded-full text-xs font-mono shadow-2xl backdrop-blur-md flex items-center gap-2.5 cursor-pointer animate-pulse hover:bg-stone-800 transition-all select-none"
+          title="Click or move mouse to resume active state"
+        >
+          <span className="text-sm">💤</span>
+          <span className="font-semibold text-amber-200">Resting in Desert Shade (AFK)</span>
+          <span className="text-[10px] text-stone-400 bg-stone-800/90 px-2 py-0.5 rounded-full border border-stone-700">Move or click to wake</span>
+        </div>
+      )}
+
+      {/* 15-Minute Frontier Siesta Standby Rest Modal */}
+      <IdleSleepModal
+        isOpen={isIdleAsleep}
+        onWakeUp={handleWakeUp}
+      />
     </div>
   );
 }

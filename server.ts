@@ -27,6 +27,7 @@ interface RemotePlayer {
   carriedRock?: boolean;
   isHunkered?: boolean;
   currentActivity?: string;
+  isAfk?: boolean;
   metadata?: Record<string, any>;
   title?: string;
   badge?: string;
@@ -630,6 +631,7 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
             if (typeof msg.isAiming === 'boolean') p.isAiming = msg.isAiming;
             if (typeof msg.carriedRock === 'boolean') p.carriedRock = msg.carriedRock;
             if (typeof msg.isHunkered === 'boolean') p.isHunkered = msg.isHunkered;
+            if (typeof msg.isAfk === 'boolean') p.isAfk = msg.isAfk;
             if (typeof msg.currentActivity === 'string') p.currentActivity = msg.currentActivity;
             if (msg.displayName && typeof msg.displayName === 'string') {
               p.name = msg.displayName.trim().substring(0, 24);
@@ -667,8 +669,24 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
               isAiming: p.isAiming,
               carriedRock: p.carriedRock,
               isHunkered: p.isHunkered,
+              isAfk: p.isAfk,
               currentActivity: p.currentActivity,
             }, playerId);
+            break;
+          }
+
+          case 'player:afk': {
+            const p = players.get(playerId);
+            if (!p) return;
+            p.isAfk = Boolean(msg.isAfk);
+            if (p.isAfk) {
+              p.action = 'resting';
+            }
+            p.lastUpdate = Date.now();
+            broadcast({
+              type: 'player:profile_updated',
+              player: p,
+            });
             break;
           }
 

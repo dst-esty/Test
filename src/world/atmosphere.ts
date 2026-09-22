@@ -216,64 +216,64 @@ export interface InterpolatedDiurnalState {
 }
 
 const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
-  // 1. Deep Midnight (1:30)
+  // 1. Deep Midnight (1:30) - Luminous Sonoran moonlight with clear terrain readability and silver highlights
   {
     time: 1.5,
-    zenithColor: new THREE.Color(0x02040c),
-    horizonColor: new THREE.Color(0x060c1c),
-    sunCoronaColor: new THREE.Color(0xffeedd),
-    sunCoronaIntensity: 0.0,
-    sunColor: new THREE.Color(0x6d85b6),
-    sunIntensity: 0.32,
-    hemiSkyColor: new THREE.Color(0x142035),
-    hemiGroundColor: new THREE.Color(0x080c14),
-    fogColor: new THREE.Color(0x070b16),
-    fogDensity: 0.00085,
-    cloudTopColor: new THREE.Color(0x283448),
-    cloudBaseColor: new THREE.Color(0x121824),
+    zenithColor: new THREE.Color(0x0c1a36),
+    horizonColor: new THREE.Color(0x1a2c4e),
+    sunCoronaColor: new THREE.Color(0xd8e8ff),
+    sunCoronaIntensity: 0.15,
+    sunColor: new THREE.Color(0x9cc2f4),
+    sunIntensity: 0.90, // Radiant directional moonlight casting visible shadows
+    hemiSkyColor: new THREE.Color(0x38527a), // Ambient sapphire skylight
+    hemiGroundColor: new THREE.Color(0x222838), // Clear desert sand & rock bounce
+    fogColor: new THREE.Color(0x14223d),
+    fogDensity: 0.00042, // Clean visibility extending across valleys and ridges
+    cloudTopColor: new THREE.Color(0x3e5274),
+    cloudBaseColor: new THREE.Color(0x1e2a3e),
     cloudOpacity: 0.40,
     sunAlpha: 0.0,
-    moonAlpha: 0.95,
+    moonAlpha: 0.98,
     starAlpha: 1.0,
   },
-  // 2. Pre-Dawn (4.4)
+  // 2. Pre-Dawn (4.4) - Silver moonset into early astronomical blue hour
   {
     time: 4.4,
-    zenithColor: new THREE.Color(0x030612),
-    horizonColor: new THREE.Color(0x081022),
-    sunCoronaColor: new THREE.Color(0xffeedd),
-    sunCoronaIntensity: 0.0,
-    sunColor: new THREE.Color(0x6d85b6),
-    sunIntensity: 0.32,
-    hemiSkyColor: new THREE.Color(0x162238),
-    hemiGroundColor: new THREE.Color(0x090e18),
-    fogColor: new THREE.Color(0x080e1a),
-    fogDensity: 0.00080,
-    cloudTopColor: new THREE.Color(0x2a364c),
-    cloudBaseColor: new THREE.Color(0x141b28),
+    zenithColor: new THREE.Color(0x0e1c3c),
+    horizonColor: new THREE.Color(0x1e3054),
+    sunCoronaColor: new THREE.Color(0xd8e8ff),
+    sunCoronaIntensity: 0.15,
+    sunColor: new THREE.Color(0x9cc2f4),
+    sunIntensity: 0.88,
+    hemiSkyColor: new THREE.Color(0x3c547e),
+    hemiGroundColor: new THREE.Color(0x242a3a),
+    fogColor: new THREE.Color(0x162442),
+    fogDensity: 0.00045,
+    cloudTopColor: new THREE.Color(0x405476),
+    cloudBaseColor: new THREE.Color(0x202c40),
     cloudOpacity: 0.45,
     sunAlpha: 0.0,
-    moonAlpha: 0.90,
+    moonAlpha: 0.92,
     starAlpha: 1.0,
   },
   // 3. Astronomical to Nautical Dawn (5.2)
   {
     time: 5.2,
-    zenithColor: new THREE.Color(0x0a1430),
-    horizonColor: new THREE.Color(0x261938),
+    zenithColor: new THREE.Color(0x14244a),
+    horizonColor: new THREE.Color(0x36284e),
     sunCoronaColor: new THREE.Color(0xff8844),
-    sunCoronaIntensity: 0.15,
-    sunColor: new THREE.Color(0x787fa6),
-    sunIntensity: 0.40,
-    hemiSkyColor: new THREE.Color(0x2a2c4e),
-    hemiGroundColor: new THREE.Color(0x121222),
-    fogColor: new THREE.Color(0x18172c),
-    fogDensity: 0.00075,
-    cloudTopColor: new THREE.Color(0x4d4668),
-    cloudBaseColor: new THREE.Color(0x221e35),
+    sunCoronaIntensity: 0.25,
+    sunColor: new THREE.Color(0x98a4ce),
+    sunIntensity: 0.82,
+    hemiSkyColor: new THREE.Color(0x42466e),
+    hemiGroundColor: new THREE.Color(0x262438),
+    fogColor: new THREE.Color(0x20203a),
+    fogDensity: 0.00052,
+    cloudTopColor: new THREE.Color(0x544c70),
+    cloudBaseColor: new THREE.Color(0x28223c),
     cloudOpacity: 0.60,
     sunAlpha: 0.15,
-    moonAlpha: 0.55,
+    moonAlpha: 0.60,
     starAlpha: 0.65,
   },
   // 4. Civil Dawn & First Light (5.8)
@@ -419,61 +419,61 @@ const DIURNAL_KEYFRAMES: DiurnalKeyframe[] = [
   // 11. Civil Dusk & Purple Twilight (19.2)
   {
     time: 19.2,
-    zenithColor: new THREE.Color(0x0c1838),
-    horizonColor: new THREE.Color(0x5a2448),
+    zenithColor: new THREE.Color(0x101c3e),
+    horizonColor: new THREE.Color(0x622c54),
     sunCoronaColor: new THREE.Color(0xd45030),
     sunCoronaIntensity: 0.35,
-    sunColor: new THREE.Color(0x8a546a),
-    sunIntensity: 0.55,
-    hemiSkyColor: new THREE.Color(0x50325c),
-    hemiGroundColor: new THREE.Color(0x221324),
-    fogColor: new THREE.Color(0x34203a),
-    fogDensity: 0.00075,
-    cloudTopColor: new THREE.Color(0x6a4864),
-    cloudBaseColor: new THREE.Color(0x2a1c32),
+    sunColor: new THREE.Color(0x94647c),
+    sunIntensity: 0.72,
+    hemiSkyColor: new THREE.Color(0x563864),
+    hemiGroundColor: new THREE.Color(0x28182c),
+    fogColor: new THREE.Color(0x382442),
+    fogDensity: 0.00060,
+    cloudTopColor: new THREE.Color(0x745070),
+    cloudBaseColor: new THREE.Color(0x30223a),
     cloudOpacity: 0.65,
     sunAlpha: 0.20,
     moonAlpha: 0.65,
     starAlpha: 0.45,
   },
-  // 12. Nautical Twilight (20.2)
+  // 12. Nautical Twilight (20.2) - Early moonlit desert evening
   {
     time: 20.2,
-    zenithColor: new THREE.Color(0x050c20),
-    horizonColor: new THREE.Color(0x141834),
-    sunCoronaColor: new THREE.Color(0x904030),
-    sunCoronaIntensity: 0.0,
-    sunColor: new THREE.Color(0x60749e),
-    sunIntensity: 0.35,
-    hemiSkyColor: new THREE.Color(0x222644),
-    hemiGroundColor: new THREE.Color(0x0c0f1e),
-    fogColor: new THREE.Color(0x121426),
-    fogDensity: 0.00080,
-    cloudTopColor: new THREE.Color(0x3a3c56),
-    cloudBaseColor: new THREE.Color(0x181a2e),
+    zenithColor: new THREE.Color(0x0e1c3c),
+    horizonColor: new THREE.Color(0x222c50),
+    sunCoronaColor: new THREE.Color(0xd0e0ff),
+    sunCoronaIntensity: 0.12,
+    sunColor: new THREE.Color(0x90b2e4),
+    sunIntensity: 0.84,
+    hemiSkyColor: new THREE.Color(0x384872),
+    hemiGroundColor: new THREE.Color(0x202234),
+    fogColor: new THREE.Color(0x18203c),
+    fogDensity: 0.00048,
+    cloudTopColor: new THREE.Color(0x444c68),
+    cloudBaseColor: new THREE.Color(0x202438),
     cloudOpacity: 0.48,
     sunAlpha: 0.0,
-    moonAlpha: 0.90,
+    moonAlpha: 0.92,
     starAlpha: 0.85,
   },
-  // 13. Astronomical Twilight into Night (21.5)
+  // 13. Astronomical Twilight into Night (21.5) - Clear silvery moonlit wilderness
   {
     time: 21.5,
-    zenithColor: new THREE.Color(0x02040c),
-    horizonColor: new THREE.Color(0x060c1c),
-    sunCoronaColor: new THREE.Color(0xffeedd),
-    sunCoronaIntensity: 0.0,
-    sunColor: new THREE.Color(0x6d85b6),
-    sunIntensity: 0.32,
-    hemiSkyColor: new THREE.Color(0x142035),
-    hemiGroundColor: new THREE.Color(0x080c14),
-    fogColor: new THREE.Color(0x070b16),
-    fogDensity: 0.00085,
-    cloudTopColor: new THREE.Color(0x283448),
-    cloudBaseColor: new THREE.Color(0x121824),
+    zenithColor: new THREE.Color(0x0c1a36),
+    horizonColor: new THREE.Color(0x1a2c4e),
+    sunCoronaColor: new THREE.Color(0xd8e8ff),
+    sunCoronaIntensity: 0.15,
+    sunColor: new THREE.Color(0x9cc2f4),
+    sunIntensity: 0.90, // Brilliant lunar beam
+    hemiSkyColor: new THREE.Color(0x38527a),
+    hemiGroundColor: new THREE.Color(0x222838),
+    fogColor: new THREE.Color(0x14223d),
+    fogDensity: 0.00042,
+    cloudTopColor: new THREE.Color(0x3e5274),
+    cloudBaseColor: new THREE.Color(0x1e2a3e),
     cloudOpacity: 0.40,
     sunAlpha: 0.0,
-    moonAlpha: 0.95,
+    moonAlpha: 0.98,
     starAlpha: 1.0,
   },
 ];
@@ -720,12 +720,14 @@ export class AtmosphereManager {
           float horizon = clamp(viewDir.y, 0.0, 1.0);
 
           // RDR western atmosphere: warm low-altitude desert aerosol / dust haze band near the horizon
+          // Modulated smoothly by day factor so starry night skies maintain clean, deep sapphire horizon contrast
           float horizonHaze = pow(1.0 - horizon, 3.2);
-          vec3 warmHazeColor = mix(uHorizonColor, vec3(0.96, 0.62, 0.36), 0.35);
+          float dayFactor = clamp(1.0 - uStarAlpha * 1.15, 0.0, 1.0);
+          vec3 warmHazeColor = mix(uHorizonColor, vec3(0.96, 0.62, 0.36), 0.35 * dayFactor);
 
           // Eased Rayleigh celestial dome gradient across day, golden hour, twilight, and night
           vec3 sky = mix(uHorizonColor, uZenithColor, pow(horizon, 0.48));
-          sky = mix(sky, warmHazeColor, horizonHaze * 0.45);
+          sky = mix(sky, warmHazeColor, horizonHaze * 0.45 * (0.3 + 0.7 * dayFactor));
 
           // Physical Sun Disc and Mie scattering corona on the celestial sky dome
           // Smooth sunset immersion factor: fades smoothly as sun descends towards/below the horizon
@@ -752,9 +754,9 @@ export class AtmosphereManager {
 
           // Celestial Night Stars and Procedural Milky Way with smooth eased opacity
           if (uStarAlpha > 0.005) {
-            float star = step(0.9962, starHash(floor(viewDir * 420.0))) * uStarAlpha;
-            float milkyBand = pow(max(0.0, 1.0 - abs(viewDir.x * 0.72 + viewDir.z * 0.69)), 5.5) * 0.38 * uStarAlpha;
-            sky += vec3(0.94, 0.96, 1.0) * star + vec3(0.70, 0.78, 0.98) * milkyBand;
+            float star = step(0.9952, starHash(floor(viewDir * 420.0))) * uStarAlpha;
+            float milkyBand = pow(max(0.0, 1.0 - abs(viewDir.x * 0.72 + viewDir.z * 0.69)), 4.8) * 0.44 * uStarAlpha;
+            sky += vec3(0.95, 0.98, 1.0) * star + vec3(0.72, 0.84, 1.0) * milkyBand;
           }
 
           gl_FragColor = vec4(sky, 1.0);
@@ -1467,9 +1469,12 @@ export class AtmosphereManager {
     // Keep shader uniform aligned with true celestial vector
     this.skyMaterial.uniforms.uSunPosition.value.copy(sunDir);
 
-    // Align directional shadow-casting sunlight with celestial angle
+    // Align directional shadow-casting luminary with celestial angle:
+    // When the sun sets below the horizon (sunDir.y <= 0.02), seamlessly switch the directional light to
+    // follow the high desert moon (moonDir) so silvery moonlight illuminates the wilderness from above!
     if (sunLight) {
-      sunLight.position.copy(playerPos).addScaledVector(sunDir, 160);
+      const activeLuminaryDir = sunDir.y > 0.02 ? sunDir : moonDir;
+      sunLight.position.copy(playerPos).addScaledVector(activeLuminaryDir, 160);
       sunLight.target.position.copy(playerPos);
       sunLight.target.updateMatrixWorld();
     }
