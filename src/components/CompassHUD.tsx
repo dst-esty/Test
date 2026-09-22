@@ -1,7 +1,8 @@
 import React from 'react';
-import { Compass, Sun, Moon, MapPin, Flame, Mountain, Globe, Eye, Users, User, Navigation } from 'lucide-react';
+import { Compass, Sun, Moon, MapPin, Flame, Mountain, Globe, Eye, Users, User, Navigation, Sparkles } from 'lucide-react';
 import { getUsgsElevation, formatUsgsDistance, WorldScaleMode, getFourPeaksSightlineStatus } from '../world/superstitionTopography';
 import { MultiplayerPlayer } from '../types';
+import { getLunarPhaseInfo } from '../world/atmosphere';
 
 interface CompassHUDProps {
   yaw: number; // in radians
@@ -19,6 +20,8 @@ interface CompassHUDProps {
   selfName?: string;
   onTrackPlayer?: (p: MultiplayerPlayer) => void;
   onOpenMultiplayerModal?: () => void;
+  lunarPhase?: number;
+  onCycleLunarPhase?: () => void;
 }
 
 export const CompassHUD: React.FC<CompassHUDProps> = ({
@@ -37,9 +40,12 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   selfName,
   onTrackPlayer,
   onOpenMultiplayerModal,
+  lunarPhase = 0.5,
+  onCycleLunarPhase,
 }) => {
   // Convert yaw to degrees (0 to 360)
   const deg = Math.round(((-yaw * 180) / Math.PI + 360) % 360);
+  const phaseInfo = getLunarPhaseInfo(lunarPhase);
 
   const getCardinal = (angle: number) => {
     const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -125,6 +131,23 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
             N
           </kbd>
         </button>
+
+        {/* Lunar Phase & Moonlight Indicator */}
+        {isNight && (
+          <button
+            id="hud-lunar-phase-btn"
+            type="button"
+            onClick={onCycleLunarPhase}
+            title={`Moonlight Atmosphere: ${phaseInfo.name} (${Math.round(phaseInfo.illumination * 100)}% Moonlight). ${phaseInfo.description}. Click to cycle lunar phase.`}
+            className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1 -my-1 rounded-full bg-slate-900/90 hover:bg-slate-800/95 text-sky-200 border border-sky-500/50 text-xs font-mono transition-all cursor-pointer shadow-md group border-r border-amber-800/60"
+          >
+            <Moon className="w-3.5 h-3.5 text-sky-300 group-hover:rotate-12 transition-transform" />
+            <span className="font-semibold text-sky-100 hidden sm:inline">{phaseInfo.name}</span>
+            <span className="text-[10px] text-sky-300 font-bold bg-sky-950/90 px-1.5 py-0.5 rounded border border-sky-700/50">
+              {Math.round(phaseInfo.illumination * 100)}% Moon
+            </span>
+          </button>
+        )}
 
         {/* Nearest Landmark */}
         {nearestLandmarkName && (

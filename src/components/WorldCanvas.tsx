@@ -185,6 +185,7 @@ interface WorldCanvasProps {
   worldScaleMode?: WorldScaleMode;
   onRegisterToggleHunkerHandler?: (fn: () => void) => void;
   onToggleHunkerDown?: () => void;
+  lunarPhase?: number;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
@@ -266,6 +267,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   worldScaleMode = '1:1',
   onRegisterToggleHunkerHandler,
   onToggleHunkerDown,
+  lunarPhase = 0.5,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
@@ -806,12 +808,13 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         playerLightRef.current.intensity = 3.5;
         playerLightRef.current.distance = 32;
       } else if (isNight) {
-        // Natural nocturnal eye adaptation / starlight radiance around the prospector
-        // Prevents nearby mining, gold panning, and navigating rocks from feeling pitch black
+        // Natural nocturnal eye adaptation & starlight/moonlight radiance around the prospector
+        // Modulated smoothly by the lunar phase so full moon night exploration is beautifully visible and atmospheric
+        const lunarIllum = 0.5 * (1.0 - Math.cos(lunarPhase * Math.PI * 2.0));
         playerLightRef.current.visible = true;
         playerLightRef.current.color.setHex(0x98b8ec);
-        playerLightRef.current.intensity = 0.85;
-        playerLightRef.current.distance = 20;
+        playerLightRef.current.intensity = 0.65 + 0.60 * lunarIllum;
+        playerLightRef.current.distance = 20 + 8 * lunarIllum;
       } else {
         playerLightRef.current.visible = false;
         playerLightRef.current.intensity = 0;
@@ -823,7 +826,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       cameraRef.current.fov = targetFov;
       cameraRef.current.updateProjectionMatrix();
     }
-  }, [playerState.equippedTool, timeOfDay]);
+  }, [playerState.equippedTool, timeOfDay, lunarPhase]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -1111,7 +1114,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
 
     const atmosphereManager = new AtmosphereManager(scene);
     atmosphereManagerRef.current = atmosphereManager;
-    atmosphereManager.updateAtmosphere(timeOfDay, weather, sunLight, hemiLight);
+    atmosphereManager.updateAtmosphere(timeOfDay, weather, sunLight, hemiLight, lunarPhase);
 
     const smokeSignalSystem = new ApacheSmokeSignalSystem(scene);
     smokeSignalSystemRef.current = smokeSignalSystem;
@@ -4637,7 +4640,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         const cavalryDialogue = cavalryPatrolRef.current.getNearbyCavalryDialogue(playerPos.current);
         if (cavalryDialogue) {
           const handleCavalryHail = () => {
-            soundEngine.playCavalryBugleCall('assembly');
+            soundEngine.playCavalryBugleCall('assembly', 0.025);
             if (onShowBanner) {
               onShowBanner(`🎖️ ${cavalryDialogue.rank} ${cavalryDialogue.name}: ${cavalryDialogue.text}`);
             }
@@ -7453,7 +7456,21 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     };
   }, []);
 
-  // Update Sun & Atmosphere when timeOfDay or weather changes
+  // Synchronize town law hostilities with outlaw heat cool-off
+  useEffect(() => {
+    const unsub = townWantedService.subscribeDowngrade((newLevel, prevLevel) => {
+      if (townfolkManagerRef.current) {
+        if (newLevel === 0 || (prevLevel === 3 && newLevel < 3)) {
+          townfolkManagerRef.current.resetAllHostilities();
+        }
+      }
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  // Update Sun & Atmosphere when timeOfDay, weather, or lunarPhase changes
   useEffect(() => {
     timeOfDayRef.current = timeOfDay;
     weatherRef.current = weather;
@@ -7462,13 +7479,14 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         timeOfDay,
         weather,
         sunLightRef.current || undefined,
-        hemiLightRef.current || undefined
+        hemiLightRef.current || undefined,
+        lunarPhase
       );
     }
     if (tortillaFlatLightingRef.current) {
       tortillaFlatLightingRef.current(timeOfDay, 0.016);
     }
-  }, [timeOfDay, weather]);
+  }, [timeOfDay, weather, lunarPhase]);
 
   // Synchronize 3D territory claims whenever Firestore/local claim registry changes
   useEffect(() => {

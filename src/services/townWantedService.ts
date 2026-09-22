@@ -20,6 +20,11 @@ export interface WantedRecord {
   crimes: OutlawCrime[];
   lastCrimeTime: number;
   alarmCooldown: number;
+  // Dynamic cool-off heat dissipation state
+  coolOffRemainingSec: number;
+  coolOffTotalSec: number;
+  isCoolingOff: boolean;
+  isSpottedByLaw: boolean;
 }
 
 const STORAGE_KEY = 'superstition_outlaw_wanted_state';
@@ -27,7 +32,9 @@ const STORAGE_KEY = 'superstition_outlaw_wanted_state';
 class TownWantedService {
   private record: WantedRecord;
   private listeners: Set<(rec: WantedRecord) => void> = new Set();
+  private downgradeListeners: Set<(newLevel: WantedLevel, prevLevel: WantedLevel, msg: string) => void> = new Set();
   private bellIntervalId: number | null = null;
+  private coolOffIntervalId: number | null = null;
   private playerPos: { x: number; z: number } = { x: 0, z: -250 };
 
   public updatePlayerPosition(x: number, z: number) {
@@ -45,6 +52,16 @@ class TownWantedService {
 
   constructor() {
     this.record = this.loadRecord();
+    this.startCoolOffTimer();
+  }
+
+  public getDefaultCoolOffSec(level: WantedLevel): number {
+    switch (level) {
+      case 3: return 50; // 50 seconds to step down from Most Wanted to Violent Outlaw
+      case 2: return 38; // 38 seconds to step down from Violent Outlaw to Town Troublemaker
+      case 1: return 28; // 28 seconds to step down from Town Troublemaker to Law-Abiding
+      default: return 0;
+    }
   }
 
   private loadRecord(): WantedRecord {
@@ -52,8 +69,10 @@ class TownWantedService {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        const wantedLevel = (parsed.wantedLevel || 0) as WantedLevel;
+        const coolOffTotal = this.getDefaultCoolOffSec(wantedLevel);
         return {
-          wantedLevel: parsed.wantedLevel || 0,
+          wantedLevel,
           bounty: parsed.bounty || 0,
           isMobilized: false, // Mobilization resets on fresh load
           hasMostWantedBadge: Boolean(parsed.hasMostWantedBadge),
@@ -63,6 +82,12 @@ class TownWantedService {
           crimes: Array.isArray(parsed.crimes) ? parsed.crimes : [],
           lastCrimeTime: parsed.lastCrimeTime || 0,
           alarmCooldown: 0,
+          coolOffRemainingSec: typeof parsed.coolOffRemainingSec === 'number' && parsed.coolOffRemainingSec > 0
+            ? parsed.coolOffRemainingSec
+            : coolOffTotal,
+          coolOffTotalSec: coolOffTotal,
+          isCoolingOff: false,
+          isSpottedByLaw: false,
         };
       }
     } catch {
@@ -80,6 +105,10 @@ class TownWantedService {
       crimes: [],
       lastCrimeTime: 0,
       alarmCooldown: 0,
+      coolOffRemainingSec: 0,
+      coolOffTotalSec: 0,
+      isCoolingOff: false,
+      isSpottedByLaw: false,
     };
   }
 
@@ -100,6 +129,122 @@ class TownWantedService {
     this.listeners.add(listener);
     listener({ ...this.record });
     return () => this.listeners.delete(listener);
+  }
+
+  public subscribeDowngrade(listener: (newLevel: WantedLevel, prevLevel: WantedLevel, msg: string) => void): () => void {
+    this.downgradeListeners.add(listener);
+    return () => this.downgradeListeners.delete(listener);
+  }
+
+  private notifyDowngrade(newLevel: WantedLevel, prevLevel: WantedLevel, msg: string) {
+    this.downgradeListeners.forEach((fn) => fn(newLevel, prevLevel, msg));
+  }
+
+  /**
+   * Continuous background tick for outlaw heat dissipation & cool-off
+   */
+  private startCoolOffTimer() {
+    if (this.coolOffIntervalId !== null) return;
+    this.coolOffIntervalId = window.setInterval(() => {
+      this.tickCoolOff();
+    }, 1000);
+  }
+
+  private tickCoolOff() {
+    if (this.record.wantedLevel === 0) {
+      if (this.record.isCoolingOff || this.record.coolOffRemainingSec > 0 || this.record.isSpottedByLaw) {
+        this.record.isCoolingOff = false;
+        this.record.coolOffRemainingSec = 0;
+        this.record.coolOffTotalSec = 0;
+        this.record.isSpottedByLaw = false;
+        this.notify();
+      }
+      return;
+    }
+
+    // Distance to Tortilla Flat center (x: 0, z: -250)
+    const distToTown = Math.hypot(this.playerPos.x, this.playerPos.z - (-250.0));
+    const inWilderness = distToTown > 85.0;
+
+    // Active law sighting check: inside town limits (< 38m) during active mobilization
+    const isSpotted = distToTown < 38.0 && this.record.isMobilized;
+    this.record.isSpottedByLaw = isSpotted;
+
+    // Grace period check: after a crime or combat action, heat remains locked for 8 seconds
+    const timeSinceCrimeSec = (Date.now() - (this.record.lastCrimeTime || 0)) / 1000;
+    if (timeSinceCrimeSec < 8.0 || isSpotted) {
+      if (this.record.isCoolingOff) {
+        this.record.isCoolingOff = false;
+        this.notify();
+      }
+      return;
+    }
+
+    // Actively cooling off!
+    this.record.isCoolingOff = true;
+
+    // In the wilderness, search parties lose the trail 50% faster
+    const decayAmount = inWilderness ? 1.5 : 1.0;
+    this.record.coolOffRemainingSec = Math.max(0, this.record.coolOffRemainingSec - decayAmount);
+
+    if (this.record.coolOffRemainingSec <= 0) {
+      this.downgradeWantedLevel();
+    } else {
+      this.notify();
+    }
+  }
+
+  /**
+   * Gradually steps down the wanted level by one tier
+   */
+  public downgradeWantedLevel(): { newLevel: WantedLevel; prevLevel: WantedLevel; message: string } {
+    const prevLevel = this.record.wantedLevel;
+    let newLevel: WantedLevel = 0;
+    let message = '';
+
+    if (prevLevel === 3) {
+      newLevel = 2;
+      this.record.wantedLevel = 2;
+      // Posse stands down; bounty halves as immediate manhunt ceases
+      this.record.bounty = Math.max(60, Math.floor(this.record.bounty * 0.45));
+      this.record.coolOffRemainingSec = this.getDefaultCoolOffSec(2);
+      this.record.coolOffTotalSec = this.record.coolOffRemainingSec;
+      this.standDownMobilization();
+      message = '⭐ Outlaw Heat Reduced: The Posse lost your trail in the canyons! Wanted status dropped to Level 2 (Violent Outlaw).';
+    } else if (prevLevel === 2) {
+      newLevel = 1;
+      this.record.wantedLevel = 1;
+      this.record.bounty = Math.min(this.record.bounty, 25);
+      this.record.coolOffRemainingSec = this.getDefaultCoolOffSec(1);
+      this.record.coolOffTotalSec = this.record.coolOffRemainingSec;
+      message = '⭐ Outlaw Heat Reduced: Local deputies have stood down search! Wanted status dropped to Level 1 (Town Troublemaker).';
+    } else {
+      newLevel = 0;
+      this.record.wantedLevel = 0;
+      this.record.bounty = 0;
+      this.record.crimes = [];
+      this.record.npcsDowned = [];
+      this.record.coolOffRemainingSec = 0;
+      this.record.coolOffTotalSec = 0;
+      this.record.isCoolingOff = false;
+      this.standDownMobilization();
+      message = '🕊️ Wanted Warrant Expired: Territorial authorities have ceased pursuit! You are once again a law-abiding citizen.';
+    }
+
+    this.saveRecord();
+    this.notifyDowngrade(newLevel, prevLevel, message);
+    return { newLevel, prevLevel, message };
+  }
+
+  /**
+   * Accelerates cool off when player sleeps through the night at camp or the hotel.
+   * Laying low in a wilderness camp for hours cold-trails the search parties!
+   */
+  public coolOffOnSleep(): { newLevel: WantedLevel; prevLevel: WantedLevel; message?: string } {
+    if (this.record.wantedLevel === 0) {
+      return { newLevel: 0, prevLevel: 0 };
+    }
+    return this.downgradeWantedLevel();
   }
 
   public getRecord(): WantedRecord {
@@ -124,12 +269,22 @@ class TownWantedService {
         bountyAdded: 25,
       });
       this.record.lastCrimeTime = now;
+      this.record.coolOffRemainingSec = this.getDefaultCoolOffSec(1);
+      this.record.coolOffTotalSec = this.record.coolOffRemainingSec;
+      this.record.isCoolingOff = false;
       this.saveRecord();
       return {
         levelChanged: true,
         newLevel: 1,
         message: '⚠️ MUNICIPAL VIOLATION: Unlawful Gunplay in Town Limits! $25 Bounty Posted.',
       };
+    } else {
+      // Refresh crime timestamp to restart grace period
+      this.record.lastCrimeTime = now;
+      this.record.coolOffRemainingSec = this.getDefaultCoolOffSec(this.record.wantedLevel);
+      this.record.coolOffTotalSec = this.record.coolOffRemainingSec;
+      this.record.isCoolingOff = false;
+      this.saveRecord();
     }
 
     return { levelChanged: false, newLevel: this.record.wantedLevel };
@@ -178,6 +333,11 @@ class TownWantedService {
     } else if (this.record.wantedLevel < 2) {
       this.record.wantedLevel = 2;
     }
+
+    // Reset cool-off timer to full duration for current level
+    this.record.coolOffRemainingSec = this.getDefaultCoolOffSec(this.record.wantedLevel);
+    this.record.coolOffTotalSec = this.record.coolOffRemainingSec;
+    this.record.isCoolingOff = false;
 
     // Mobilize the town immediately
     this.triggerMobilization();
@@ -235,6 +395,10 @@ class TownWantedService {
       earnedMostWanted = true;
       soundEngine.playOutlawBadgeEarned();
     }
+
+    this.record.coolOffRemainingSec = this.getDefaultCoolOffSec(3);
+    this.record.coolOffTotalSec = this.record.coolOffRemainingSec;
+    this.record.isCoolingOff = false;
 
     this.triggerMobilization();
     this.saveRecord();
@@ -301,6 +465,10 @@ class TownWantedService {
     this.record.wantedLevel = 0;
     this.record.isMobilized = false;
     this.record.npcsDowned = [];
+    this.record.coolOffRemainingSec = 0;
+    this.record.coolOffTotalSec = 0;
+    this.record.isCoolingOff = false;
+    this.record.isSpottedByLaw = false;
     this.standDownMobilization();
     this.saveRecord();
     return true;
@@ -314,6 +482,10 @@ class TownWantedService {
     this.record.wantedLevel = 0;
     this.record.isMobilized = false;
     this.record.npcsDowned = [];
+    this.record.coolOffRemainingSec = 0;
+    this.record.coolOffTotalSec = 0;
+    this.record.isCoolingOff = false;
+    this.record.isSpottedByLaw = false;
     this.standDownMobilization();
     this.saveRecord();
   }
@@ -337,6 +509,10 @@ class TownWantedService {
       crimes: [],
       lastCrimeTime: 0,
       alarmCooldown: 0,
+      coolOffRemainingSec: 0,
+      coolOffTotalSec: 0,
+      isCoolingOff: false,
+      isSpottedByLaw: false,
     };
     this.standDownMobilization();
     this.saveRecord();

@@ -619,7 +619,7 @@ export class CavalryPatrolManager {
           this.bannerTriggeredForArrival = true;
           const playerDistToTF = Math.hypot(playerPos.x - targetWp.x, playerPos.z - targetWp.z);
           if (playerDistToTF < 70) {
-            const volScale = Math.max(0.1, (1 - playerDistToTF / 70) * 0.3);
+            const volScale = Math.max(0.015, (1 - playerDistToTF / 70) * 0.04);
             soundEngine.playCavalryBugleCall('assembly', volScale);
             if (onShowBanner) {
               onShowBanner('🎖️ 6th U.S. Cavalry Detachment arrived at Tortilla Flat hitching rails.');
@@ -664,7 +664,7 @@ export class CavalryPatrolManager {
         this.hoofSoundTimer = 0;
         const playerDist = Math.hypot(playerPos.x - this.columnPosition.x, playerPos.z - this.columnPosition.z);
         if (playerDist < 32) {
-          const volumeFactor = Math.max(0, 1 - (playerDist / 32)) * 0.28;
+          const volumeFactor = Math.max(0, 1 - (playerDist / 32)) * 0.06;
           soundEngine.playCavalryTroopHooves(volumeFactor);
         }
       }
@@ -692,7 +692,7 @@ export class CavalryPatrolManager {
     if (playerPos) {
       const dist = Math.hypot(playerPos.x - startWp.x, playerPos.z - startWp.z);
       if (dist < 140) {
-        const volScale = Math.max(0.08, (1 - dist / 140) * 0.22);
+        const volScale = Math.max(0.01, (1 - dist / 140) * 0.035);
         soundEngine.playCavalryBugleCall('boots_and_saddles', volScale);
         if (onShowBanner) {
           onShowBanner('🎺 Fort McDowell Cavalry Patrol dispatched along the Salt River trail.');

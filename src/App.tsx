@@ -34,7 +34,7 @@ import { ShaftSinkingStats } from './world/undergroundVoxels';
 import { multiplayer } from './multiplayer/multiplayerService';
 import { territoryClaims } from './services/territoryClaimService';
 import { getTerrainHeight } from './world/terrain';
-import { advanceDiurnalTime } from './world/atmosphere';
+import { advanceDiurnalTime, getLunarPhaseInfo } from './world/atmosphere';
 import { Compass, BookOpen, Map as MapIcon, Sparkles, AlertCircle } from 'lucide-react';
 import { isMobileDevice } from './utils/device';
 import { safeLocalStorage } from './utils/storage';
@@ -43,6 +43,7 @@ import { WorldScaleMode, formatUsgsDistance } from './world/superstitionTopograp
 import { isScatteredSkullClue } from './services/curseNarrativeEngine';
 import { armImmediateFullscreenOnFirstGesture, enterFullscreen } from './utils/fullscreen';
 import { recordCoronersLogEntry } from './services/coronersLogService';
+import { townWantedService } from './services/townWantedService';
 
 export default function App() {
   // Player State
@@ -485,6 +486,23 @@ export default function App() {
   const [timeOfDay, setTimeOfDay] = useState<number>(() => multiplayer.getUniversalTimeOfDay());
   const [weather, setWeather] = useState<WeatherType>(() => multiplayer.getUniversalWeather());
 
+  // Universal Synchronized Lunar Phase Instance (0.0 to 1.0; 0.5 = Full Moon for luminous night exploration)
+  const [lunarPhase, setLunarPhase] = useState<number>(() => {
+    const saved = safeLocalStorage.getItem('lost_dutchman_lunar_phase');
+    return saved !== null ? parseFloat(saved) : 0.5; // Full Moon default
+  });
+
+  const handleCycleLunarPhase = useCallback(() => {
+    setLunarPhase((prev) => {
+      const next = (prev + 0.125) % 1.0;
+      safeLocalStorage.setItem('lost_dutchman_lunar_phase', next.toString());
+      const info = getLunarPhaseInfo(next);
+      soundEngine.playOreChime();
+      showBanner(`🌙 Lunar Phase: ${info.name} (${Math.round(info.illumination * 100)}% Moonlight). ${info.description}`);
+      return next;
+    });
+  }, [showBanner]);
+
   // Register dynamic weather events (sandstorms, haboobs, and dust warnings)
   useEffect(() => {
     dynamicWeatherEngine.setHandlers({
@@ -570,6 +588,11 @@ export default function App() {
   const handleSleepUntilDawn = useCallback(() => {
     soundEngine.playCampfire();
     setTimeOfDay(6.0); // 6:00 AM Sunrise
+    setLunarPhase((lp) => {
+      const updated = (lp + 1 / 29.5) % 1.0;
+      safeLocalStorage.setItem('lost_dutchman_lunar_phase', updated.toString());
+      return updated;
+    });
     setPlayerState((prev) => {
       const updatedStructures = (prev.builtStructures || []).map((s) => {
         if (s.type === 'campfire' || s.type === 'prospector_camp') {
@@ -592,7 +615,12 @@ export default function App() {
         builtStructures: updatedStructures,
       };
     });
-    showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Vigour, health, and hydration fully restored.");
+    const coolResult = townWantedService.coolOffOnSleep();
+    if (coolResult.message) {
+      showBanner(`🌅 Slept safely through the cold desert night until 6:00 AM! ${coolResult.message}`);
+    } else {
+      showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Vigour, health, and hydration fully restored.");
+    }
   }, [showBanner]);
 
   const handleSleepInHotel = useCallback((paymentMethod: 'cash' | 'gold') => {
@@ -613,6 +641,11 @@ export default function App() {
 
     soundEngine.playHotelRest();
     setTimeOfDay(6.0); // 6:00 AM Sunrise
+    setLunarPhase((lp) => {
+      const updated = (lp + 1 / 29.5) % 1.0;
+      safeLocalStorage.setItem('lost_dutchman_lunar_phase', updated.toString());
+      return updated;
+    });
     setPlayerState((prev) => ({
       ...prev,
       cashDollars: paymentMethod === 'cash' ? Math.max(0, (prev.cashDollars || 0) - 2.0) : prev.cashDollars,
@@ -625,7 +658,12 @@ export default function App() {
     }));
 
     setIsTortillaFlatOpen(false);
-    showBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Vigour and vitals fully replenished.");
+    const coolResult = townWantedService.coolOffOnSleep();
+    if (coolResult.message) {
+      showBanner(`🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! ${coolResult.message}`);
+    } else {
+      showBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Vigour and vitals fully replenished.");
+    }
     return true;
   }, [playerState.cashDollars, playerState.goldFound, showBanner]);
 
@@ -634,14 +672,17 @@ export default function App() {
       const isDay = prev >= 5.5 && prev < 19.5;
       const nextTime = isDay ? 21.0 : 9.5;
       soundEngine.playCampfire();
-      showBanner(
-        isDay
-          ? "🌌 Night has fallen over Tortilla Flat! Main street is illuminated with festive string lights, flickering torches, and warm boardwalk lanterns."
-          : "☀️ Morning sun crests over the Superstition Mountains! Tortilla Flat settles into daytime bustle."
-      );
+      if (isDay) {
+        const info = getLunarPhaseInfo(lunarPhase);
+        showBanner(
+          `🌌 Night has fallen under a ${info.name}! Ambient moonlight (${Math.round(info.illumination * 100)}%) casts silvery desert shadows.`
+        );
+      } else {
+        showBanner("☀️ Morning sun crests over the Superstition Mountains! Tortilla Flat settles into daytime bustle.");
+      }
       return nextTime;
     });
-  }, [showBanner]);
+  }, [showBanner, lunarPhase]);
 
   const handleStokeCamp = useCallback(() => {
     if (!nearbyCamp) return;
@@ -1033,7 +1074,18 @@ export default function App() {
   // Universal continuous sun & celestial progression (shared instance)
   useEffect(() => {
     const interval = setInterval(() => {
-      setTimeOfDay((prev) => advanceDiurnalTime(prev, 1));
+      setTimeOfDay((prev) => {
+        const next = advanceDiurnalTime(prev, 1);
+        if (next < prev) {
+          // Midnight rollover: natural synodic progression (~29.5 days per lunar cycle)
+          setLunarPhase((lp) => {
+            const updated = (lp + 1 / 29.5) % 1.0;
+            safeLocalStorage.setItem('lost_dutchman_lunar_phase', updated.toString());
+            return updated;
+          });
+        }
+        return next;
+      });
     }, 1000);
     return () => clearInterval(interval);
   }, []);
@@ -1101,6 +1153,15 @@ export default function App() {
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handleToggleGoggles]);
+
+  // Territorial Most Wanted Outlaw Cool-off downgrade notifications
+  useEffect(() => {
+    const unsub = townWantedService.subscribeDowngrade((_newLevel, _prevLevel, message) => {
+      showBanner(message);
+      soundEngine.playOreChime();
+    });
+    return unsub;
+  }, [showBanner]);
 
   // Handle Companion Mount toggle (Burro / Pony)
   const handleToggleMount = useCallback(() => {
@@ -1469,6 +1530,7 @@ export default function App() {
         landmarks={landmarks}
         clues={clues}
         timeOfDay={timeOfDay}
+        lunarPhase={lunarPhase}
         weather={weather}
         viewMode={viewMode}
         onRegisterDigHandler={(fn) => {
@@ -1685,6 +1747,8 @@ export default function App() {
           selfName={selfName}
           onTrackPlayer={handleTrackPlayer}
           onOpenMultiplayerModal={() => setRosterModalTab('customize')}
+          lunarPhase={lunarPhase}
+          onCycleLunarPhase={handleCycleLunarPhase}
         />
       )}
 
@@ -2006,6 +2070,7 @@ export default function App() {
         onStokeCamp={handleStokeCamp}
         nearbyCamp={nearbyCamp}
         timeOfDay={timeOfDay}
+        lunarPhase={lunarPhase}
       />
 
       {/* Rock Quarry & Mining Supply Depot Modal */}

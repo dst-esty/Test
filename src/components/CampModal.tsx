@@ -4,6 +4,7 @@ import {
   Tent,
   Coffee,
   Sun,
+  Moon,
   X,
   Coins,
   Box,
@@ -18,6 +19,7 @@ import {
 import { BuiltStructure, MineStructureType, PlayerState } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
 import { soundEngine } from '../audio/soundEffects';
+import { getLunarPhaseInfo } from '../world/atmosphere';
 
 interface CampModalProps {
   isOpen: boolean;
@@ -29,6 +31,7 @@ interface CampModalProps {
   onStokeCamp?: () => void;
   nearbyCamp?: BuiltStructure | null;
   timeOfDay?: number;
+  lunarPhase?: number;
 }
 
 export const CampModal: React.FC<CampModalProps> = ({
@@ -41,6 +44,7 @@ export const CampModal: React.FC<CampModalProps> = ({
   onStokeCamp,
   nearbyCamp,
   timeOfDay = 12,
+  lunarPhase = 0.5,
 }) => {
   if (!isOpen) return null;
 
@@ -126,11 +130,17 @@ export const CampModal: React.FC<CampModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-[11px] text-stone-400 font-mono">
-            <Clock className="w-3 h-3 text-amber-400" />
-            <span>Time: {Math.floor(timeOfDay).toString().padStart(2, '0')}:{Math.floor((timeOfDay % 1) * 60).toString().padStart(2, '0')}</span>
+          <div className="flex items-center gap-2 text-[11px] text-stone-400 font-mono flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-3 h-3 text-amber-400" />
+              <span>Time: {Math.floor(timeOfDay).toString().padStart(2, '0')}:{Math.floor((timeOfDay % 1) * 60).toString().padStart(2, '0')}</span>
+            </div>
             {isNight && (
-              <span className="text-amber-400 font-bold ml-1">🌙 Desert Night Chill</span>
+              <div className="flex items-center gap-1.5 bg-slate-900/90 border border-sky-600/40 px-2 py-0.5 rounded-full text-sky-200">
+                <Moon className="w-3 h-3 text-sky-300" />
+                <span className="font-semibold text-sky-100">{getLunarPhaseInfo(lunarPhase).name}</span>
+                <span className="text-[10px] text-sky-400 font-mono">({Math.round(getLunarPhaseInfo(lunarPhase).illumination * 100)}% Moonlight)</span>
+              </div>
             )}
           </div>
         </div>

@@ -593,6 +593,84 @@ export function advanceDiurnalTime(currentTime: number, deltaSec: number = 1): n
   return ((currentTime + rate * deltaSec) % 24 + 24) % 24;
 }
 
+export type LunarPhaseName =
+  | 'new_moon'
+  | 'waxing_crescent'
+  | 'first_quarter'
+  | 'waxing_gibbous'
+  | 'full_moon'
+  | 'waning_gibbous'
+  | 'third_quarter'
+  | 'waning_crescent';
+
+export interface LunarPhaseInfo {
+  phase: number; // 0.0 to 1.0 (0.0=New, 0.25=First Quarter, 0.5=Full, 0.75=Third Quarter)
+  name: LunarPhaseName;
+  label: string; // e.g. "Full Sonoran Moon"
+  illumination: number; // 0.0 to 1.0
+  icon: string; // '🌑' | '🌒' | '🌓' | '🌔' | '🌕' | '🌖' | '🌗' | '🌘'
+  description: string;
+}
+
+/**
+ * Returns comprehensive lunar phase metadata and illumination factor for a given phase ratio [0..1).
+ */
+export function getLunarPhaseInfo(rawPhase: number): LunarPhaseInfo {
+  const phase = ((rawPhase % 1.0) + 1.0) % 1.0;
+  // Sinusoidal illumination curve: 0 at phase 0.0 (New Moon), 1.0 at phase 0.5 (Full Moon)
+  const pureIllumination = 0.5 * (1.0 - Math.cos(phase * Math.PI * 2.0));
+  const illumination = pureIllumination;
+
+  let name: LunarPhaseName;
+  let label: string;
+  let icon: string;
+  let description: string;
+
+  if (phase < 0.0625 || phase >= 0.9375) {
+    name = 'new_moon';
+    label = 'New Moon';
+    icon = '🌑';
+    description = 'Dark, quiet desert night with blazing starlight and clear Milky Way.';
+  } else if (phase < 0.1875) {
+    name = 'waxing_crescent';
+    label = 'Waxing Crescent';
+    icon = '🌒';
+    description = 'Slender silver sickle illuminating high mountain ridgelines.';
+  } else if (phase < 0.3125) {
+    name = 'first_quarter';
+    label = 'First Quarter';
+    icon = '🌓';
+    description = 'Half-moon casting sharp, angled shadows across canyon rocks.';
+  } else if (phase < 0.4375) {
+    name = 'waxing_gibbous';
+    label = 'Waxing Gibbous';
+    icon = '🌔';
+    description = 'Luminous moon filling desert flats with atmospheric silver wash.';
+  } else if (phase < 0.5625) {
+    name = 'full_moon';
+    label = 'Full Sonoran Moon';
+    icon = '🌕';
+    description = 'Brilliant silver moonlight bathing canyons and trails in radiant ambient glow.';
+  } else if (phase < 0.6875) {
+    name = 'waning_gibbous';
+    label = 'Waning Gibbous';
+    icon = '🌖';
+    description = 'Rich midnight moonlight guiding nocturnal prospectors across the valleys.';
+  } else if (phase < 0.8125) {
+    name = 'third_quarter';
+    label = 'Third Quarter';
+    icon = '🌗';
+    description = 'High silver light carving silhouettes of Saguaro and Weaver’s Needle.';
+  } else {
+    name = 'waning_crescent';
+    label = 'Waning Crescent';
+    icon = '🌘';
+    description = 'Faint early morning crescent glowing softly above Eastern bluffs.';
+  }
+
+  return { phase, name, label, illumination, icon, description };
+}
+
 export class AtmosphereManager {
   private scene: THREE.Scene;
   private skyDome: THREE.Mesh;
@@ -647,6 +725,7 @@ export class AtmosphereManager {
   private weatherWeights = { sandstorm: 0, storm: 0, lightRain: 0 };
   private cachedSunLight?: THREE.DirectionalLight;
   private cachedHemiLight?: THREE.HemisphereLight;
+  private lunarPhase: number = 0.5; // 0.0=New Moon, 0.25=First Quarter, 0.5=Full Moon, 0.75=Third Quarter
   private diurnalState: InterpolatedDiurnalState = {
     zenithColor: new THREE.Color(0x2458a8),
     horizonColor: new THREE.Color(0xf4b260),
@@ -680,7 +759,7 @@ export class AtmosphereManager {
     this.moonTexture = createMoonGlowTexture();
     this.dustTexture = createDustPuffTexture();
 
-    // 1. Physically Accurate Atmospheric Scattering Sky Dome
+    // 1. Physically Accurate Atmospheric Scattering Sky Dome with Moonlight Shader
     // Uses camera-relative ray directions so the sky dome is 100% immune to camera position distortion
     const skyGeo = new THREE.SphereGeometry(2800, 48, 32);
     this.skyMaterial = new THREE.ShaderMaterial({
@@ -696,6 +775,11 @@ export class AtmosphereManager {
       `,
       fragmentShader: `
         uniform vec3 uSunPosition; // Normalized sun direction vector
+        uniform vec3 uMoonPosition; // Normalized moon direction vector
+        uniform float uMoonlightIntensity; // Computed active moonlight factor [0..1]
+        uniform float uLunarPhase; // [0..1)
+        uniform float uLunarIllumination; // [0..1]
+        uniform vec3 uMoonlightColor; // Luminous silver-blue tint
         uniform float uTime;
         uniform float uTimeOfDay;
         uniform float uWeather;
@@ -716,7 +800,9 @@ export class AtmosphereManager {
         void main() {
           vec3 viewDir = normalize(vDirection);
           vec3 sunDir = normalize(uSunPosition);
+          vec3 moonDir = normalize(uMoonPosition);
           float sunDot = max(dot(viewDir, sunDir), 0.0);
+          float moonDot = max(dot(viewDir, moonDir), 0.0);
           float horizon = clamp(viewDir.y, 0.0, 1.0);
 
           // RDR western atmosphere: warm low-altitude desert aerosol / dust haze band near the horizon
@@ -752,11 +838,40 @@ export class AtmosphereManager {
             sky += vec3(0.9, 0.45, 0.2) * pow(sunDot, 64.0) * 0.25 * uHaboobDustBlend * horizonFade;
           }
 
+          // Moonlight Atmospheric Scattering & Lunar Halo Shader Effect
+          // Activates during nocturnal cycles and scales dynamically with lunar phase and sky clearness
+          float moonHorizonFade = clamp((moonDir.y + 0.04) / 0.16, 0.0, 1.0);
+          if (moonHorizonFade > 0.001 && uMoonlightIntensity > 0.003) {
+            // 1. Forward Mie aerosol scattering around the moon (silvery lunar corona & halo)
+            float innerLunarCorona = pow(moonDot, 512.0) * 1.15;
+            float midLunarHalo = pow(moonDot, 96.0) * 0.48;
+            float wideLunarGlow = pow(moonDot, 24.0) * 0.20;
+            float horizonLunarScatter = pow(moonDot, 8.0) * horizonHaze * 0.25;
+
+            // Ice-crystal 22° atmospheric halo ring
+            float haloRing = smoothstep(0.915, 0.935, moonDot) * smoothstep(0.955, 0.935, moonDot) * 0.15;
+
+            float totalLunarCorona = (innerLunarCorona + midLunarHalo + wideLunarGlow + horizonLunarScatter) * uMoonlightIntensity * moonHorizonFade;
+            sky += uMoonlightColor * min(totalLunarCorona, 2.0);
+            sky += vec3(0.88, 0.94, 1.0) * haloRing * uMoonlightIntensity * moonHorizonFade;
+
+            // 2. Ambient Rayleigh Moonlight Wash across the entire night sky vault
+            // Increases nocturnal ambient brightness, giving open desert night exploration
+            // a clear, luminous silver-sapphire presence instead of pitch-black darkness
+            float moonScatterDome = pow(horizon, 0.52);
+            float moonScatterHorizon = pow(1.0 - horizon, 2.4);
+            vec3 ambientMoonWash = uMoonlightColor * (moonScatterDome * 0.14 + moonScatterHorizon * 0.22 + 0.06) * uMoonlightIntensity;
+            sky += ambientMoonWash;
+          }
+
           // Celestial Night Stars and Procedural Milky Way with smooth eased opacity
           if (uStarAlpha > 0.005) {
             float star = step(0.9952, starHash(floor(viewDir * 420.0))) * uStarAlpha;
             float milkyBand = pow(max(0.0, 1.0 - abs(viewDir.x * 0.72 + viewDir.z * 0.69)), 4.8) * 0.44 * uStarAlpha;
-            sky += vec3(0.95, 0.98, 1.0) * star + vec3(0.72, 0.84, 1.0) * milkyBand;
+            // On bright moonlit nights, ambient moonlight provides soft illumination,
+            // with stars subtly balanced by Rayleigh contrast (real desert night atmosphere)
+            float starDampening = clamp(1.0 - uMoonlightIntensity * 0.38, 0.40, 1.0);
+            sky += (vec3(0.95, 0.98, 1.0) * star + vec3(0.72, 0.84, 1.0) * milkyBand) * starDampening;
           }
 
           gl_FragColor = vec4(sky, 1.0);
@@ -764,6 +879,11 @@ export class AtmosphereManager {
       `,
       uniforms: {
         uSunPosition: { value: new THREE.Vector3(0.6, 0.7, 0.3).normalize() },
+        uMoonPosition: { value: new THREE.Vector3(-0.6, 0.7, -0.3).normalize() },
+        uMoonlightIntensity: { value: 0.0 },
+        uLunarPhase: { value: 0.5 },
+        uLunarIllumination: { value: 1.0 },
+        uMoonlightColor: { value: new THREE.Color(0xaec8f4) },
         uTime: { value: 0 },
         uTimeOfDay: { value: 9.5 },
         uWeather: { value: 0 },
@@ -820,15 +940,74 @@ export class AtmosphereManager {
 
     this.scene.add(this.sunGroup);
 
-    // 3. Optical Moon System
+    // 3. Optical Moon System with Phase-Aware Lunar Surface Shader
     const moonDiscGeo = new THREE.SphereGeometry(22.0, 32, 32);
-    const moonDiscMat = new THREE.MeshBasicMaterial({
-      color: 0xe2e8f0,
-      fog: false,
+    const moonDiscShaderMat = new THREE.ShaderMaterial({
+      vertexShader: `
+        varying vec3 vNormal;
+        varying vec2 vUv;
+        varying vec3 vViewPosition;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          vUv = uv;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          vViewPosition = -mvPosition.xyz;
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform float uPhase; // 0.0 to 1.0 (0.5 = Full Moon)
+        uniform float uIllumination;
+        uniform float uOpacity;
+        uniform vec3 uMoonColor;
+        varying vec3 vNormal;
+        varying vec2 vUv;
+        varying vec3 vViewPosition;
+
+        void main() {
+          vec3 N = normalize(vNormal);
+          vec3 V = normalize(vViewPosition);
+
+          // Astronomical phase lighting: light direction vector rotating around Y based on phase
+          // At uPhase = 0.5 (Full Moon), angle = 0, lightDir is (0, 0, 1) directly facing the moon face
+          // At uPhase = 0.25 (First Quarter), angle = -PI/2, lightDir is (1, 0, 0)
+          // At uPhase = 0.75 (Third Quarter), angle = PI/2, lightDir is (-1, 0, 0)
+          float angle = (uPhase - 0.5) * 6.2831853;
+          vec3 lightDir = normalize(vec3(-sin(angle), 0.0, cos(angle)));
+
+          float NdotL = dot(N, lightDir);
+          float phaseTerminator = smoothstep(-0.06, 0.08, NdotL);
+
+          // Procedural lunar surface features: Maria (dark basalt volcanic plains) & crater ray texture
+          float maria = sin(vUv.x * 14.0 + cos(vUv.y * 11.0)) * 0.12
+                      + sin(vUv.x * 28.0) * sin(vUv.y * 24.0) * 0.08;
+          vec3 baseLunarSurface = mix(vec3(0.94, 0.96, 1.0), vec3(0.66, 0.70, 0.76), clamp(maria + 0.35, 0.0, 1.0));
+
+          // Retroreflective lunar limb brightening
+          float limb = 1.0 - max(dot(N, V), 0.0);
+          baseLunarSurface += vec3(0.18, 0.22, 0.28) * pow(limb, 3.2);
+
+          // Subtle earthshine on unlit portion so the full celestial sphere remains faintly discernible
+          float earthshine = 0.06;
+          float finalLight = mix(earthshine, 1.0, phaseTerminator);
+
+          vec3 col = baseLunarSurface * finalLight * uMoonColor;
+          float alpha = uOpacity * smoothstep(-0.2, 0.05, finalLight);
+
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+      uniforms: {
+        uPhase: { value: 0.5 },
+        uIllumination: { value: 1.0 },
+        uOpacity: { value: 0.95 },
+        uMoonColor: { value: new THREE.Color(0xdde8fc) },
+      },
       transparent: true,
-      opacity: 0.95,
+      fog: false,
+      depthWrite: false,
     });
-    this.moonDiscMesh = new THREE.Mesh(moonDiscGeo, moonDiscMat);
+    this.moonDiscMesh = new THREE.Mesh(moonDiscGeo, moonDiscShaderMat);
     this.moonGroup.add(this.moonDiscMesh);
 
     const moonGlowMat = new THREE.SpriteMaterial({
@@ -1203,10 +1382,14 @@ export class AtmosphereManager {
     time: number,
     weather: WeatherType,
     sunLight?: THREE.DirectionalLight,
-    hemiLight?: THREE.HemisphereLight
+    hemiLight?: THREE.HemisphereLight,
+    lunarPhase?: number
   ) {
     this.targetTimeOfDay = time;
     this.weather = weather;
+    if (lunarPhase !== undefined) {
+      this.lunarPhase = ((lunarPhase % 1.0) + 1.0) % 1.0;
+    }
     if (sunLight) this.cachedSunLight = sunLight;
     if (hemiLight) this.cachedHemiLight = hemiLight;
 
@@ -1219,7 +1402,34 @@ export class AtmosphereManager {
   }
 
   /**
-   * Evaluates continuous Hermite-eased diurnal keyframes and blends weather overrides smoothly.
+   * Directly sets the lunar phase (0.0=New Moon, 0.25=First Quarter, 0.5=Full Moon, 0.75=Third Quarter).
+   * Modulates the Moonlight shader effect and nocturnal ambient lighting.
+   */
+  public setLunarPhase(phase: number): void {
+    this.lunarPhase = ((phase % 1.0) + 1.0) % 1.0;
+    this.applyAtmosphereState(this.currentTimeOfDay, this.weather, this.cachedSunLight, this.cachedHemiLight);
+  }
+
+  public getLunarPhase(): number {
+    return this.lunarPhase;
+  }
+
+  public getLunarPhaseInfo(): LunarPhaseInfo {
+    return getLunarPhaseInfo(this.lunarPhase);
+  }
+
+  /**
+   * Advances through the 8 distinct lunar phases, refreshing atmospheric moonlight in real-time.
+   */
+  public cycleLunarPhase(): LunarPhaseInfo {
+    this.lunarPhase = (this.lunarPhase + 0.125) % 1.0;
+    this.applyAtmosphereState(this.currentTimeOfDay, this.weather, this.cachedSunLight, this.cachedHemiLight);
+    return getLunarPhaseInfo(this.lunarPhase);
+  }
+
+  /**
+   * Evaluates continuous Hermite-eased diurnal keyframes, blends weather overrides,
+   * and calculates the Moonlight shader effect with ambient brightness enhancements based on lunar phase.
    */
   private applyAtmosphereState(
     time: number,
@@ -1302,6 +1512,55 @@ export class AtmosphereManager {
       finalCloudOpacity = THREE.MathUtils.lerp(finalCloudOpacity, 0.88, rainW);
     }
 
+    // 3. Compute Night Factor, Lunar Illumination, and Moonlight Atmospheric Intensity
+    let nightFactor = 0.0;
+    if (time >= 21.0 || time <= 4.5) {
+      nightFactor = 1.0;
+    } else if (time > 18.5 && time < 21.0) {
+      nightFactor = (time - 18.5) / 2.5; // dusk to night transition
+    } else if (time > 4.5 && time < 6.0) {
+      nightFactor = 1.0 - (time - 4.5) / 1.5; // night to dawn transition
+    }
+
+    const weatherClearness = Math.max(0, 1.0 - sw * 0.95 - dustW * 0.92 - rainW * 0.65);
+    const moonElevation = Math.max(0, Math.min(1.0, (moonDir.y + 0.06) / 0.28));
+    const phaseInfo = getLunarPhaseInfo(this.lunarPhase);
+    const lunarIllum = phaseInfo.illumination;
+
+    // Moonlight Intensity factor:
+    // Base starlight ambient factor (0.16) ensures even a New Moon remains navigable with starry starlight
+    // On a Full Moon with clear skies, effectiveLunarFactor is 1.0, providing peak radiant moonlight
+    const effectiveLunarFactor = 0.16 + 0.84 * lunarIllum;
+    const moonlightIntensity = nightFactor * effectiveLunarFactor * weatherClearness * moonElevation;
+
+    // Increase Ambient Brightness during Clear Night Cycles based on Lunar Phase
+    if (nightFactor > 0.01 && weatherClearness > 0.05) {
+      // 1. Ambient Hemisphere Light boost:
+      // The sky hemisphere reflects the ambient moonlight scattered across the sky dome
+      const moonlightSkyBoost = new THREE.Color(0x6086b8).multiplyScalar(0.70 * moonlightIntensity);
+      finalHemiSky.add(moonlightSkyBoost);
+
+      // The desert ground bounce reflects silvery moonlight off white caliche sand, granite, and canyon rock
+      const moonlightGroundBoost = new THREE.Color(0x384860).multiplyScalar(0.60 * moonlightIntensity);
+      finalHemiGround.add(moonlightGroundBoost);
+
+      // 2. Directional Key Light (Silvery lunar beam casting visible shadows across the desert):
+      if (sunDir.y <= 0.02) {
+        const moonBeamColor = new THREE.Color(0x9cc4f8).lerp(new THREE.Color(0xdce8ff), lunarIllum * 0.5);
+        finalSunColor.copy(moonBeamColor);
+        // Dynamic intensity: up to 1.35 on a clear Full Moon, providing crisp visible moonlit shadows!
+        finalSunIntensity = THREE.MathUtils.lerp(0.35, 1.35, lunarIllum) * weatherClearness * moonElevation;
+      }
+
+      // 3. Distance Fog & Scenic Readability:
+      finalFogColor.add(new THREE.Color(0x18243c).multiplyScalar(0.50 * moonlightIntensity));
+      finalFogDensity *= (1.0 - 0.22 * moonlightIntensity);
+
+      // 4. Volumetric desert clouds catch silvery moonlight
+      finalCloudTop.add(new THREE.Color(0x405878).multiplyScalar(0.55 * moonlightIntensity));
+      finalCloudBase.add(new THREE.Color(0x203048).multiplyScalar(0.40 * moonlightIntensity));
+    }
+
     // Apply to Scene Fog
     if (this.scene.fog && 'color' in this.scene.fog) {
       this.scene.fog.color.copy(finalFogColor);
@@ -1324,6 +1583,11 @@ export class AtmosphereManager {
 
     // Update Sky Shader uniforms
     this.skyMaterial.uniforms.uSunPosition.value.copy(sunDir);
+    this.skyMaterial.uniforms.uMoonPosition.value.copy(moonDir);
+    this.skyMaterial.uniforms.uMoonlightIntensity.value = moonlightIntensity;
+    this.skyMaterial.uniforms.uLunarPhase.value = this.lunarPhase;
+    this.skyMaterial.uniforms.uLunarIllumination.value = lunarIllum;
+    this.skyMaterial.uniforms.uMoonlightColor.value.setHex(0xaec8f4);
     this.skyMaterial.uniforms.uTimeOfDay.value = time;
     this.skyMaterial.uniforms.uZenithColor.value.copy(finalZenith);
     this.skyMaterial.uniforms.uHorizonColor.value.copy(finalHorizon);
@@ -1344,8 +1608,20 @@ export class AtmosphereManager {
 
     const moonHorizonFade = Math.max(0, Math.min(1, (moonDir.y + 0.04) / 0.16));
     const effectiveMoonAlpha = state.moonAlpha * (1.0 - 0.85 * sw) * (1.0 - 0.75 * dustW) * moonHorizonFade;
-    (this.moonDiscMesh.material as THREE.MeshBasicMaterial).opacity = effectiveMoonAlpha * 0.95;
-    (this.moonGlowSprite.material as THREE.SpriteMaterial).opacity = 0.42 * effectiveMoonAlpha;
+
+    // Update lunar phase disc shader
+    if (this.moonDiscMesh.material && 'uniforms' in this.moonDiscMesh.material) {
+      const mat = this.moonDiscMesh.material as THREE.ShaderMaterial;
+      mat.uniforms.uPhase.value = this.lunarPhase;
+      mat.uniforms.uIllumination.value = lunarIllum;
+      mat.uniforms.uOpacity.value = effectiveMoonAlpha * 0.96;
+    }
+
+    // Dynamic lunar glow sprite scale and opacity based on lunar illumination
+    const glowScale = 125 * (0.65 + 0.55 * lunarIllum);
+    this.moonGlowSprite.scale.set(glowScale, glowScale, 1);
+    (this.moonGlowSprite.material as THREE.SpriteMaterial).opacity =
+      0.48 * effectiveMoonAlpha * (0.35 + 0.65 * lunarIllum);
     this.moonGroup.visible = effectiveMoonAlpha > 0.005;
 
     // Update 3D volumetric cloud puff colors and opacity
@@ -1465,9 +1741,11 @@ export class AtmosphereManager {
     // This aligns the optical solar disc, corona sprites, and sky shader flawlessly across the vast wilderness
     this.sunGroup.position.copy(playerPos).addScaledVector(sunDir, 2400);
     this.moonGroup.position.copy(playerPos).addScaledVector(moonDir, 2400);
+    this.moonGroup.lookAt(playerPos);
 
-    // Keep shader uniform aligned with true celestial vector
+    // Keep shader uniform aligned with true celestial vectors
     this.skyMaterial.uniforms.uSunPosition.value.copy(sunDir);
+    this.skyMaterial.uniforms.uMoonPosition.value.copy(moonDir);
 
     // Align directional shadow-casting luminary with celestial angle:
     // When the sun sets below the horizon (sunDir.y <= 0.02), seamlessly switch the directional light to

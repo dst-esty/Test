@@ -91,6 +91,50 @@ export const TownWantedOverlay: React.FC<TownWantedOverlayProps> = ({ onOpenJour
                 </span>
               )}
             </div>
+
+            {/* Dynamic Outlaw Heat & Cool-Off Status Bar */}
+            {record.wantedLevel > 0 && (
+              <div className="mt-1.5 pt-1 border-t border-amber-900/40">
+                <div className="flex items-center justify-between text-[10px] font-mono mb-0.5">
+                  <span className="flex items-center gap-1 font-semibold">
+                    {record.isSpottedByLaw ? (
+                      <span className="text-red-400">⚠️ In Law Sights</span>
+                    ) : record.isCoolingOff ? (
+                      <span className="text-sky-300">⏳ Cooling Off</span>
+                    ) : (
+                      <span className="text-amber-400/90">🔥 Active Heat</span>
+                    )}
+                  </span>
+                  <span className="text-stone-300 font-bold">
+                    {record.isCoolingOff
+                      ? `${Math.ceil(record.coolOffRemainingSec)}s`
+                      : record.isSpottedByLaw
+                      ? 'PAUSED'
+                      : '8s grace'}
+                  </span>
+                </div>
+
+                {/* Progress bar towards next lower tier */}
+                <div className="w-full h-1.5 bg-stone-950/80 rounded-full overflow-hidden border border-amber-900/50">
+                  <div
+                    className={`h-full transition-all duration-1000 ${
+                      record.isSpottedByLaw
+                        ? 'bg-red-500 animate-pulse'
+                        : record.isCoolingOff
+                        ? 'bg-gradient-to-r from-sky-500 to-emerald-400'
+                        : 'bg-amber-600'
+                    }`}
+                    style={{
+                      width: `${
+                        record.coolOffTotalSec > 0
+                          ? Math.max(0, Math.min(100, (1 - record.coolOffRemainingSec / record.coolOffTotalSec) * 100))
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -113,6 +157,23 @@ export const TownWantedOverlay: React.FC<TownWantedOverlayProps> = ({ onOpenJour
               >
                 ✕
               </button>
+            </div>
+
+            {/* Cool-Off Status Explanation Card */}
+            <div className="mb-2 p-2 rounded bg-stone-900/90 border border-amber-900/40 text-[10px]">
+              <div className="flex items-center justify-between font-bold text-amber-300 mb-1">
+                <span>⭐ Outlaw Heat Dissipation</span>
+                <span className={record.isCoolingOff ? 'text-sky-300' : 'text-amber-400'}>
+                  {record.isCoolingOff ? 'Trail Growing Cold' : 'Search Active'}
+                </span>
+              </div>
+              <p className="text-stone-300 text-[10px] leading-relaxed">
+                Stay out of trouble and keep distance from Tortilla Flat to let your wanted level cool down gradually.
+              </p>
+              <div className="mt-1 flex items-center justify-between text-[9px] text-stone-400 font-mono">
+                <span>⛰️ Wilderness: 1.5x Speed</span>
+                <span>🌙 Camp Rest: -1 Star</span>
+              </div>
             </div>
 
             <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
