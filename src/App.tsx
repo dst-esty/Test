@@ -44,6 +44,7 @@ import { isScatteredSkullClue } from './services/curseNarrativeEngine';
 import { armImmediateFullscreenOnFirstGesture, enterFullscreen } from './utils/fullscreen';
 import { recordCoronersLogEntry } from './services/coronersLogService';
 import { townWantedService } from './services/townWantedService';
+import { bountyService } from './services/bountyService';
 
 export default function App() {
   // Player State
@@ -1247,6 +1248,22 @@ export default function App() {
         prev.map((lm) => (lm.id === landmarkId ? { ...lm, discovered: true } : lm))
       );
 
+      setPlayerState((prev) => {
+        const nextSet = new Set(prev.discoveredLandmarks || []);
+        nextSet.add(landmarkId);
+        return {
+          ...prev,
+          discoveredLandmarks: Array.from(nextSet),
+        };
+      });
+
+      // Check if this landmark fulfills an active USGS survey bounty contract
+      const { completedBounty } = bountyService.onLandmarkDiscovered(landmarkId);
+      if (completedBounty) {
+        soundEngine.playOreChime?.();
+        showBanner(`📜 Bounty Objective Fulfilled: Mapped "${completedBounty.targetLandmarkName}"! Return to Tortilla Flat Mercantile to claim reward.`);
+      }
+
       const targetClue = clues.find((c) => c.id === clueId);
       const targetLm = landmarks.find((l) => l.id === landmarkId);
 
@@ -1392,6 +1409,11 @@ export default function App() {
       setLandmarks((prev) =>
         prev.map((lm) => (lm.id === nearbyLm.id ? { ...lm, discovered: true } : lm))
       );
+      const { completedBounty } = bountyService.onLandmarkDiscovered(nearbyLm.id);
+      if (completedBounty) {
+        soundEngine.playOreChime?.();
+        showBanner(`📜 Bounty Objective Fulfilled: Mapped "${completedBounty.targetLandmarkName}"! Return to Tortilla Flat Mercantile to claim reward.`);
+      }
     }
 
     setIsMapOpen(false);

@@ -25,11 +25,14 @@ import {
   Sun,
   Key,
   ShieldCheck,
+  Scroll,
 } from 'lucide-react';
 import { PlayerState, Vector3D, TerritoryClaim, TortillaFlatTab } from '../types';
 import { soundEngine } from '../audio/soundEffects';
 import { DialogueNPCInfo } from './TownfolkDialogueOverlay';
 import { territoryClaims } from '../services/territoryClaimService';
+import { DailyBountyBoard } from './DailyBountyBoard';
+import { bountyService } from '../services/bountyService';
 
 interface TortillaFlatModalProps {
   isOpen: boolean;
@@ -77,6 +80,14 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
   const planks = playerState.woodPlanks || 0;
   const dynamite = playerState.dynamite;
   const ammo = playerState.ammo;
+  const storedRations = playerState.provisionsRations || 0;
+
+  const contracts = bountyService.getContracts();
+  const readyBountiesCount = contracts.filter((c) => {
+    if (c.status === 'claimed' || c.status === 'available') return false;
+    return bountyService.canClaim(c.id, playerState).eligible;
+  }).length;
+  const activeBountiesCount = contracts.filter((c) => c.status === 'active' || c.status === 'completed').length;
 
   // Assayer Exchange Handler ($20.67 per Troy Ounce 1880s Gold Standard)
   const handleCashInGold = (amount: number) => {
@@ -187,6 +198,26 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
             Mercantile Provisions
           </button>
           <button
+            onClick={() => setActiveTab('bounties')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-serif rounded-t-xl transition-all ${
+              activeTab === 'bounties'
+                ? 'bg-amber-900/50 text-amber-100 border-t-2 border-x border-amber-600 font-bold'
+                : 'text-stone-400 hover:text-stone-200 hover:bg-stone-800/40'
+            }`}
+          >
+            <Scroll className="w-4 h-4 text-amber-400" />
+            <span>Daily Bounty Board</span>
+            {readyBountiesCount > 0 ? (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/40 animate-pulse">
+                CLAIM ({readyBountiesCount})
+              </span>
+            ) : activeBountiesCount > 0 ? (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/40">
+                {activeBountiesCount}
+              </span>
+            ) : null}
+          </button>
+          <button
             onClick={() => setActiveTab('assayer')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-serif rounded-t-xl transition-all ${
               activeTab === 'assayer'
@@ -257,7 +288,64 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
                 Welcome to the Tortilla Flat Trading Post! Stock up on expedition trail rations, dynamite for hard rock blasting, timber planks for shoring deep trenches, and rifle ammunition before heading deeper into the Superstition Mountains.
               </div>
 
+              {/* Daily Bounty Board Callout Banner */}
+              <div className="p-4 bg-gradient-to-r from-amber-950/60 via-stone-900 to-amber-950/60 border border-amber-600/70 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 bg-amber-900/80 border border-amber-500/60 rounded-xl text-amber-300 shadow">
+                    <Scroll className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold font-serif text-amber-100">Mercantile Daily Bounty Board</span>
+                      <span className="px-2 py-0.5 text-[9px] font-mono uppercase bg-amber-700/60 text-amber-200 border border-amber-500/50 rounded-full">
+                        Provisions & Exploration Quests
+                      </span>
+                    </div>
+                    <div className="text-xs text-amber-300/80 font-serif mt-0.5">
+                      Accept daily supply contracts, map Superstition landmarks, or deliver rations to earn cash and mining supplies.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setActiveTab('bounties')}
+                  className="px-4 py-2 bg-amber-700 hover:bg-amber-600 text-stone-950 font-serif font-bold text-xs rounded-xl border border-amber-500/50 transition-all shadow shrink-0 flex items-center gap-1.5"
+                >
+                  <span>Inspect Bounty Board</span>
+                  {readyBountiesCount > 0 ? (
+                    <span className="px-1.5 py-0.2 bg-emerald-400 text-stone-950 rounded text-[10px] font-mono font-bold">
+                      {readyBountiesCount} READY
+                    </span>
+                  ) : (
+                    <span>→</span>
+                  )}
+                </button>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Item: Preserved Trail Rations (Stored for Trail / Bounty Delivery) */}
+                <div className="p-4 bg-stone-950/70 border border-stone-800 rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-amber-950 border border-amber-700/50 rounded-lg text-amber-400">
+                      <Package className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="font-bold font-serif text-stone-100">Preserved Trail Rations (Pack)</div>
+                      <div className="text-xs text-stone-400">
+                        Cured jerky & hardtack for trail treks or bounty contracts (Stock: {storedRations})
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() =>
+                      handleBuy('Trail Rations Pack', 1.5, (p) => ({
+                        provisionsRations: (p.provisionsRations || 0) + 1,
+                      }))
+                    }
+                    className="px-3 py-1.5 bg-amber-900/70 hover:bg-amber-800 text-amber-100 font-mono text-xs rounded-lg border border-amber-600/50 transition-colors shadow"
+                  >
+                    $1.50 (+1 Ration)
+                  </button>
+                </div>
                 {/* Item: Spring Water Canteen Refill */}
                 <div className="p-4 bg-stone-950/70 border border-stone-800 rounded-xl flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -412,6 +500,16 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
                 </div>
               </div>
             </div>
+          )}
+
+          {/* TAB: DAILY BOUNTY BOARD */}
+          {activeTab === 'bounties' && (
+            <DailyBountyBoard
+              playerState={playerState}
+              onUpdatePlayerState={onUpdatePlayerState}
+              onShowBanner={onShowBanner}
+              onSwitchToMercantile={() => setActiveTab('mercantile')}
+            />
           )}
 
           {/* TAB 2: GOLD ASSAYER COUNTER */}

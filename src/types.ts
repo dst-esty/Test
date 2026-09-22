@@ -391,6 +391,8 @@ export interface GameOverDetails {
   title: string;
   subtitle: string;
   cause: string;
+  causeOfDeath?: string;
+  epitaph?: string;
   depth?: number;
   strata?: string;
   goldFound: number;
@@ -488,5 +490,5 @@ export interface MultiplayerState {
   } | null;
 }
 
-export type TortillaFlatTab = 'mercantile' | 'assayer' | 'saloon' | 'hotel' | 'stagecoach' | 'livery';
+export type TortillaFlatTab = 'mercantile' | 'bounties' | 'assayer' | 'saloon' | 'hotel' | 'stagecoach' | 'livery';
 

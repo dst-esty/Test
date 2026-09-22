@@ -61,6 +61,7 @@ import { RapierPhysicsManager } from '../physics/rapierEngine';
 import { MountainDustParticleSystem } from '../world/mountainDustParticles';
 import { friendshipService } from '../services/friendshipService';
 import { safeLocalStorage } from '../utils/storage';
+import { bountyService } from '../services/bountyService';
 import { MountManager } from '../world/mountManager';
 import { TownfolkManager } from '../world/townfolk';
 import { isTortillaFlatTownLimits } from '../world/townBoundaries';
@@ -423,8 +424,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       else if (posZ > 120) locName = 'Black Cross Butte Rim';
 
       setCoronerPanOverlay({
-        cause: details.causeOfDeath || 'Perished in the Superstition Mountains',
-        details: details.epitaph || 'Found lifeless under the scorching desert sun.',
+        cause: details.causeOfDeath || details.cause || 'Perished in the Superstition Mountains',
+        details: details.epitaph || details.subtitle || 'Found lifeless under the scorching desert sun.',
         locationDesc: locName,
         x: posX,
         y: posY,
@@ -432,7 +433,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       });
 
       try {
-        soundEffects.playHeartbeat?.();
+        soundEngine.playHeartbeat?.();
       } catch (e) {}
     },
     []
@@ -1477,9 +1478,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           if (dist < 50) {
             const vol = Math.max(0.1, 1.0 - dist / 50);
             if (data.action === 'shoot' || data.action === 'rifle') {
-              try { soundEffects.playGunshot?.(vol); } catch (e) {}
+              try { soundEngine.playGunshot?.(vol); } catch (e) {}
             } else if (data.action === 'dig' || data.action === 'pickaxe' || data.action === 'swing') {
-              try { soundEffects.playPickaxeSwing?.(vol); } catch (e) {}
+              try { soundEngine.playPickaxeSwing?.(vol); } catch (e) {}
             }
           }
         }
@@ -2084,12 +2085,14 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           cashDollars: (prev.cashDollars || 0) + cashEarned,
         }));
         recordExcavationYield(goldVal, result.rocksAwarded);
+        bountyService.onBlockExcavated(result.rocksAwarded || 1);
 
         if (cashEarned > 0) {
           bannerText += ` ➔ 🪙 Auto-Redeemed +$${cashEarned.toFixed(2)} ($20.67/oz)!`;
         }
       } else {
         soundEngine.playVoxelDig();
+        bountyService.onBlockExcavated(result.rocksAwarded || 1);
         setPlayerState((prev) => ({
           ...prev,
           blocksDug: (prev.blocksDug || 0) + result.rocksAwarded,
@@ -4756,6 +4759,18 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       const distToSaloonDoor = Math.hypot(px - (-10.0), pz - (-244.0));
       const distToHotelDoor = Math.hypot(px - (-10.0), pz - (-248.0));
       const distToMercantileDoor = Math.hypot(px - (-10.0), pz - (-261.5));
+      const distToBountyBoard = Math.hypot(px - (-10.0), pz - (-262.85));
+
+      // Direct Bounty Board on Mercantile Porch Wall
+      if (distToBountyBoard < 3.8 && onOpenTortillaFlat) {
+        const label = '📜 Inspect Mercantile Daily Bounty Board [E]';
+        if (executeAction) {
+          onOpenTortillaFlat('bounties');
+        } else {
+          onPromptInteract(label, () => onOpenTortillaFlat('bounties'));
+        }
+        return;
+      }
 
       // Direct Hotel Stairs & Boarding Entrance
       if (distToHotelDoor < 5.5 && onOpenTortillaFlat) {
@@ -4775,7 +4790,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           if (executeAction) {
             onOpenTortillaFlat('mercantile');
           } else {
-            onPromptInteract('Enter Tortilla Flat Mercantile & Assayer [E]', () => onOpenTortillaFlat('mercantile'));
+            onPromptInteract('Enter Tortilla Flat Mercantile & Daily Bounty Board [E]', () => onOpenTortillaFlat('mercantile'));
           }
         } else {
           const label = isNight

@@ -1259,6 +1259,57 @@ export function buildTortillaFlatSettlement(scene: THREE.Scene, waterRefillPoint
   goldPan.rotation.x = 0.2;
   storeGroup.add(goldPan);
 
+  // -------------------------------------------------------------
+  // Mercantile Daily Bounty & Notice Board (Mounted on exterior wall beside door)
+  // Weathered wooden backboard, brass title plate, pinned notice papers with brass tacks
+  // -------------------------------------------------------------
+  const bountyBoardGroup = new THREE.Group();
+  bountyBoardGroup.position.set(4.78, 1.6, -1.35);
+
+  // Heavy pine frame backboard
+  const boardBacking = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.4, 1.1), woodTrimWalnut);
+  boardBacking.castShadow = true;
+  bountyBoardGroup.add(boardBacking);
+
+  // Cork/softwood pinboard interior face
+  const corkMat = new THREE.MeshStandardMaterial({ color: 0x9a7b56, roughness: 0.95 });
+  const pinboard = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.25, 0.95), corkMat);
+  pinboard.position.set(0.03, 0, 0);
+  bountyBoardGroup.add(pinboard);
+
+  // Header Brass Signplate: "DAILY BOUNTIES"
+  const headerPlateMat = new THREE.MeshStandardMaterial({ color: 0xbfa15f, roughness: 0.4, metalness: 0.6 });
+  const headerPlate = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.9), headerPlateMat);
+  headerPlate.position.set(0.04, 0.54, 0);
+  bountyBoardGroup.add(headerPlate);
+
+  // Pinned Parchment Notice Sheets
+  const paperMat1 = new THREE.MeshStandardMaterial({ color: 0xe8dfcb, roughness: 0.9 });
+  const paperMat2 = new THREE.MeshStandardMaterial({ color: 0xded1b8, roughness: 0.9 });
+  const paperMat3 = new THREE.MeshStandardMaterial({ color: 0xf0e9d6, roughness: 0.9 });
+  const brassPinMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.3, metalness: 0.8 });
+
+  const noticePositions = [
+    { y: 0.22, z: -0.22, rot: 0.04, mat: paperMat1, scaleZ: 0.38, scaleY: 0.36 },
+    { y: 0.20, z: 0.22, rot: -0.05, mat: paperMat2, scaleZ: 0.40, scaleY: 0.38 },
+    { y: -0.24, z: -0.20, rot: -0.03, mat: paperMat3, scaleZ: 0.36, scaleY: 0.35 },
+    { y: -0.22, z: 0.23, rot: 0.06, mat: paperMat1, scaleZ: 0.42, scaleY: 0.37 },
+  ];
+
+  noticePositions.forEach((np) => {
+    const paper = new THREE.Mesh(new THREE.BoxGeometry(0.02, np.scaleY, np.scaleZ), np.mat);
+    paper.position.set(0.065, np.y, np.z);
+    paper.rotation.x = np.rot;
+    bountyBoardGroup.add(paper);
+
+    // Brass tack at top center of paper
+    const tack = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), brassPinMat);
+    tack.position.set(0.078, np.y + np.scaleY * 0.42, np.z);
+    bountyBoardGroup.add(tack);
+  });
+
+  storeGroup.add(bountyBoardGroup);
+
   townGroup.add(storeGroup);
 
   // -------------------------------------------------------------

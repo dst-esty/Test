@@ -1640,6 +1640,42 @@ class SoundEngine {
     });
   }
 
+  public playPaperRustle() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    try {
+      const t = this.ctx.currentTime;
+      const bufferSize = Math.floor(this.ctx.sampleRate * 0.15);
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.4));
+      }
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(1400, t);
+      filter.Q.setValueAtTime(2.5, t);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.2, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      noise.start(t);
+    } catch {
+      // AudioContext fallback
+    }
+  }
+
   /**
    * Unique, haunting whispering sound effect played when uncovering scattered skull clues
    * in the Superstition wilderness (Dr. Adolph Ruth's severed skull, James Cravey's ridge skull,
@@ -1851,6 +1887,38 @@ class SoundEngine {
 
     osc.start(t);
     osc.stop(t + 0.06);
+  }
+
+  public playHeartbeat(volume: number = 0.5) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    try {
+      const t = this.ctx.currentTime;
+      [0, 0.14].forEach((offset, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(idx === 0 ? 55 : 48, t + offset);
+        osc.frequency.exponentialRampToValueAtTime(30, t + offset + 0.15);
+        gain.gain.setValueAtTime(volume * 0.4, t + offset);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + offset + 0.18);
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(t + offset);
+        osc.stop(t + offset + 0.2);
+      });
+    } catch {
+      // AudioContext fallback
+    }
+  }
+
+  public playGunshot(volume: number = 1) {
+    this.playRifleShot();
+  }
+
+  public playPickaxeSwing(volume: number = 1) {
+    this.playPickaxe();
   }
 
   public playRifleShot() {
