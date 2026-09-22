@@ -22,6 +22,7 @@ export interface ProspectorAnimationParams {
   pitch?: number;
   carriedRock?: boolean;
   isDead?: boolean;
+  isHunkered?: boolean;
 }
 
 /**
@@ -59,6 +60,7 @@ export class ProspectorRig {
   public lanternMesh: THREE.Group;
   public dynamiteMesh: THREE.Group;
   public compassMesh: THREE.Group;
+  public panMesh: THREE.Group;
   public rockMesh: THREE.Mesh;
   public activeToolName: string = 'hands';
 
@@ -950,6 +952,23 @@ export class ProspectorRig {
     this.rockMesh.visible = false;
     this.bodyGroup.add(this.rockMesh);
 
+    // 9. Steel Gold Pan
+    this.panMesh = new THREE.Group();
+    const panMat = new THREE.MeshStandardMaterial({
+      color: 0x333333,
+      roughness: 0.65,
+      metalness: 0.7,
+    });
+    const panBase = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.12, 0.03, 14), panMat);
+    this.panMesh.add(panBase);
+    const panRim = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.04, 14), panMat);
+    panRim.position.y = 0.02;
+    this.panMesh.add(panRim);
+    this.panMesh.rotation.x = -Math.PI / 4;
+    this.panMesh.position.set(0, 0, 0.15);
+    this.panMesh.visible = false;
+    this.toolsGroup.add(this.panMesh);
+
     // Apply high-fidelity dynamic shadows to all character body parts, garments & tools
     enableShadows(this.root);
   }
@@ -974,6 +993,7 @@ export class ProspectorRig {
     this.lanternMesh.visible = toolName === 'lantern' && !isCarryingRock;
     this.dynamiteMesh.visible = toolName === 'dynamite' && !isCarryingRock;
     this.compassMesh.visible = (toolName === 'compass' || toolName === 'binoculars') && !isCarryingRock;
+    this.panMesh.visible = (toolName === 'pan' || toolName === 'gold_pan') && !isCarryingRock;
     this.rockMesh.visible = isCarryingRock;
   }
 
@@ -1068,6 +1088,23 @@ export class ProspectorRig {
 
       if (!isAiming && !isSwinging) {
         this.rightArmGroup.rotation.set(-0.6, 0, -0.25);
+        this.rightForearmGroup.rotation.set(-0.8, 0, 0);
+      }
+      return;
+    }
+
+    // --- 1b. HUNKERED / CROUCHED SURVIVAL COVER POSE ---
+    if (params.isHunkered && !isRiding) {
+      this.bodyGroup.position.y = 0.44;
+      this.bodyGroup.rotation.set(0.32, 0, 0);
+      this.leftLegGroup.rotation.set(-1.15, 0, 0.22);
+      this.leftShinGroup.rotation.set(1.4, 0, 0);
+      this.rightLegGroup.rotation.set(-1.15, 0, -0.22);
+      this.rightShinGroup.rotation.set(1.4, 0, 0);
+      if (!isAiming && !isSwinging && !carriedRock) {
+        this.leftArmGroup.rotation.set(-0.5, 0, 0.2);
+        this.leftForearmGroup.rotation.set(-0.8, 0, 0);
+        this.rightArmGroup.rotation.set(-0.5, 0, -0.2);
         this.rightForearmGroup.rotation.set(-0.8, 0, 0);
       }
       return;

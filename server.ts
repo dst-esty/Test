@@ -21,6 +21,11 @@ interface RemotePlayer {
   health: number;
   ping: number;
   lastUpdate: number;
+  isRiding?: boolean;
+  isAiming?: boolean;
+  carriedRock?: boolean;
+  isHunkered?: boolean;
+  currentActivity?: string;
 }
 
 interface SharedHole {
@@ -516,7 +521,7 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
       name: randomName,
       outfitColor: randomPreset.hex,
       x: 0 + (Math.random() - 0.5) * 6,
-      y: 7.2,
+      y: 9.2,
       z: -246 + (Math.random() - 0.5) * 6,
       yaw: 0,
       pitch: 0,
@@ -527,6 +532,11 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
       health: 100,
       ping: 0,
       lastUpdate: Date.now(),
+      isRiding: false,
+      isAiming: false,
+      carriedRock: false,
+      isHunkered: false,
+      currentActivity: 'idle',
     };
 
     players.set(playerId, newPlayer);
@@ -593,6 +603,11 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
             p.rocksGathered = typeof msg.rocksGathered === 'number' ? msg.rocksGathered : p.rocksGathered;
             p.health = typeof msg.health === 'number' ? msg.health : p.health;
             p.ping = typeof msg.ping === 'number' ? msg.ping : p.ping;
+            if (typeof msg.isRiding === 'boolean') p.isRiding = msg.isRiding;
+            if (typeof msg.isAiming === 'boolean') p.isAiming = msg.isAiming;
+            if (typeof msg.carriedRock === 'boolean') p.carriedRock = msg.carriedRock;
+            if (typeof msg.isHunkered === 'boolean') p.isHunkered = msg.isHunkered;
+            if (typeof msg.currentActivity === 'string') p.currentActivity = msg.currentActivity;
             p.lastUpdate = Date.now();
 
             // Broadcast movement/state to others
@@ -609,6 +624,11 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
               goldFound: p.goldFound,
               rocksGathered: p.rocksGathered,
               health: p.health,
+              isRiding: p.isRiding,
+              isAiming: p.isAiming,
+              carriedRock: p.carriedRock,
+              isHunkered: p.isHunkered,
+              currentActivity: p.currentActivity,
             }, playerId);
             break;
           }
@@ -630,13 +650,15 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
           }
 
           case 'player:action': {
-            // e.g. swinging pickaxe, digging dirt, firing flare
+            // e.g. swinging pickaxe, firing rifle, panning gold, digging dirt
             broadcast({
               type: 'player:action',
               id: playerId,
               action: msg.action,
               tool: msg.tool,
               target: msg.target,
+              activity: msg.activity,
+              origin: msg.origin,
             }, playerId);
             break;
           }

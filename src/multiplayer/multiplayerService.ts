@@ -18,10 +18,22 @@ export type MultiplayerEventHandler = {
     goldFound: number;
     rocksGathered: number;
     health: number;
+    isRiding?: boolean;
+    isAiming?: boolean;
+    carriedRock?: boolean;
+    isHunkered?: boolean;
+    currentActivity?: string;
   }) => void;
   onPlayerProfileUpdated?: (player: MultiplayerPlayer) => void;
   onPlayerLeft?: (id: string, name: string) => void;
-  onPlayerAction?: (data: { id: string; action: string; tool: string; target?: any }) => void;
+  onPlayerAction?: (data: {
+    id: string;
+    action: string;
+    tool: string;
+    target?: any;
+    activity?: string;
+    origin?: any;
+  }) => void;
   onTerrainDug?: (data: { hole: any; dugByPlayerId: string; tool?: string }) => void;
   onTerrainShored?: (data: { holeId: string; stability?: number; shoredUntilDepth?: number; shoredBy?: string }) => void;
   onTerrainBlasted?: (data: { x: number; y: number; z: number; radius: number; blastedBy?: string }) => void;
@@ -35,6 +47,7 @@ class MultiplayerService {
   private ws: WebSocket | null = null;
   private selfId: string | null = null;
   private handlers: MultiplayerEventHandler = {};
+  private handlerSets = new Set<MultiplayerEventHandler>();
   private reconnectTimeout: any = null;
   private pingInterval: any = null;
   private isConnecting = false;
@@ -80,6 +93,10 @@ class MultiplayerService {
     return this.state;
   }
 
+  public getPlayers(): MultiplayerPlayer[] {
+    return Object.values(this.state.players).filter((p) => p.id !== this.selfId);
+  }
+
   public getSelfName(): string {
     return safeLocalStorage.getItem('prospector_name') || 'Canyon Jack';
   }
@@ -107,8 +124,48 @@ class MultiplayerService {
     { name: 'Charcoal Prospector', hex: '#3c3b3f' },
   ];
 
+  public addEventHandler(handlers: MultiplayerEventHandler): () => void {
+    this.handlerSets.add(handlers);
+
+    // If players are already synced from server init, immediately deliver to caller
+    const currentOthers = this.getPlayers();
+    if (currentOthers.length > 0 && handlers.onPlayersSync) {
+      try {
+        handlers.onPlayersSync(currentOthers);
+      } catch (err) {
+        console.error('[Multiplayer] Error in initial onPlayersSync:', err);
+      }
+    }
+
+    return () => {
+      this.handlerSets.delete(handlers);
+    };
+  }
+
   public setHandlers(handlers: MultiplayerEventHandler) {
-    this.handlers = handlers;
+    this.handlers = { ...this.handlers, ...handlers };
+    this.addEventHandler(handlers);
+  }
+
+  private dispatch<K extends keyof MultiplayerEventHandler>(
+    event: K,
+    ...args: Parameters<NonNullable<MultiplayerEventHandler[K]>>
+  ) {
+    const invokedFunctions = new Set<Function>();
+    const trigger = (target: MultiplayerEventHandler) => {
+      const fn = target[event] as any;
+      if (typeof fn === 'function' && !invokedFunctions.has(fn)) {
+        invokedFunctions.add(fn);
+        try {
+          fn(...args);
+        } catch (err) {
+          console.error(`[Multiplayer] Error in handler for ${String(event)}:`, err);
+        }
+      }
+    };
+
+    trigger(this.handlers);
+    this.handlerSets.forEach(trigger);
   }
 
   public getSelfId(): string | null {
@@ -209,20 +266,18 @@ class MultiplayerService {
           this.state.chatMessages = [...msg.recentChat];
         }
         this.notify();
-        if (this.handlers.onConnected) {
-          this.handlers.onConnected(msg.selfId, msg.selfData);
+        this.dispatch('onConnected', msg.selfId, msg.selfData);
+        if (msg.players) {
+          this.dispatch('onPlayersSync', msg.players);
         }
-        if (this.handlers.onPlayersSync && msg.players) {
-          this.handlers.onPlayersSync(msg.players);
-        }
-        if (msg.recentChat && this.handlers.onChatMessage) {
+        if (msg.recentChat) {
           for (const c of msg.recentChat) {
-            this.handlers.onChatMessage(c);
+            this.dispatch('onChatMessage', c);
           }
         }
-        if (msg.holes && this.handlers.onTerrainDug) {
+        if (msg.holes) {
           for (const h of msg.holes) {
-            this.handlers.onTerrainDug({ hole: h, dugByPlayerId: 'server_init' });
+            this.dispatch('onTerrainDug', { hole: h, dugByPlayerId: 'server_init' });
           }
         }
         if (msg.universalWeather) {
@@ -231,8 +286,8 @@ class MultiplayerService {
         if (typeof msg.universalTimeOfDay === 'number') {
           this.state.universalTimeOfDay = msg.universalTimeOfDay;
         }
-        if (this.handlers.onWeatherSync && msg.universalWeather) {
-          this.handlers.onWeatherSync({
+        if (msg.universalWeather) {
+          this.dispatch('onWeatherSync', {
             weather: msg.universalWeather,
             timeOfDay: typeof msg.universalTimeOfDay === 'number' ? msg.universalTimeOfDay : 9.5,
           });
@@ -245,9 +300,7 @@ class MultiplayerService {
         this.currentPing = roundTrip;
         this.state.ping = roundTrip;
         this.notify();
-        if (this.handlers.onPingUpdated) {
-          this.handlers.onPingUpdated(roundTrip);
-        }
+        this.dispatch('onPingUpdated', roundTrip);
         break;
       }
 
@@ -256,9 +309,7 @@ class MultiplayerService {
           this.state.players[msg.player.id] = msg.player;
           this.notify();
         }
-        if (this.handlers.onPlayerJoined) {
-          this.handlers.onPlayerJoined(msg.player);
-        }
+        this.dispatch('onPlayerJoined', msg.player);
         break;
       }
 
@@ -275,11 +326,14 @@ class MultiplayerService {
             goldFound: msg.goldFound,
             rocksGathered: msg.rocksGathered,
             health: msg.health,
+            isRiding: msg.isRiding,
+            isAiming: msg.isAiming,
+            carriedRock: msg.carriedRock,
+            isHunkered: msg.isHunkered,
+            currentActivity: msg.currentActivity,
           });
         }
-        if (this.handlers.onPlayerMoved) {
-          this.handlers.onPlayerMoved(msg);
-        }
+        this.dispatch('onPlayerMoved', msg);
         break;
       }
 
@@ -288,44 +342,32 @@ class MultiplayerService {
           Object.assign(this.state.players[msg.player.id], msg.player);
           this.notify();
         }
-        if (this.handlers.onPlayerProfileUpdated) {
-          this.handlers.onPlayerProfileUpdated(msg.player);
-        }
+        this.dispatch('onPlayerProfileUpdated', msg.player);
         break;
       }
 
       case 'player:action': {
-        if (this.handlers.onPlayerAction) {
-          this.handlers.onPlayerAction(msg);
-        }
+        this.dispatch('onPlayerAction', msg);
         break;
       }
 
       case 'terrain:dug': {
-        if (this.handlers.onTerrainDug) {
-          this.handlers.onTerrainDug(msg);
-        }
+        this.dispatch('onTerrainDug', msg);
         break;
       }
 
       case 'terrain:shored': {
-        if (this.handlers.onTerrainShored) {
-          this.handlers.onTerrainShored(msg);
-        }
+        this.dispatch('onTerrainShored', msg);
         break;
       }
 
       case 'terrain:blasted': {
-        if (this.handlers.onTerrainBlasted) {
-          this.handlers.onTerrainBlasted(msg);
-        }
+        this.dispatch('onTerrainBlasted', msg);
         break;
       }
 
       case 'mine:built': {
-        if (this.handlers.onMineBuilt) {
-          this.handlers.onMineBuilt(msg.mine);
-        }
+        this.dispatch('onMineBuilt', msg.mine);
         break;
       }
 
@@ -334,9 +376,7 @@ class MultiplayerService {
           this.state.chatMessages.push(msg.message);
           if (this.state.chatMessages.length > 50) this.state.chatMessages.shift();
           this.notify();
-        }
-        if (this.handlers.onChatMessage) {
-          this.handlers.onChatMessage(msg.message);
+          this.dispatch('onChatMessage', msg.message);
         }
         break;
       }
@@ -349,22 +389,18 @@ class MultiplayerService {
           this.state.universalTimeOfDay = msg.timeOfDay;
         }
         this.notify();
-        if (this.handlers.onWeatherSync) {
-          this.handlers.onWeatherSync({
-            weather: msg.weather,
-            timeOfDay: msg.timeOfDay,
-            label: msg.label,
-          });
-        }
+        this.dispatch('onWeatherSync', {
+          weather: msg.weather,
+          timeOfDay: msg.timeOfDay,
+          label: msg.label,
+        });
         break;
       }
 
       case 'player:left': {
         delete this.state.players[msg.id];
         this.notify();
-        if (this.handlers.onPlayerLeft) {
-          this.handlers.onPlayerLeft(msg.id, msg.name);
-        }
+        this.dispatch('onPlayerLeft', msg.id, msg.name);
         break;
       }
     }
@@ -402,6 +438,11 @@ class MultiplayerService {
     goldFound: number;
     rocksGathered: number;
     health: number;
+    isRiding?: boolean;
+    isAiming?: boolean;
+    carriedRock?: boolean;
+    isHunkered?: boolean;
+    currentActivity?: string;
   }) {
     this.pendingUpdate = data;
     if (!this.throttledUpdateTimer) {
@@ -418,12 +459,17 @@ class MultiplayerService {
     }
   }
 
-  public broadcastAction(action: string, tool: string, target?: any) {
+  public broadcastAction(action: string, tool: string, extra?: { target?: any; activity?: string; origin?: any; x?: number; y?: number; z?: number }) {
     this.sendRaw({
       type: 'player:action',
       action,
       tool,
-      target,
+      target: extra?.target,
+      activity: extra?.activity,
+      origin: extra?.origin,
+      x: extra?.x,
+      y: extra?.y,
+      z: extra?.z,
     });
   }
 

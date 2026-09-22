@@ -168,7 +168,7 @@ export default function App() {
       }
     };
 
-    multiplayer.setHandlers({
+    const unsubWeather = multiplayer.addEventHandler({
       onWeatherSync: (data) => {
         if (data.weather) {
           setWeather(data.weather);
@@ -181,6 +181,7 @@ export default function App() {
 
     multiplayer.subscribe(handleUpdate);
     return () => {
+      unsubWeather();
       multiplayer.unsubscribe(handleUpdate);
       multiplayer.disconnect();
     };

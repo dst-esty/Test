@@ -446,6 +446,11 @@ export interface MultiplayerPlayer {
   ping: number;
   lastUpdate: number;
   distanceToLocal?: number;
+  isRiding?: boolean;
+  isAiming?: boolean;
+  carriedRock?: boolean;
+  isHunkered?: boolean;
+  currentActivity?: string;
 }
 
 export interface MultiplayerChatMessage {

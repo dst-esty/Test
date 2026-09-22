@@ -1303,11 +1303,13 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     starsRef.current = stars;
 
     // 8b. Real-Time Multiplayer Event Bridge & Remote Prospectors
-    multiplayer.setHandlers({
+    const unsubMultiplayer = multiplayer.addEventHandler({
       onPlayerJoined: (player) => {
         if (player.id === multiplayer.getSelfId()) return;
         if (!remoteProspectorsRef.current.has(player.id)) {
           const rp = new RemoteProspector(player);
+          const pStatus = friendshipService.getPardnerStatus(player.id, player.name);
+          rp.setPardnerStatus(pStatus.status === 'pardner');
           scene.add(rp.group);
           remoteProspectorsRef.current.set(player.id, rp);
         }
@@ -1350,6 +1352,11 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             health: data.health,
             ping: 0,
             lastUpdate: Date.now(),
+            isRiding: data.isRiding,
+            isAiming: data.isAiming,
+            carriedRock: data.carriedRock,
+            isHunkered: data.isHunkered,
+            currentActivity: data.currentActivity,
           });
           const pStatus = friendshipService.getPardnerStatus(data.id);
           rp.setPardnerStatus(pStatus.status === 'pardner');
@@ -1422,6 +1429,20 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           );
         }
       },
+    });
+
+    // Immediate bootstrap: instantiate any remote players that are already connected
+    const existingRemotePlayers = multiplayer.getPlayers();
+    const currentSelfId = multiplayer.getSelfId();
+    existingRemotePlayers.forEach((p) => {
+      if (p.id === currentSelfId) return;
+      if (!remoteProspectorsRef.current.has(p.id)) {
+        const rp = new RemoteProspector(p);
+        const pStatus = friendshipService.getPardnerStatus(p.id, p.name);
+        rp.setPardnerStatus(pStatus.status === 'pardner');
+        scene.add(rp.group);
+        remoteProspectorsRef.current.set(p.id, rp);
+      }
     });
 
     const unsubFriendships = friendshipService.subscribe(() => {
@@ -3341,12 +3362,16 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       soundEngine.startAmbiance();
       toolSwingProgress.current = 1.0; // Trigger physical 3D tool swing animation
 
+      const tool = playerStateRef.current.equippedTool;
+      multiplayer.broadcastAction(
+        tool === 'rifle' ? 'shoot' : (tool === 'dynamite' ? 'dynamite' : 'swing'),
+        tool
+      );
+
       if (playerStateRef.current.carriedObject) {
         executeThrowRock();
         return;
       }
-
-      const tool = playerStateRef.current.equippedTool;
       if (tool === 'hands') {
         executePickUpRock();
         return;
@@ -7184,17 +7209,39 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       // Transmit local position & action to multiplayer server (Throttled to 10Hz network tick)
       if (nowMs - lastMultiplayerSyncTime.current > 100) {
         lastMultiplayerSyncTime.current = nowMs;
+        const isRidingNow = Boolean(playerStateRef.current.isRidingMount && playerStateRef.current.ownedMount);
+        let liveActivity = 'idle';
+        if (isRidingNow) {
+          liveActivity = isMoving ? (isSprinting ? 'galloping' : 'trotting') : 'mounted';
+        } else if (isHunkeredDownRef.current) {
+          liveActivity = 'hunkered';
+        } else if (isAimingRifleRef.current) {
+          liveActivity = 'aiming';
+        } else if (toolSwingProgress.current > 0) {
+          const t = playerStateRef.current.equippedTool;
+          liveActivity = t === 'pickaxe' ? 'mining' : t === 'shovel' ? 'digging' : t === 'axe' ? 'chopping' : t === 'rifle' ? 'shooting' : 'working';
+        } else if (playerStateRef.current.carriedObject) {
+          liveActivity = 'hauling';
+        } else if (isMoving) {
+          liveActivity = isSprinting ? 'sprinting' : 'walking';
+        }
+
         multiplayer.queuePositionUpdate({
           x: playerPos.current.x,
           y: playerPos.current.y,
           z: playerPos.current.z,
           yaw: playerYaw.current,
           pitch: playerPitch.current,
-          action: isSprinting ? 'run' : (isMoving ? 'walk' : 'idle'),
+          action: isSprinting ? 'run' : (isMoving ? 'walk' : (toolSwingProgress.current > 0 ? 'swing' : (isAimingRifleRef.current ? 'aim' : 'idle'))),
           activeTool: playerStateRef.current.equippedTool,
           goldFound: playerStateRef.current.goldFound || 0,
           rocksGathered: playerStateRef.current.blocksDug || 0,
           health: playerStateRef.current.health || 100,
+          isRiding: isRidingNow,
+          isAiming: Boolean(isAimingRifleRef.current),
+          carriedRock: Boolean(playerStateRef.current.carriedObject),
+          isHunkered: Boolean(isHunkeredDownRef.current && !isRidingNow),
+          currentActivity: liveActivity,
         });
       }
     };
@@ -7202,6 +7249,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     animationFrameId = requestAnimationFrame(animate);
 
     return () => {
+      unsubMultiplayer();
       unsubFriendships();
       cancelAnimationFrame(animationFrameId);
       remoteProspectorsRef.current.forEach((rp) => {
