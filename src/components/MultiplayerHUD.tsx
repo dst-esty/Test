@@ -205,8 +205,14 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
   const autoCollapseTimeoutRef = useRef<number | null>(null);
   const prevMessagesCountRef = useRef<number>(chatMessages.length);
 
-  const playersList: MultiplayerPlayer[] = Object.values(onlinePlayers);
-  const onlineCount = playersList.length + 1; // Including self
+  const persistentProspectorId = friendshipService.getOrCreateProspectorId();
+  const otherPlayersList: MultiplayerPlayer[] = Object.values(onlinePlayers).filter(
+    (p) =>
+      p.id !== selfId &&
+      p.id !== persistentProspectorId &&
+      p.name.trim().toLowerCase() !== selfName.trim().toLowerCase()
+  );
+  const onlineCount = otherPlayersList.length + 1; // Including self
 
   // Filter messages based on user clear timestamp
   const visibleMessages = chatMessages.filter(
@@ -846,12 +852,12 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                 </div>
 
                 {/* Remote Players */}
-                {playersList.length === 0 ? (
+                {otherPlayersList.length === 0 ? (
                   <div className="p-6 text-center text-stone-500 text-xs">
                     No other prospectors in your immediate sector right now. Invite friends with your callsign to form a pardnership!
                   </div>
                 ) : (
-                  playersList.map((player) => {
+                  otherPlayersList.map((player) => {
                     const pStatus = friendshipService.getPardnerStatus(player.id, player.name);
                     return (
                       <div
@@ -1020,7 +1026,7 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                         </div>
                       ) : (
                         accepted.map((item) => {
-                          const onlinePlayer = playersList.find(
+                          const onlinePlayer = otherPlayersList.find(
                             (p) =>
                               p.id === item.pardnerId ||
                               p.name.toLowerCase() === item.pardnerName.toLowerCase()

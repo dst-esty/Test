@@ -64,14 +64,15 @@ export class RemoteProspector {
     this.currentActivity = player.currentActivity || 'idle';
 
     this.group = new THREE.Group();
-    // Plant boots firmly on the ground (always clamp to terrain height so avatars never sink underground)
+    // Plant boots firmly on ground (supporting terrain, climbing, and deep dug holes / mine shafts)
     const terrainGroundY = getTerrainHeight(this.targetPos.x, this.targetPos.z);
-    let initialGroundY = terrainGroundY;
-    if (this.targetPos.y > terrainGroundY + 0.8) {
-      initialGroundY = Math.max(terrainGroundY, this.targetPos.y - 1.7);
+    const footY = this.targetPos.y - 1.7;
+    let initialGroundY = footY;
+    if (Math.abs(footY - terrainGroundY) < 0.35) {
+      initialGroundY = terrainGroundY;
     }
     this.group.position.set(this.targetPos.x, initialGroundY, this.targetPos.z);
-    this.group.rotation.y = this.targetYaw;
+    this.group.rotation.y = this.targetYaw + Math.PI;
 
     // 1. Build the high-detail 3D prospector rig
     this.rig = createProspectorCharacter({
@@ -258,6 +259,24 @@ export class RemoteProspector {
       this.isSwinging = true;
       this.swingProgress = 1.0;
     }
+    if (action === 'shoot' || action === 'rifle') {
+      this.isAiming = true;
+      this.triggerMuzzleFlash();
+    }
+  }
+
+  private muzzleFlashLight: THREE.PointLight | null = null;
+  private muzzleFlashTimer: number = 0;
+
+  public triggerMuzzleFlash() {
+    if (!this.muzzleFlashLight) {
+      this.muzzleFlashLight = new THREE.PointLight(0xffb040, 4.0, 10);
+      this.muzzleFlashLight.position.set(0.35, 1.4, 0.85);
+      this.group.add(this.muzzleFlashLight);
+    }
+    this.muzzleFlashLight.visible = true;
+    this.muzzleFlashLight.intensity = 4.5;
+    this.muzzleFlashTimer = 0.09;
   }
 
   public updateData(data: Partial<MultiplayerPlayer>) {
@@ -417,21 +436,31 @@ export class RemoteProspector {
   }
 
   public update(delta: number, localPlayerPos: THREE.Vector3) {
-    // 1. Plant boots firmly on the ground (always clamp to terrain height so avatars never sink underground)
+    // 1. Plant boots firmly on ground (supporting terrain, climbing, and deep dug holes / mine shafts)
     const terrainGroundY = getTerrainHeight(this.targetPos.x, this.targetPos.z);
-    let targetGroundY = terrainGroundY;
-    if (this.targetPos.y > terrainGroundY + 0.8) {
-      targetGroundY = Math.max(terrainGroundY, this.targetPos.y - 1.7);
+    const footY = this.targetPos.y - 1.7;
+    let targetGroundY = footY;
+    if (Math.abs(footY - terrainGroundY) < 0.35) {
+      targetGroundY = terrainGroundY;
     }
     const targetGroundPos = new THREE.Vector3(this.targetPos.x, targetGroundY, this.targetPos.z);
     const lerpFactor = Math.min(1.0, delta * 12);
     this.group.position.lerp(targetGroundPos, lerpFactor);
 
-    // Shortest angular distance lerp for yaw
-    let diffYaw = this.targetYaw - this.group.rotation.y;
+    // Shortest angular distance lerp for facing heading (+ Math.PI coordinate offset)
+    const targetFacingYaw = this.targetYaw + Math.PI;
+    let diffYaw = targetFacingYaw - this.group.rotation.y;
     while (diffYaw > Math.PI) diffYaw -= Math.PI * 2;
     while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
     this.group.rotation.y += diffYaw * lerpFactor;
+
+    // Handle muzzle flash countdown
+    if (this.muzzleFlashTimer > 0) {
+      this.muzzleFlashTimer -= delta;
+      if (this.muzzleFlashTimer <= 0 && this.muzzleFlashLight) {
+        this.muzzleFlashLight.visible = false;
+      }
+    }
 
     // Distance to local player for nameplate & LOD
     const dist = this.group.position.distanceTo(localPlayerPos);
@@ -505,6 +534,10 @@ export class RemoteProspector {
   public dispose() {
     this.nameplateTexture.dispose();
     this.rig.dispose();
+    if (this.muzzleFlashLight) {
+      this.group.remove(this.muzzleFlashLight);
+      this.muzzleFlashLight.dispose();
+    }
     this.group.traverse((obj) => {
       if ((obj as THREE.Mesh).geometry) {
         (obj as THREE.Mesh).geometry.dispose();

@@ -519,20 +519,37 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
   wss.on("connection", (ws: WebSocket, req: any) => {
     let initialName = '';
     let initialColor = '';
+    let prospectorIdParam = '';
     try {
       const url = new URL(req.url || '', 'http://localhost:3000');
       initialName = url.searchParams.get('name') || '';
       initialColor = url.searchParams.get('color') || '';
+      prospectorIdParam = url.searchParams.get('prospectorId') || url.searchParams.get('id') || '';
     } catch (e) {}
 
-    const playerId = 'prospector_' + Math.random().toString(36).substring(2, 8);
+    const playerId = (prospectorIdParam && prospectorIdParam.trim())
+      ? prospectorIdParam.trim().substring(0, 64)
+      : ('prospector_' + Math.random().toString(36).substring(2, 8));
+
     const randomPreset = COLOR_PRESETS[Math.floor(Math.random() * COLOR_PRESETS.length)];
     const randomName = PROSPECTOR_NAMES[Math.floor(Math.random() * PROSPECTOR_NAMES.length)];
 
-    const assignedName = (initialName && initialName.trim()) ? initialName.trim().substring(0, 24) : randomName;
-    const assignedColor = (initialColor && initialColor.trim()) ? initialColor.trim() : randomPreset.hex;
+    const existingPlayer = players.get(playerId);
+    const assignedName = (initialName && initialName.trim())
+      ? initialName.trim().substring(0, 24)
+      : (existingPlayer?.name || randomName);
+    const assignedColor = (initialColor && initialColor.trim())
+      ? initialColor.trim()
+      : (existingPlayer?.outfitColor || randomPreset.hex);
 
-    const newPlayer: RemotePlayer = {
+    const isReconnecting = Boolean(existingPlayer);
+    const newPlayer: RemotePlayer = existingPlayer ? {
+      ...existingPlayer,
+      name: assignedName,
+      displayName: assignedName,
+      outfitColor: assignedColor,
+      lastUpdate: Date.now(),
+    } : {
       id: playerId,
       name: assignedName,
       displayName: assignedName,
@@ -582,19 +599,21 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
       console.warn(`[WS Client ${playerId}] Failed to send init:`, err);
     }
 
-    // 2. Announce join to everyone else
+    // 2. Announce join to everyone else (only if not a quick reconnect)
     broadcast({
       type: 'player:joined',
       player: newPlayer,
     }, playerId);
 
-    addChatMessage({
-      senderId: 'system',
-      senderName: 'Wilderness Telegraph',
-      senderColor: '#eab308',
-      text: `${newPlayer.name} has arrived at the Superstition Mountains expedition camp!`,
-      type: 'system',
-    });
+    if (!isReconnecting) {
+      addChatMessage({
+        senderId: 'system',
+        senderName: 'Wilderness Telegraph',
+        senderColor: '#eab308',
+        text: `${newPlayer.name} has arrived at the Superstition Mountains expedition camp!`,
+        type: 'system',
+      });
+    }
 
     // 3. Message dispatcher
     ws.on("message", (raw: string) => {
@@ -947,6 +966,10 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
     });
 
     ws.on("close", () => {
+      // If client reconnected before previous socket fired close, keep newer socket
+      if (sockets.get(playerId) !== ws) {
+        return;
+      }
       const leftPlayer = players.get(playerId);
       players.delete(playerId);
       sockets.delete(playerId);

@@ -346,6 +346,30 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   const panoramicAngle = useRef(0);
   const expeditionStartTime = useRef(Date.now());
 
+  // Coroner's Pan Cinematic State & Timers
+  const [coronerPanOverlay, setCoronerPanOverlay] = useState<{
+    cause: string;
+    details: string;
+    locationDesc: string;
+    x: number;
+    y: number;
+    z: number;
+  } | null>(null);
+
+  const pendingDeathDetailsRef = useRef<GameOverDetails | null>(null);
+  const isCoronerPanActiveRef = useRef<boolean>(false);
+  const coronerPanElapsedRef = useRef<number>(0);
+  const coronerPanDuration = 5.2; // 5.2 seconds of cinematic coroner's slow-motion pan
+
+  const completeCoronersPan = useCallback(() => {
+    if (!isCoronerPanActiveRef.current) return;
+    isCoronerPanActiveRef.current = false;
+    setCoronerPanOverlay(null);
+    if (pendingDeathDetailsRef.current && onPlayerDeath) {
+      onPlayerDeath(pendingDeathDetailsRef.current);
+    }
+  }, [onPlayerDeath]);
+
   useEffect(() => {
     isGameOverRef.current = isGameOver;
     if (isGameOver) {
@@ -367,6 +391,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       isGameOverRef.current = true;
       deathPos.current.copy(playerPos.current);
       panoramicAngle.current = playerYaw.current;
+      pendingDeathDetailsRef.current = details;
+      isCoronerPanActiveRef.current = true;
+      coronerPanElapsedRef.current = 0;
 
       try {
         if (document.pointerLockElement) {
@@ -384,17 +411,41 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         localPlayerRigRef.current.root.visible = true;
       }
 
-      if (onPlayerDeath) {
-        onPlayerDeath(details);
-      }
+      // Format location description based on coordinates and terrain
+      const posX = Math.round(deathPos.current.x);
+      const posZ = Math.round(deathPos.current.z);
+      const posY = Math.round(deathPos.current.y);
+      let locName = 'Superstition Wilderness Ridge';
+      if (posZ < -180) locName = 'Tortilla Flat Settlement Border';
+      else if (Math.hypot(posX - 150, posZ - 100) < 120) locName = "Weaver's Needle Canyon Approach";
+      else if (Math.hypot(posX + 200, posZ + 80) < 100) locName = 'Peralta Trail Ridge';
+      else if (Math.hypot(posX, posZ - 50) < 90) locName = 'Geronimo Siphon Ravine';
+      else if (posZ > 120) locName = 'Black Cross Butte Rim';
+
+      setCoronerPanOverlay({
+        cause: details.causeOfDeath || 'Perished in the Superstition Mountains',
+        details: details.epitaph || 'Found lifeless under the scorching desert sun.',
+        locationDesc: locName,
+        x: posX,
+        y: posY,
+        z: posZ,
+      });
+
+      try {
+        soundEffects.playHeartbeat?.();
+      } catch (e) {}
     },
-    [onPlayerDeath]
+    []
   );
 
   useEffect(() => {
     if (onRegisterRestartHandler) {
       onRegisterRestartHandler(() => {
         isGameOverRef.current = false;
+        isCoronerPanActiveRef.current = false;
+        setCoronerPanOverlay(null);
+        pendingDeathDetailsRef.current = null;
+        coronerPanElapsedRef.current = 0;
         expeditionStartTime.current = Date.now();
         const townY = getTerrainHeight(0, -246) + 1.7;
         playerPos.current.set(0, townY, -246);
@@ -1417,9 +1468,20 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         }
       },
       onPlayerAction: (data) => {
+        if (data.id === multiplayer.getSelfId()) return;
         const rp = remoteProspectorsRef.current.get(data.id);
         if (rp) {
           rp.triggerAction(data.action, data.tool);
+          // Play spatial audio based on action and distance to player
+          const dist = rp.group.position.distanceTo(playerPos.current);
+          if (dist < 50) {
+            const vol = Math.max(0.1, 1.0 - dist / 50);
+            if (data.action === 'shoot' || data.action === 'rifle') {
+              try { soundEffects.playGunshot?.(vol); } catch (e) {}
+            } else if (data.action === 'dig' || data.action === 'pickaxe' || data.action === 'swing') {
+              try { soundEffects.playPickaxeSwing?.(vol); } catch (e) {}
+            }
+          }
         }
       },
       onPlayerLeft: (id) => {
@@ -1487,6 +1549,24 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         remoteProspectorsRef.current.set(p.id, rp);
       }
     });
+
+    // Replay any dug holes and mine structures that were already cached from server init
+    const initialHoles = multiplayer.getCachedHoles();
+    if (initialHoles && initialHoles.length > 0) {
+      initialHoles.forEach((hole: any) => {
+        syncRemoteDugHole(hole, scene);
+      });
+    }
+    const initialMines = multiplayer.getCachedMines();
+    if (initialMines && initialMines.length > 0 && mineBuildingRef.current) {
+      initialMines.forEach((mine: any) => {
+        mineBuildingRef.current.buildStructure(
+          mine.blueprintId as any,
+          { x: mine.x, y: getTerrainHeight(mine.x, mine.z), z: mine.z },
+          0
+        );
+      });
+    }
 
     const unsubFriendships = friendshipService.subscribe(() => {
       remoteProspectorsRef.current.forEach((rp) => {
@@ -3068,6 +3148,11 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isCoronerPanActiveRef.current && (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape')) {
+        e.preventDefault();
+        completeCoronersPan();
+        return;
+      }
       if (isGameOverRef.current || isUIOpenRef.current) return;
       if (
         e.target instanceof HTMLInputElement ||
@@ -6010,7 +6095,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           currentGroundY + saddleHeightOffset,
           playerPos.current.z
         );
-        rig.root.rotation.y = playerYaw.current;
+        rig.root.rotation.y = playerYaw.current + Math.PI;
         rig.root.visible = viewMode === 'third';
         if (isHunkeredRig) {
           rig.root.scale.set(1.0, 0.52, 1.0);
@@ -6043,7 +6128,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           currentGroundY + saddleHeightOffset,
           playerPos.current.z
         );
-        characterMeshRef.current.rotation.y = playerYaw.current;
+        characterMeshRef.current.rotation.y = playerYaw.current + Math.PI;
         characterMeshRef.current.visible = viewMode === 'third';
         if (isHunkeredRig) {
           characterMeshRef.current.scale.set(1.0, 0.52, 1.0);
@@ -6061,16 +6146,23 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         );
       }
 
-      // 2. Camera Positioning (Panoramic Death Cam vs First-Person vs Third-Person)
+      // 2. Camera Positioning (Coroner's Slow-Motion Pan vs First-Person vs Third-Person)
       if (isGameOverRef.current) {
-        // Slow cinematic panoramic orbit around the fallen prospector sweeping across desert vistas
-        panoramicAngle.current += delta * 0.16;
-        const orbitDist = 7.5;
-        const orbitY = deathPos.current.y + 3.2;
+        if (isCoronerPanActiveRef.current) {
+          coronerPanElapsedRef.current += delta;
+          if (coronerPanElapsedRef.current >= coronerPanDuration) {
+            completeCoronersPan();
+          }
+        }
+        // Slow cinematic coroner's pan: sweeps low from beside the fallen prospector then glides upward and outward to reveal the vast Arizona expanse
+        const panProgress = Math.min(1.0, coronerPanElapsedRef.current / coronerPanDuration);
+        panoramicAngle.current += delta * 0.18;
+        const orbitDist = 4.2 + panProgress * 4.5;
+        const orbitY = deathPos.current.y + 1.2 + panProgress * 2.8;
         const camX = deathPos.current.x + Math.sin(panoramicAngle.current) * orbitDist;
         const camZ = deathPos.current.z + Math.cos(panoramicAngle.current) * orbitDist;
         camera.position.set(camX, orbitY, camZ);
-        camera.lookAt(deathPos.current.x, deathPos.current.y + 0.5, deathPos.current.z);
+        camera.lookAt(deathPos.current.x, deathPos.current.y + 0.4, deathPos.current.z);
       } else if (viewMode === 'first') {
         camera.position.copy(playerPos.current);
         if (isHunkeredDownRef.current && !isRiding) {

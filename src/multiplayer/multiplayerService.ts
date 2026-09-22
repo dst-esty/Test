@@ -62,6 +62,8 @@ class MultiplayerService {
   private currentPing = 0;
   private throttledUpdateTimer: any = null;
   private pendingUpdate: any = null;
+  private cachedHoles: any[] = [];
+  private cachedMines: any[] = [];
 
   private state: {
     players: Record<string, MultiplayerPlayer>;
@@ -98,6 +100,23 @@ class MultiplayerService {
 
   public getState() {
     return this.state;
+  }
+
+  public getCachedHoles(): any[] {
+    return this.cachedHoles;
+  }
+
+  public getCachedMines(): any[] {
+    return this.cachedMines;
+  }
+
+  public getPersistentId(): string {
+    let id = safeLocalStorage.getItem('superstition_prospector_id');
+    if (!id || id.trim() === '') {
+      id = 'prospector_' + Math.random().toString(36).substring(2, 9);
+      safeLocalStorage.setItem('superstition_prospector_id', id);
+    }
+    return id;
   }
 
   public getPlayers(): MultiplayerPlayer[] {
@@ -234,7 +253,8 @@ class MultiplayerService {
       const wsProtocol = isHttps ? 'wss:' : 'ws:';
       const queryName = encodeURIComponent(this.getSelfName());
       const queryColor = encodeURIComponent(this.getSelfColor());
-      const wsUrl = `${wsProtocol}//${window.location.host}/ws?name=${queryName}&color=${queryColor}`;
+      const queryId = encodeURIComponent(this.getPersistentId());
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws?name=${queryName}&color=${queryColor}&prospectorId=${queryId}`;
 
       const socket = new WebSocket(wsUrl);
       this.ws = socket;
@@ -339,9 +359,16 @@ class MultiplayerService {
             this.dispatch('onChatMessage', c);
           }
         }
-        if (msg.holes) {
+        if (msg.holes && Array.isArray(msg.holes)) {
+          this.cachedHoles = [...msg.holes];
           for (const h of msg.holes) {
             this.dispatch('onTerrainDug', { hole: h, dugByPlayerId: 'server_init' });
+          }
+        }
+        if (msg.mines && Array.isArray(msg.mines)) {
+          this.cachedMines = [...msg.mines];
+          for (const m of msg.mines) {
+            this.dispatch('onMineBuilt', m);
           }
         }
         if (msg.universalWeather) {
@@ -516,11 +543,29 @@ class MultiplayerService {
       }
 
       case 'terrain:dug': {
+        if (msg.hole) {
+          const idx = this.cachedHoles.findIndex(
+            (h: any) => h.id === msg.hole.id || Math.hypot(h.x - msg.hole.x, h.z - msg.hole.z) < 2.5
+          );
+          if (idx >= 0) {
+            this.cachedHoles[idx] = msg.hole;
+          } else {
+            this.cachedHoles.push(msg.hole);
+          }
+        }
         this.dispatch('onTerrainDug', msg);
         break;
       }
 
       case 'terrain:shored': {
+        if (msg.holeId) {
+          const h = this.cachedHoles.find((item: any) => item.id === msg.holeId);
+          if (h) {
+            h.isShored = true;
+            if (typeof msg.stability === 'number') h.stability = msg.stability;
+            if (typeof msg.shoredUntilDepth === 'number') h.shoredUntilDepth = msg.shoredUntilDepth;
+          }
+        }
         this.dispatch('onTerrainShored', msg);
         break;
       }
@@ -531,6 +576,12 @@ class MultiplayerService {
       }
 
       case 'mine:built': {
+        if (msg.mine) {
+          const exists = this.cachedMines.some((m: any) => m.id === msg.mine.id);
+          if (!exists) {
+            this.cachedMines.push(msg.mine);
+          }
+        }
         this.dispatch('onMineBuilt', msg.mine);
         break;
       }

@@ -21,12 +21,12 @@ class DynamicWeatherEngine {
   private phase: SandstormPhase = 'calm';
   
   // Timer settings (in seconds)
-  // Sandstorm triggers every 300 to 500 seconds (5 to 8.3 minutes of active wilderness survival)
-  private timeUntilNextEvent: number = 320; 
+  // Sandstorms are rare, dramatic wilderness spectacles (every 20 to 30 minutes)
+  private timeUntilNextEvent: number = 1200; 
   private warningTimer: number = 0;
   private readonly warningDuration: number = 22; // 22s pre-haboob warning
   private sandstormTimer: number = 0;
-  private sandstormDuration: number = 70; // 70s active blinding sandstorm
+  private sandstormDuration: number = 36; // Swift 36s active blinding sandstorm
   private clearingTimer: number = 0;
   private readonly clearingDuration: number = 14;
 
@@ -37,8 +37,8 @@ class DynamicWeatherEngine {
   private lastParchedCoughTime: number = 0;
 
   constructor() {
-    // Initial delay before first sandstorm so the player can get oriented in Tortilla Flat
-    this.timeUntilNextEvent = 260; // ~4.3 minutes into expedition
+    // Initial delay before first possible sandstorm (~18-25 minutes into expedition)
+    this.timeUntilNextEvent = 1100 + Math.random() * 400;
   }
 
   public setHandlers(handlers: {
@@ -202,8 +202,8 @@ class DynamicWeatherEngine {
       this.clearingTimer -= delta;
       if (this.clearingTimer <= 0) {
         this.phase = 'calm';
-        // Next sandstorm between 360s and 600s (6 to 10 minutes)
-        this.timeUntilNextEvent = 360 + Math.random() * 240;
+        // Next sandstorm between 1200s and 1800s (20 to 30 minutes)
+        this.timeUntilNextEvent = 1200 + Math.random() * 600;
         this.hasWarnedThisEvent = false;
         this.notifyListeners(isHunkered);
       }
