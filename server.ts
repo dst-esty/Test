@@ -8,6 +8,7 @@ import { GoogleGenAI, Modality } from "@google/genai";
 interface RemotePlayer {
   id: string;
   name: string;
+  displayName?: string;
   outfitColor: string;
   x: number;
   y: number;
@@ -26,6 +27,9 @@ interface RemotePlayer {
   carriedRock?: boolean;
   isHunkered?: boolean;
   currentActivity?: string;
+  metadata?: Record<string, any>;
+  title?: string;
+  badge?: string;
 }
 
 interface SharedHole {
@@ -530,6 +534,7 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
     const newPlayer: RemotePlayer = {
       id: playerId,
       name: assignedName,
+      displayName: assignedName,
       outfitColor: assignedColor,
       x: 0 + (Math.random() - 0.5) * 6,
       y: 9.2,
@@ -548,6 +553,7 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
       carriedRock: false,
       isHunkered: false,
       currentActivity: 'idle',
+      metadata: {},
     };
 
     players.set(playerId, newPlayer);
@@ -625,6 +631,16 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
             if (typeof msg.carriedRock === 'boolean') p.carriedRock = msg.carriedRock;
             if (typeof msg.isHunkered === 'boolean') p.isHunkered = msg.isHunkered;
             if (typeof msg.currentActivity === 'string') p.currentActivity = msg.currentActivity;
+            if (msg.displayName && typeof msg.displayName === 'string') {
+              p.name = msg.displayName.trim().substring(0, 24);
+              p.displayName = p.name;
+            } else if (msg.name && typeof msg.name === 'string') {
+              p.name = msg.name.trim().substring(0, 24);
+              p.displayName = p.name;
+            }
+            if (msg.metadata && typeof msg.metadata === 'object') {
+              p.metadata = { ...(p.metadata || {}), ...msg.metadata };
+            }
             p.lastUpdate = Date.now();
 
             // Broadcast movement/state to others
@@ -632,7 +648,11 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
               type: 'player:moved',
               id: playerId,
               name: p.name,
+              displayName: p.displayName || p.name,
               outfitColor: p.outfitColor,
+              metadata: p.metadata,
+              title: p.title,
+              badge: p.badge,
               x: p.x,
               y: p.y,
               z: p.z,
@@ -652,15 +672,27 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
             break;
           }
 
+          case 'player:metadata':
           case 'player:profile': {
             const p = players.get(playerId);
             if (!p) return;
             const oldName = p.name;
-            if (msg.name && typeof msg.name === 'string') {
-              p.name = msg.name.trim().substring(0, 24);
+            const newNameCandidate = msg.displayName || msg.name;
+            if (newNameCandidate && typeof newNameCandidate === 'string') {
+              p.name = newNameCandidate.trim().substring(0, 24);
+              p.displayName = p.name;
             }
             if (msg.outfitColor && typeof msg.outfitColor === 'string') {
               p.outfitColor = msg.outfitColor;
+            }
+            if (msg.title && typeof msg.title === 'string') {
+              p.title = msg.title.trim().substring(0, 32);
+            }
+            if (msg.badge && typeof msg.badge === 'string') {
+              p.badge = msg.badge.trim().substring(0, 32);
+            }
+            if (msg.metadata && typeof msg.metadata === 'object') {
+              p.metadata = { ...(p.metadata || {}), ...msg.metadata };
             }
             if (oldName !== p.name) {
               addChatMessage({

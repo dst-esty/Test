@@ -9,7 +9,9 @@ export type MultiplayerEventHandler = {
   onPlayerMoved?: (data: {
     id: string;
     name?: string;
+    displayName?: string;
     outfitColor?: string;
+    metadata?: Record<string, any>;
     x: number;
     y: number;
     z: number;
@@ -27,6 +29,8 @@ export type MultiplayerEventHandler = {
     currentActivity?: string;
   }) => void;
   onPlayerProfileUpdated?: (player: MultiplayerPlayer) => void;
+  onUpdateProfile?: (player: MultiplayerPlayer) => void;
+  onMetadataUpdated?: (data: { playerId: string; metadata: Record<string, any>; player?: MultiplayerPlayer }) => void;
   onPlayerLeft?: (id: string, name: string) => void;
   onPlayerAction?: (data: {
     id: string;
@@ -122,6 +126,24 @@ class MultiplayerService {
 
   public getSelfColor(): string {
     return safeLocalStorage.getItem('prospector_color') || '#8c5932';
+  }
+
+  public getSelfMetadata(): Record<string, any> {
+    try {
+      const raw = safeLocalStorage.getItem('prospector_metadata');
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // fallback
+    }
+    return {};
+  }
+
+  public setSelfMetadata(metadata: Record<string, any>) {
+    try {
+      safeLocalStorage.setItem('prospector_metadata', JSON.stringify(metadata));
+    } catch {
+      // fallback
+    }
   }
 
   public getUniversalWeather(): WeatherType {
@@ -294,13 +316,16 @@ class MultiplayerService {
           this.state.chatMessages = [...msg.recentChat];
         }
 
-        // Immediately sync our local prospector name and outfit color to the server and all peers
+        // Immediately sync our local prospector name, outfit color, and metadata to the server and all peers
         const localName = this.getSelfName();
         const localColor = this.getSelfColor();
+        const localMetadata = this.getSelfMetadata();
         this.sendRaw({
           type: 'player:profile',
           name: localName,
+          displayName: localName,
           outfitColor: localColor,
+          metadata: localMetadata,
         });
 
         this.notify();
@@ -352,11 +377,16 @@ class MultiplayerService {
       }
 
       case 'player:moved': {
+        const resolvedName = (msg.displayName || msg.name || 'Prospector').trim().substring(0, 24);
         if (!this.state.players[msg.id]) {
           this.state.players[msg.id] = {
             id: msg.id,
-            name: msg.name || 'Prospector',
+            name: resolvedName,
+            displayName: resolvedName,
             outfitColor: msg.outfitColor || '#8c5932',
+            metadata: msg.metadata || {},
+            title: msg.title,
+            badge: msg.badge,
             x: msg.x,
             y: msg.y,
             z: msg.z,
@@ -378,8 +408,9 @@ class MultiplayerService {
           this.notify();
         } else {
           const prev = this.state.players[msg.id];
-          const nameChanged = Boolean(msg.name && msg.name !== prev.name);
+          const nameChanged = Boolean((msg.displayName || msg.name) && resolvedName !== prev.name);
           const colorChanged = Boolean(msg.outfitColor && msg.outfitColor !== prev.outfitColor);
+          const metaChanged = Boolean(msg.metadata && JSON.stringify(msg.metadata) !== JSON.stringify(prev.metadata));
           Object.assign(prev, {
             x: msg.x,
             y: msg.y,
@@ -396,10 +427,14 @@ class MultiplayerService {
             carriedRock: msg.carriedRock,
             isHunkered: msg.isHunkered,
             currentActivity: msg.currentActivity,
-            ...(msg.name ? { name: msg.name } : {}),
+            name: resolvedName,
+            displayName: resolvedName,
             ...(msg.outfitColor ? { outfitColor: msg.outfitColor } : {}),
+            ...(msg.title ? { title: msg.title } : {}),
+            ...(msg.badge ? { badge: msg.badge } : {}),
+            ...(msg.metadata ? { metadata: { ...(prev.metadata || {}), ...msg.metadata } } : {}),
           });
-          if (nameChanged || colorChanged) {
+          if (nameChanged || colorChanged || metaChanged) {
             this.notify();
           }
         }
@@ -409,18 +444,65 @@ class MultiplayerService {
 
       case 'player:profile_updated': {
         if (msg.player) {
-          if (msg.player.id === this.selfId) {
-            safeLocalStorage.setItem('prospector_name', msg.player.name);
-            safeLocalStorage.setItem('prospector_color', msg.player.outfitColor);
-          } else {
-            this.state.players[msg.player.id] = {
-              ...(this.state.players[msg.player.id] || {}),
-              ...msg.player,
-            };
+          const p = msg.player;
+          const resolvedName = (p.displayName || p.name || 'Prospector').trim().substring(0, 24);
+          p.name = resolvedName;
+          p.displayName = resolvedName;
+
+          if (p.id === this.selfId) {
+            safeLocalStorage.setItem('prospector_name', resolvedName);
+            if (p.outfitColor) safeLocalStorage.setItem('prospector_color', p.outfitColor);
+            if (p.metadata) this.setSelfMetadata(p.metadata);
           }
+
+          this.state.players[p.id] = {
+            ...(this.state.players[p.id] || {}),
+            ...p,
+            name: resolvedName,
+            displayName: resolvedName,
+            metadata: {
+              ...(this.state.players[p.id]?.metadata || {}),
+              ...(p.metadata || {}),
+            },
+          };
+
+          // Trigger state refresh for all UI subscribers across connected clients
           this.notify();
+          this.dispatch('onPlayerProfileUpdated', this.state.players[p.id]);
+          this.dispatch('onUpdateProfile', this.state.players[p.id]);
         }
-        this.dispatch('onPlayerProfileUpdated', msg.player);
+        break;
+      }
+
+      case 'player:metadata_updated': {
+        const playerId = msg.id || msg.playerId;
+        if (playerId) {
+          const resolvedName = (msg.displayName || msg.name || this.state.players[playerId]?.name || 'Prospector').trim().substring(0, 24);
+          if (playerId === this.selfId) {
+            if (msg.displayName || msg.name) safeLocalStorage.setItem('prospector_name', resolvedName);
+            if (msg.outfitColor) safeLocalStorage.setItem('prospector_color', msg.outfitColor);
+            if (msg.metadata) this.setSelfMetadata(msg.metadata);
+          }
+          this.state.players[playerId] = {
+            ...(this.state.players[playerId] || {}),
+            ...msg,
+            id: playerId,
+            name: resolvedName,
+            displayName: resolvedName,
+            metadata: {
+              ...(this.state.players[playerId]?.metadata || {}),
+              ...(msg.metadata || {}),
+            },
+          };
+          this.notify();
+          this.dispatch('onMetadataUpdated', {
+            playerId,
+            metadata: this.state.players[playerId].metadata || {},
+            player: this.state.players[playerId],
+          });
+          this.dispatch('onPlayerProfileUpdated', this.state.players[playerId]);
+          this.dispatch('onUpdateProfile', this.state.players[playerId]);
+        }
         break;
       }
 
@@ -490,24 +572,110 @@ class MultiplayerService {
     }
   }
 
-  public updateProfile(name: string, outfitColor: string) {
-    const cleanName = name ? name.trim().substring(0, 24) : '';
+  public updateProfile(
+    nameOrData: string | (Partial<MultiplayerPlayer> & { displayName?: string; name?: string; outfitColor?: string; metadata?: Record<string, any>; [key: string]: any }),
+    outfitColor?: string,
+    metadata?: Record<string, any>
+  ) {
+    let cleanName = '';
+    let cleanColor = '';
+    let extraMeta: Record<string, any> | undefined = metadata;
+    let title: string | undefined = undefined;
+    let badge: string | undefined = undefined;
+
+    if (typeof nameOrData === 'object' && nameOrData !== null) {
+      cleanName = (nameOrData.displayName || nameOrData.name || '').trim().substring(0, 24);
+      cleanColor = (nameOrData.outfitColor || outfitColor || '').trim();
+      extraMeta = nameOrData.metadata || extraMeta;
+      title = nameOrData.title;
+      badge = nameOrData.badge;
+    } else if (typeof nameOrData === 'string') {
+      cleanName = nameOrData.trim().substring(0, 24);
+      cleanColor = (outfitColor || '').trim();
+    }
+
     if (cleanName) {
       safeLocalStorage.setItem('prospector_name', cleanName);
     }
-    if (outfitColor) {
-      safeLocalStorage.setItem('prospector_color', outfitColor);
+    if (cleanColor) {
+      safeLocalStorage.setItem('prospector_color', cleanColor);
     }
-    if (this.selfId && this.state.players[this.selfId]) {
-      if (cleanName) this.state.players[this.selfId].name = cleanName;
-      if (outfitColor) this.state.players[this.selfId].outfitColor = outfitColor;
+    if (extraMeta) {
+      this.setSelfMetadata(extraMeta);
     }
+
+    const currentMeta = extraMeta || this.getSelfMetadata();
+    const finalName = cleanName || this.getSelfName();
+    const finalColor = cleanColor || this.getSelfColor();
+
+    if (this.selfId) {
+      if (!this.state.players[this.selfId]) {
+        this.state.players[this.selfId] = {
+          id: this.selfId,
+          name: finalName,
+          displayName: finalName,
+          outfitColor: finalColor,
+          x: 0,
+          y: 9.2,
+          z: -246,
+          yaw: 0,
+          pitch: 0,
+          action: 'idle',
+          activeTool: 'pickaxe',
+          goldFound: 0,
+          rocksGathered: 0,
+          health: 100,
+          ping: this.currentPing,
+          lastUpdate: Date.now(),
+          metadata: currentMeta,
+          ...(title ? { title } : {}),
+          ...(badge ? { badge } : {}),
+        };
+      } else {
+        const selfP = this.state.players[this.selfId];
+        selfP.name = finalName;
+        selfP.displayName = finalName;
+        if (finalColor) selfP.outfitColor = finalColor;
+        if (title) selfP.title = title;
+        if (badge) selfP.badge = badge;
+        selfP.metadata = { ...(selfP.metadata || {}), ...currentMeta };
+      }
+    }
+
+    // Trigger local state refresh immediately for all UI observers
     this.notify();
-    this.sendRaw({
+
+    // Broadcast across network to server and all connected peers
+    const payload = {
       type: 'player:profile',
-      name: cleanName || this.getSelfName(),
-      outfitColor: outfitColor || this.getSelfColor(),
-    });
+      name: finalName,
+      displayName: finalName,
+      outfitColor: finalColor,
+      title,
+      badge,
+      metadata: currentMeta,
+    };
+    this.sendRaw(payload);
+
+    return payload;
+  }
+
+  // Alias onUpdateProfile so callers can use either convention
+  public onUpdateProfile(
+    nameOrData: string | (Partial<MultiplayerPlayer> & { displayName?: string; name?: string; outfitColor?: string; metadata?: Record<string, any>; [key: string]: any }),
+    outfitColor?: string,
+    metadata?: Record<string, any>
+  ) {
+    return this.updateProfile(nameOrData, outfitColor, metadata);
+  }
+
+  // Explicit broadcast methods for metadata updates across the network
+  public broadcastMetadataUpdate(metadata: Record<string, any>) {
+    return this.updateProfile(this.getSelfName(), this.getSelfColor(), metadata);
+  }
+
+  public broadcastPlayerMetadata(metadata: Record<string, any>) {
+    return this.updateProfile(this.getSelfName(), this.getSelfColor(), metadata);
   }
 
   // Throttled position update (send at ~20Hz to keep network clean and responsive)
@@ -533,11 +701,14 @@ class MultiplayerService {
       this.throttledUpdateTimer = setTimeout(() => {
         this.throttledUpdateTimer = null;
         if (this.pendingUpdate) {
+          const selfName = this.getSelfName();
           this.sendRaw({
             type: 'player:update',
             ...this.pendingUpdate,
-            name: this.getSelfName(),
+            name: selfName,
+            displayName: selfName,
             outfitColor: this.getSelfColor(),
+            metadata: this.getSelfMetadata(),
             ping: this.currentPing,
           });
         }

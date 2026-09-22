@@ -1367,15 +1367,31 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       },
       onPlayerProfileUpdated: (player) => {
         let rp = remoteProspectorsRef.current.get(player.id);
+        const resolvedName = player.displayName || player.name;
         if (!rp && player.id !== multiplayer.getSelfId()) {
-          rp = new RemoteProspector(player);
-          const pStatus = friendshipService.getPardnerStatus(player.id, player.name);
+          rp = new RemoteProspector({ ...player, name: resolvedName });
+          const pStatus = friendshipService.getPardnerStatus(player.id, resolvedName);
           rp.setPardnerStatus(pStatus.status === 'pardner');
           scene.add(rp.group);
           remoteProspectorsRef.current.set(player.id, rp);
         } else if (rp) {
-          rp.setProfile(player.name, player.outfitColor);
-          const pStatus = friendshipService.getPardnerStatus(player.id, player.name);
+          rp.setProfile(resolvedName, player.outfitColor);
+          const pStatus = friendshipService.getPardnerStatus(player.id, resolvedName);
+          rp.setPardnerStatus(pStatus.status === 'pardner');
+        }
+      },
+      onUpdateProfile: (player) => {
+        let rp = remoteProspectorsRef.current.get(player.id);
+        const resolvedName = player.displayName || player.name;
+        if (!rp && player.id !== multiplayer.getSelfId()) {
+          rp = new RemoteProspector({ ...player, name: resolvedName });
+          const pStatus = friendshipService.getPardnerStatus(player.id, resolvedName);
+          rp.setPardnerStatus(pStatus.status === 'pardner');
+          scene.add(rp.group);
+          remoteProspectorsRef.current.set(player.id, rp);
+        } else if (rp) {
+          rp.setProfile(resolvedName, player.outfitColor);
+          const pStatus = friendshipService.getPardnerStatus(player.id, resolvedName);
           rp.setPardnerStatus(pStatus.status === 'pardner');
         }
       },

@@ -432,6 +432,7 @@ export interface CoronersLogEntry {
 export interface MultiplayerPlayer {
   id: string;
   name: string;
+  displayName?: string;
   outfitColor: string;
   x: number;
   y: number;
@@ -451,6 +452,9 @@ export interface MultiplayerPlayer {
   carriedRock?: boolean;
   isHunkered?: boolean;
   currentActivity?: string;
+  metadata?: Record<string, any>;
+  title?: string;
+  badge?: string;
 }
 
 export interface MultiplayerChatMessage {

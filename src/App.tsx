@@ -1198,8 +1198,8 @@ export default function App() {
   );
 
   // Multiplayer Actions
-  const handleUpdateProfile = useCallback((name: string, color: string) => {
-    multiplayer.updateProfile(name, color);
+  const handleUpdateProfile = useCallback((name: string, color: string, metadata?: Record<string, any>) => {
+    multiplayer.onUpdateProfile(name, color, metadata);
     setSelfName(name);
     setSelfColor(color);
   }, []);

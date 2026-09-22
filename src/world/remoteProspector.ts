@@ -259,8 +259,9 @@ export class RemoteProspector {
   }
 
   public updateData(data: Partial<MultiplayerPlayer>) {
-    if (data.name && data.name !== this.name) {
-      this.setProfile(data.name, data.outfitColor || this.outfitColor);
+    const resolvedName = data.displayName || data.name;
+    if (resolvedName && resolvedName !== this.name) {
+      this.setProfile(resolvedName, data.outfitColor || this.outfitColor);
     } else if (data.outfitColor && data.outfitColor !== this.outfitColor) {
       this.setProfile(this.name, data.outfitColor);
     }
