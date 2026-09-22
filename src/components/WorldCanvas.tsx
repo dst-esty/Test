@@ -1366,8 +1366,14 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         rp.updateData(data);
       },
       onPlayerProfileUpdated: (player) => {
-        const rp = remoteProspectorsRef.current.get(player.id);
-        if (rp) {
+        let rp = remoteProspectorsRef.current.get(player.id);
+        if (!rp && player.id !== multiplayer.getSelfId()) {
+          rp = new RemoteProspector(player);
+          const pStatus = friendshipService.getPardnerStatus(player.id, player.name);
+          rp.setPardnerStatus(pStatus.status === 'pardner');
+          scene.add(rp.group);
+          remoteProspectorsRef.current.set(player.id, rp);
+        } else if (rp) {
           rp.setProfile(player.name, player.outfitColor);
           const pStatus = friendshipService.getPardnerStatus(player.id, player.name);
           rp.setPardnerStatus(pStatus.status === 'pardner');

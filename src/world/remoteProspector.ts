@@ -226,11 +226,14 @@ export class RemoteProspector {
   }
 
   public setProfile(name: string, outfitColor?: string) {
-    this.name = name;
+    if (name && typeof name === 'string') {
+      this.name = name.trim();
+    }
     if (outfitColor) {
       this.outfitColor = outfitColor;
       this.rig.setOutfitColor(outfitColor);
     }
+    this.nameplateTimer = 1.0;
     this.updateNameplate(0);
   }
 

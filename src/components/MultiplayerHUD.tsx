@@ -47,6 +47,8 @@ interface MultiplayerHUDProps {
   visible?: boolean;
   isOpen?: boolean;
   onToggleOpen?: (open: boolean) => void;
+  openRosterTab?: 'roster' | 'pardners' | 'customize' | 'chat' | null;
+  onCloseRosterModal?: () => void;
 }
 
 const QUICK_SHOUTS = [
@@ -70,8 +72,23 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
   visible = true,
   isOpen,
   onToggleOpen,
+  openRosterTab,
+  onCloseRosterModal,
 }) => {
   const [showRosterModal, setShowRosterModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'roster' | 'pardners' | 'customize' | 'chat'>('roster');
+
+  useEffect(() => {
+    if (openRosterTab) {
+      setActiveTab(openRosterTab);
+      setShowRosterModal(true);
+    }
+  }, [openRosterTab]);
+
+  const handleCloseModal = () => {
+    setShowRosterModal(false);
+    if (onCloseRosterModal) onCloseRosterModal();
+  };
   // Default internal state if not controlled externally
   const [internalOpen, setInternalOpen] = useState<boolean>(false);
   const isTelegraphOpen = typeof isOpen === 'boolean' ? isOpen : internalOpen;
@@ -108,7 +125,6 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
   const [chatText, setChatText] = useState('');
   const [editName, setEditName] = useState(selfName);
   const [editColor, setEditColor] = useState(selfColor);
-  const [activeTab, setActiveTab] = useState<'roster' | 'pardners' | 'customize' | 'chat'>('roster');
   const [friendships, setFriendships] = useState<Friendship[]>(() => friendshipService.getAllFriendships());
   const [directPardnerName, setDirectPardnerName] = useState('');
   const [pardnerNotice, setPardnerNotice] = useState<string | null>(null);
@@ -313,12 +329,12 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
 
   const handleSaveProfile = () => {
     if (!editName.trim()) return;
-    const cleanName = editName.trim();
+    const cleanName = editName.trim().substring(0, 24);
     onUpdateProfile(cleanName, editColor);
     friendshipService.setProspectorName(cleanName);
     setPardnerNotice(`🤠 Callsign "${cleanName}" permanently saved & telegraphed to the frontier.`);
     setTimeout(() => setPardnerNotice(null), 3500);
-    setShowRosterModal(false);
+    handleCloseModal();
   };
 
   if (!visible) {
@@ -732,7 +748,7 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                 </div>
               </div>
               <button
-                onClick={() => setShowRosterModal(false)}
+                onClick={handleCloseModal}
                 className="w-8 h-8 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-stone-200 flex items-center justify-center cursor-pointer"
               >
                 ✕
@@ -908,7 +924,7 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                             <button
                               onClick={() => {
                                 onTrackPlayer(player);
-                                setShowRosterModal(false);
+                                handleCloseModal();
                               }}
                               className="flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700 cursor-pointer"
                             >
@@ -1036,7 +1052,7 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                                   <button
                                     onClick={() => {
                                       onTrackPlayer(onlinePlayer);
-                                      setShowRosterModal(false);
+                                      handleCloseModal();
                                     }}
                                     className="px-2 py-1 text-xs rounded bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 border border-amber-600/40 cursor-pointer"
                                   >
@@ -1121,13 +1137,20 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
                       type="text"
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveProfile();
+                        }
+                      }}
                       maxLength={24}
                       className="w-full px-3 py-2 rounded-xl bg-stone-950 border border-stone-700 text-stone-100 text-sm focus:outline-none focus:border-amber-500 font-medium"
                       placeholder="Enter your prospector name..."
+                      autoFocus
                     />
                   </div>
                   <p className="text-[10px] text-stone-400 mt-1">
-                    This moniker is permanently saved to your frontier log and displayed over your prospector in 3D.
+                    Press <kbd className="px-1 py-0.5 rounded bg-stone-800 text-amber-300 font-mono text-[9px] border border-stone-700">Enter</kbd> or click Save below to broadcast your moniker to all prospectors in the mountains.
                   </p>
                 </div>
 
@@ -1160,7 +1183,7 @@ export const MultiplayerHUD: React.FC<MultiplayerHUDProps> = ({
 
                 <div className="pt-3 border-t border-stone-800 flex justify-end gap-2">
                   <button
-                    onClick={() => setShowRosterModal(false)}
+                    onClick={handleCloseModal}
                     className="px-4 py-2 text-xs rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 cursor-pointer"
                   >
                     Cancel

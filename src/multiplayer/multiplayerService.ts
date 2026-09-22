@@ -209,7 +209,9 @@ class MultiplayerService {
     try {
       const isHttps = window.location.protocol === 'https:';
       const wsProtocol = isHttps ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProtocol}//${window.location.host}`;
+      const queryName = encodeURIComponent(this.getSelfName());
+      const queryColor = encodeURIComponent(this.getSelfColor());
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws?name=${queryName}&color=${queryColor}`;
 
       const socket = new WebSocket(wsUrl);
       this.ws = socket;
@@ -375,7 +377,10 @@ class MultiplayerService {
           };
           this.notify();
         } else {
-          Object.assign(this.state.players[msg.id], {
+          const prev = this.state.players[msg.id];
+          const nameChanged = Boolean(msg.name && msg.name !== prev.name);
+          const colorChanged = Boolean(msg.outfitColor && msg.outfitColor !== prev.outfitColor);
+          Object.assign(prev, {
             x: msg.x,
             y: msg.y,
             z: msg.z,
@@ -394,6 +399,9 @@ class MultiplayerService {
             ...(msg.name ? { name: msg.name } : {}),
             ...(msg.outfitColor ? { outfitColor: msg.outfitColor } : {}),
           });
+          if (nameChanged || colorChanged) {
+            this.notify();
+          }
         }
         this.dispatch('onPlayerMoved', msg);
         break;
@@ -409,8 +417,8 @@ class MultiplayerService {
               ...(this.state.players[msg.player.id] || {}),
               ...msg.player,
             };
-            this.notify();
           }
+          this.notify();
         }
         this.dispatch('onPlayerProfileUpdated', msg.player);
         break;
@@ -483,16 +491,22 @@ class MultiplayerService {
   }
 
   public updateProfile(name: string, outfitColor: string) {
-    if (name && name.trim()) {
-      safeLocalStorage.setItem('prospector_name', name.trim());
+    const cleanName = name ? name.trim().substring(0, 24) : '';
+    if (cleanName) {
+      safeLocalStorage.setItem('prospector_name', cleanName);
     }
     if (outfitColor) {
       safeLocalStorage.setItem('prospector_color', outfitColor);
     }
+    if (this.selfId && this.state.players[this.selfId]) {
+      if (cleanName) this.state.players[this.selfId].name = cleanName;
+      if (outfitColor) this.state.players[this.selfId].outfitColor = outfitColor;
+    }
+    this.notify();
     this.sendRaw({
       type: 'player:profile',
-      name: name.trim(),
-      outfitColor,
+      name: cleanName || this.getSelfName(),
+      outfitColor: outfitColor || this.getSelfColor(),
     });
   }
 
@@ -522,6 +536,8 @@ class MultiplayerService {
           this.sendRaw({
             type: 'player:update',
             ...this.pendingUpdate,
+            name: this.getSelfName(),
+            outfitColor: this.getSelfColor(),
             ping: this.currentPing,
           });
         }

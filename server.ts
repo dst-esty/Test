@@ -511,15 +511,26 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
   }, 1000);
 
   // WebSocket connection handling
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req: any) => {
+    let initialName = '';
+    let initialColor = '';
+    try {
+      const url = new URL(req.url || '', 'http://localhost:3000');
+      initialName = url.searchParams.get('name') || '';
+      initialColor = url.searchParams.get('color') || '';
+    } catch (e) {}
+
     const playerId = 'prospector_' + Math.random().toString(36).substring(2, 8);
     const randomPreset = COLOR_PRESETS[Math.floor(Math.random() * COLOR_PRESETS.length)];
     const randomName = PROSPECTOR_NAMES[Math.floor(Math.random() * PROSPECTOR_NAMES.length)];
 
+    const assignedName = (initialName && initialName.trim()) ? initialName.trim().substring(0, 24) : randomName;
+    const assignedColor = (initialColor && initialColor.trim()) ? initialColor.trim() : randomPreset.hex;
+
     const newPlayer: RemotePlayer = {
       id: playerId,
-      name: randomName,
-      outfitColor: randomPreset.hex,
+      name: assignedName,
+      outfitColor: assignedColor,
       x: 0 + (Math.random() - 0.5) * 6,
       y: 9.2,
       z: -246 + (Math.random() - 0.5) * 6,
@@ -592,6 +603,12 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
           case 'player:update': {
             const p = players.get(playerId);
             if (!p) return;
+            if (msg.name && typeof msg.name === 'string') {
+              p.name = msg.name.trim().substring(0, 24);
+            }
+            if (msg.outfitColor && typeof msg.outfitColor === 'string') {
+              p.outfitColor = msg.outfitColor;
+            }
             p.x = typeof msg.x === 'number' ? msg.x : p.x;
             p.y = typeof msg.y === 'number' ? msg.y : p.y;
             p.z = typeof msg.z === 'number' ? msg.z : p.z;
@@ -638,11 +655,21 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
           case 'player:profile': {
             const p = players.get(playerId);
             if (!p) return;
+            const oldName = p.name;
             if (msg.name && typeof msg.name === 'string') {
               p.name = msg.name.trim().substring(0, 24);
             }
             if (msg.outfitColor && typeof msg.outfitColor === 'string') {
               p.outfitColor = msg.outfitColor;
+            }
+            if (oldName !== p.name) {
+              addChatMessage({
+                senderId: 'system',
+                senderName: 'Wilderness Telegraph',
+                senderColor: '#eab308',
+                text: `📜 Moniker Update: "${oldName}" is now officially registered across the frontier as "${p.name}"!`,
+                type: 'system',
+              });
             }
             broadcast({
               type: 'player:profile_updated',

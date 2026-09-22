@@ -1061,6 +1061,7 @@ export default function App() {
   const [isHudVisible, setIsHudVisible] = useState(true);
   const [isTelegraphOpen, setIsTelegraphOpen] = useState(false);
   const [unreadTelegraphCount, setUnreadTelegraphCount] = useState(0);
+  const [rosterModalTab, setRosterModalTab] = useState<'roster' | 'pardners' | 'customize' | 'chat' | null>(null);
 
   // Track unread messages when telegraph is closed
   const prevChatCountRef = useRef<number>(chatMessages.length);
@@ -1662,7 +1663,7 @@ export default function App() {
           onlinePlayers={Object.values(onlinePlayers)}
           selfName={selfName}
           onTrackPlayer={handleTrackPlayer}
-          onOpenMultiplayerModal={() => setIsTelegraphOpen(true)}
+          onOpenMultiplayerModal={() => setRosterModalTab('customize')}
         />
       )}
 
@@ -1682,6 +1683,8 @@ export default function App() {
         onToggleOpen={(open) => {
           setIsTelegraphOpen(open);
         }}
+        openRosterTab={rosterModalTab}
+        onCloseRosterModal={() => setRosterModalTab(null)}
       />
 
       {/* Main Controls & Inventory Overlay */}
