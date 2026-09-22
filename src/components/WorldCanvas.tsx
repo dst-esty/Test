@@ -1338,8 +1338,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         if (!rp) {
           rp = new RemoteProspector({
             id: data.id,
-            name: 'Prospector',
-            outfitColor: '#8c5932',
+            name: data.name || multiplayer.getPlayer(data.id)?.name || 'Prospector',
+            outfitColor: data.outfitColor || multiplayer.getPlayer(data.id)?.outfitColor || '#8c5932',
             x: data.x,
             y: data.y,
             z: data.z,

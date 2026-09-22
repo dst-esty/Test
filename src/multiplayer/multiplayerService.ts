@@ -8,6 +8,8 @@ export type MultiplayerEventHandler = {
   onPlayerJoined?: (player: MultiplayerPlayer) => void;
   onPlayerMoved?: (data: {
     id: string;
+    name?: string;
+    outfitColor?: string;
     x: number;
     y: number;
     z: number;
@@ -97,8 +99,25 @@ class MultiplayerService {
     return Object.values(this.state.players).filter((p) => p.id !== this.selfId);
   }
 
+  public getPlayer(id: string): MultiplayerPlayer | undefined {
+    return this.state.players[id];
+  }
+
   public getSelfName(): string {
-    return safeLocalStorage.getItem('prospector_name') || 'Canyon Jack';
+    let name = safeLocalStorage.getItem('prospector_name');
+    if (!name || name.trim() === '' || name.trim() === 'Canyon Jack') {
+      const frontierNames = [
+        'Dusty Pete', 'Silver Annie', 'Dutchman Jacob',
+        'Yukon Dan', 'Apache Scout', 'Sierra Belle', 'Klondike Kate',
+        'Mustang Sally', 'Red Rock Slim', 'Trailblazer Cole', 'Grizzly Jake',
+        'Wild Bill', 'Calamity Jane', 'Panhandle Slim', 'Sourdough Sam'
+      ];
+      const pick = frontierNames[Math.floor(Math.random() * frontierNames.length)];
+      const num = Math.floor(10 + Math.random() * 90);
+      name = `${pick} #${num}`;
+      safeLocalStorage.setItem('prospector_name', name);
+    }
+    return name;
   }
 
   public getSelfColor(): string {
@@ -205,6 +224,13 @@ class MultiplayerService {
             this.sendRaw({ type: 'ping', time: this.lastPingSent });
           }
         }, 4000);
+
+        // Immediately synchronize player profile name and color to server
+        this.sendRaw({
+          type: 'player:profile',
+          name: this.getSelfName(),
+          outfitColor: this.getSelfColor(),
+        });
       };
 
       socket.onmessage = (event) => {
@@ -265,6 +291,16 @@ class MultiplayerService {
         if (msg.recentChat) {
           this.state.chatMessages = [...msg.recentChat];
         }
+
+        // Immediately sync our local prospector name and outfit color to the server and all peers
+        const localName = this.getSelfName();
+        const localColor = this.getSelfColor();
+        this.sendRaw({
+          type: 'player:profile',
+          name: localName,
+          outfitColor: localColor,
+        });
+
         this.notify();
         this.dispatch('onConnected', msg.selfId, msg.selfData);
         if (msg.players) {
@@ -314,7 +350,31 @@ class MultiplayerService {
       }
 
       case 'player:moved': {
-        if (this.state.players[msg.id]) {
+        if (!this.state.players[msg.id]) {
+          this.state.players[msg.id] = {
+            id: msg.id,
+            name: msg.name || 'Prospector',
+            outfitColor: msg.outfitColor || '#8c5932',
+            x: msg.x,
+            y: msg.y,
+            z: msg.z,
+            yaw: msg.yaw,
+            pitch: msg.pitch,
+            action: msg.action,
+            activeTool: msg.activeTool,
+            goldFound: msg.goldFound,
+            rocksGathered: msg.rocksGathered,
+            health: msg.health,
+            isRiding: msg.isRiding,
+            isAiming: msg.isAiming,
+            carriedRock: msg.carriedRock,
+            isHunkered: msg.isHunkered,
+            currentActivity: msg.currentActivity,
+            ping: 0,
+            lastUpdate: Date.now(),
+          };
+          this.notify();
+        } else {
           Object.assign(this.state.players[msg.id], {
             x: msg.x,
             y: msg.y,
@@ -331,6 +391,8 @@ class MultiplayerService {
             carriedRock: msg.carriedRock,
             isHunkered: msg.isHunkered,
             currentActivity: msg.currentActivity,
+            ...(msg.name ? { name: msg.name } : {}),
+            ...(msg.outfitColor ? { outfitColor: msg.outfitColor } : {}),
           });
         }
         this.dispatch('onPlayerMoved', msg);
@@ -338,9 +400,17 @@ class MultiplayerService {
       }
 
       case 'player:profile_updated': {
-        if (msg.player && this.state.players[msg.player.id]) {
-          Object.assign(this.state.players[msg.player.id], msg.player);
-          this.notify();
+        if (msg.player) {
+          if (msg.player.id === this.selfId) {
+            safeLocalStorage.setItem('prospector_name', msg.player.name);
+            safeLocalStorage.setItem('prospector_color', msg.player.outfitColor);
+          } else {
+            this.state.players[msg.player.id] = {
+              ...(this.state.players[msg.player.id] || {}),
+              ...msg.player,
+            };
+            this.notify();
+          }
         }
         this.dispatch('onPlayerProfileUpdated', msg.player);
         break;

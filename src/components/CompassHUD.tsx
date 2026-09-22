@@ -1,6 +1,7 @@
 import React from 'react';
-import { Compass, Sun, Moon, MapPin, Flame, Mountain, Globe, Eye } from 'lucide-react';
+import { Compass, Sun, Moon, MapPin, Flame, Mountain, Globe, Eye, Users, User, Navigation } from 'lucide-react';
 import { getUsgsElevation, formatUsgsDistance, WorldScaleMode, getFourPeaksSightlineStatus } from '../world/superstitionTopography';
+import { MultiplayerPlayer } from '../types';
 
 interface CompassHUDProps {
   yaw: number; // in radians
@@ -14,6 +15,10 @@ interface CompassHUDProps {
   playerCoords?: { x: number; y?: number; z: number };
   worldScaleMode?: WorldScaleMode;
   onToggleWorldScaleMode?: () => void;
+  onlinePlayers?: MultiplayerPlayer[];
+  selfName?: string;
+  onTrackPlayer?: (p: MultiplayerPlayer) => void;
+  onOpenMultiplayerModal?: () => void;
 }
 
 export const CompassHUD: React.FC<CompassHUDProps> = ({
@@ -28,6 +33,10 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   playerCoords,
   worldScaleMode = '1:1',
   onToggleWorldScaleMode,
+  onlinePlayers = [],
+  selfName,
+  onTrackPlayer,
+  onOpenMultiplayerModal,
 }) => {
   // Convert yaw to degrees (0 to 360)
   const deg = Math.round(((-yaw * 180) / Math.PI + 360) % 360);
@@ -44,6 +53,29 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
   const isNight = timeOfDay < 5.2 || timeOfDay > 20.2;
   const isSunset = timeOfDay >= 17.5 && timeOfDay <= 20.2;
+
+  // Calculate relative angles and distances to fellow online prospectors
+  const fellowProspectors = (onlinePlayers || [])
+    .filter((p) => p && p.id && (!selfName || p.name !== selfName))
+    .map((p) => {
+      const dx = p.x - (playerCoords?.x ?? 0);
+      const dz = p.z - (playerCoords?.z ?? 0);
+      const dist = Math.hypot(dx, dz);
+      const angleRad = Math.atan2(dx, -dz);
+      const bearingDeg = ((angleRad * 180 / Math.PI) + 360) % 360;
+      let relDeg = bearingDeg - deg;
+      while (relDeg > 180) relDeg -= 360;
+      while (relDeg < -180) relDeg += 360;
+      return {
+        ...p,
+        distance: dist,
+        bearingDeg,
+        relDeg,
+      };
+    })
+    .sort((a, b) => a.distance - b.distance);
+
+  const nearestProspector = fellowProspectors[0];
 
   // Dynamic Four Peaks sightline calculations based on player position
   const sightline = playerCoords && !isInsideMine
@@ -149,12 +181,66 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
           </div>
         )}
 
+        {/* Active Player Callsign */}
+        {selfName && (
+          <div
+            onClick={onOpenMultiplayerModal}
+            className="pointer-events-auto hidden md:flex items-center gap-1.5 border-l border-amber-800/60 pl-3 text-xs text-amber-200 hover:text-amber-100 cursor-pointer group"
+            title="Your Prospector Callsign. Click to open Frontier Telegraph & Roster."
+          >
+            <User className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+            <span className="font-semibold text-amber-300 max-w-[120px] truncate">{selfName}</span>
+          </div>
+        )}
+
+        {/* Fellow Online Prospectors Indicator */}
+        {fellowProspectors.length > 0 && nearestProspector && (
+          <button
+            type="button"
+            onClick={() => onTrackPlayer ? onTrackPlayer(nearestProspector) : onOpenMultiplayerModal?.()}
+            className="pointer-events-auto flex items-center gap-1.5 border-l border-amber-800/60 pl-3 text-xs bg-amber-950/60 hover:bg-amber-900/80 px-2.5 py-1 rounded-full text-amber-300 border border-amber-600/40 cursor-pointer transition-all group"
+            title={`Track ${nearestProspector.name} (${Math.round(nearestProspector.distance)}m away)`}
+          >
+            <Users className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+            <span className="font-bold text-amber-200">
+              {fellowProspectors.length} {fellowProspectors.length === 1 ? 'Prospector' : 'Prospectors'}
+            </span>
+            <span className="text-[11px] font-mono text-amber-400/90 hidden lg:inline">
+              ({nearestProspector.name} {Math.round(nearestProspector.distance)}m)
+            </span>
+            <Navigation className="w-3 h-3 text-amber-400 group-hover:rotate-45 transition-transform" />
+          </button>
+        )}
+
         {isInsideMine && (
           <span className="text-xs font-bold text-amber-300 uppercase tracking-wider bg-amber-900/50 px-2 py-0.5 rounded border border-amber-600/40">
             Inside Dutchman Shaft
           </span>
         )}
       </div>
+
+      {/* Nearby Prospector Direction Indicator */}
+      {nearestProspector && (
+        <div className="mt-1 flex items-center gap-2 pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => onTrackPlayer?.(nearestProspector)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-stone-900/90 backdrop-blur-md text-amber-300 border border-amber-600/60 text-[11px] font-mono shadow-lg hover:bg-stone-800 cursor-pointer transition-all"
+            title={`Click to track ${nearestProspector.name}`}
+          >
+            {nearestProspector.relDeg < -18 ? (
+              <span className="text-amber-400 font-bold">◂ Turn Left</span>
+            ) : nearestProspector.relDeg > 18 ? (
+              <span className="text-amber-400 font-bold">Turn Right ▸</span>
+            ) : (
+              <span className="text-emerald-400 font-bold">▲ Directly Ahead</span>
+            )}
+            <span className="text-stone-300">Fellow Prospector:</span>
+            <span className="font-bold text-amber-200">{nearestProspector.name}</span>
+            <span className="text-amber-400/90 font-semibold">({Math.round(nearestProspector.distance)}m)</span>
+          </button>
+        </div>
+      )}
 
       {/* Subtle compass ribbon underneath */}
       <div className="mt-1 w-64 h-5 overflow-hidden relative flex justify-center items-center bg-stone-950/60 border border-amber-900/40 rounded-full px-2 shadow-inner opacity-85">

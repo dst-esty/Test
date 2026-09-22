@@ -614,6 +614,8 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
             broadcast({
               type: 'player:moved',
               id: playerId,
+              name: p.name,
+              outfitColor: p.outfitColor,
               x: p.x,
               y: p.y,
               z: p.z,

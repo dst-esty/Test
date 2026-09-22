@@ -145,8 +145,8 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<MultiplayerChatMessage[]>([]);
   const [multiplayerPing, setMultiplayerPing] = useState<number>(35);
   const [selfId, setSelfId] = useState<string | null>(null);
-  const [selfName, setSelfName] = useState<string>(() => safeLocalStorage.getItem('prospector_name') || 'Canyon Jack');
-  const [selfColor, setSelfColor] = useState<string>(() => safeLocalStorage.getItem('prospector_color') || '#8c5932');
+  const [selfName, setSelfName] = useState<string>(() => multiplayer.getSelfName());
+  const [selfColor, setSelfColor] = useState<string>(() => multiplayer.getSelfColor());
   const [trackedPlayerPos, setTrackedPlayerPos] = useState<Vector3D | null>(null);
 
   // Initialize and synchronize real-time multiplayer connection
@@ -1659,6 +1659,10 @@ export default function App() {
           playerCoords={{ x: playerState.position.x, y: playerState.position.y, z: playerState.position.z }}
           worldScaleMode={worldScaleMode}
           onToggleWorldScaleMode={handleToggleWorldScaleMode}
+          onlinePlayers={Object.values(onlinePlayers)}
+          selfName={selfName}
+          onTrackPlayer={handleTrackPlayer}
+          onOpenMultiplayerModal={() => setIsTelegraphOpen(true)}
         />
       )}
 

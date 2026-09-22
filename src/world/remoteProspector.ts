@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MultiplayerPlayer } from '../types';
 import { createProspectorCharacter, ProspectorRig } from './prospectorModel';
+import { getTerrainHeight } from './terrain';
 
 export class RemoteProspector {
   public id: string;
@@ -20,6 +21,7 @@ export class RemoteProspector {
   private nameplateCanvas: HTMLCanvasElement;
   private nameplateCtx: CanvasRenderingContext2D;
   private nameplateTexture: THREE.CanvasTexture;
+  private nameplateTimer: number = 0;
 
   public targetPos: THREE.Vector3;
   public targetYaw: number = 0;
@@ -60,8 +62,12 @@ export class RemoteProspector {
     this.currentActivity = player.currentActivity || 'idle';
 
     this.group = new THREE.Group();
-    // Plant boots firmly on the ground (subtract eye-level 1.7m)
-    const initialGroundY = Math.max(1.0, this.targetPos.y - 1.7);
+    // Plant boots firmly on the ground (always clamp to terrain height so avatars never sink underground)
+    const terrainGroundY = getTerrainHeight(this.targetPos.x, this.targetPos.z);
+    let initialGroundY = terrainGroundY;
+    if (this.targetPos.y > terrainGroundY + 0.8) {
+      initialGroundY = Math.max(terrainGroundY, this.targetPos.y - 1.7);
+    }
     this.group.position.set(this.targetPos.x, initialGroundY, this.targetPos.z);
     this.group.rotation.y = this.targetYaw;
 
@@ -102,8 +108,9 @@ export class RemoteProspector {
       depthTest: false,
     });
     this.nameplateSprite = new THREE.Sprite(spriteMat);
+    this.nameplateSprite.renderOrder = 9999;
     this.nameplateSprite.position.set(0, this.isRiding ? 2.85 : 2.4, 0);
-    this.nameplateSprite.scale.set(2.8, 0.9, 1);
+    this.nameplateSprite.scale.set(3.2, 1.0, 1);
     this.group.add(this.nameplateSprite);
 
     this.updateNameplate(0);
@@ -249,6 +256,11 @@ export class RemoteProspector {
   }
 
   public updateData(data: Partial<MultiplayerPlayer>) {
+    if (data.name && data.name !== this.name) {
+      this.setProfile(data.name, data.outfitColor || this.outfitColor);
+    } else if (data.outfitColor && data.outfitColor !== this.outfitColor) {
+      this.setProfile(this.name, data.outfitColor);
+    }
     if (typeof data.x === 'number' && typeof data.y === 'number' && typeof data.z === 'number') {
       this.targetPos.set(data.x, data.y, data.z);
     }
@@ -383,8 +395,12 @@ export class RemoteProspector {
   }
 
   public update(delta: number, localPlayerPos: THREE.Vector3) {
-    // 1. Plant boots firmly on the ground (subtract eye-level 1.7m)
-    const targetGroundY = Math.max(1.0, this.targetPos.y - 1.7);
+    // 1. Plant boots firmly on the ground (always clamp to terrain height so avatars never sink underground)
+    const terrainGroundY = getTerrainHeight(this.targetPos.x, this.targetPos.z);
+    let targetGroundY = terrainGroundY;
+    if (this.targetPos.y > terrainGroundY + 0.8) {
+      targetGroundY = Math.max(terrainGroundY, this.targetPos.y - 1.7);
+    }
     const targetGroundPos = new THREE.Vector3(this.targetPos.x, targetGroundY, this.targetPos.z);
     const lerpFactor = Math.min(1.0, delta * 12);
     this.group.position.lerp(targetGroundPos, lerpFactor);
@@ -397,7 +413,17 @@ export class RemoteProspector {
 
     // Distance to local player for nameplate & LOD
     const dist = this.group.position.distanceTo(localPlayerPos);
-    this.updateNameplate(dist);
+    
+    // Dynamic distance scaling so nameplates are crisp and readable near and far
+    const distScale = Math.max(3.2, Math.min(10.5, dist * 0.12));
+    this.nameplateSprite.scale.set(distScale, distScale * 0.32, 1);
+    this.nameplateSprite.position.set(0, (this.isRiding ? 2.9 : 2.4) + (distScale - 3.2) * 0.22, 0);
+
+    this.nameplateTimer += delta;
+    if (this.nameplateTimer > 0.25) {
+      this.nameplateTimer = 0;
+      this.updateNameplate(dist);
+    }
 
     // Check if moving
     const speed = this.group.position.distanceTo(targetGroundPos);
