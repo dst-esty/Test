@@ -49,7 +49,7 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   const sightline = playerCoords && !isInsideMine
     ? getFourPeaksSightlineStatus(playerCoords.x, playerCoords.z)
     : null;
-  const isLookingNorth = deg >= 335 || deg <= 45;
+  const isLookingNorth = deg >= 340 || deg <= 20;
 
   return (
     <div className="pointer-events-none absolute top-3 left-0 right-0 z-20 flex flex-col items-center select-none px-4">
@@ -157,27 +157,31 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
       </div>
 
       {/* Subtle compass ribbon underneath */}
-      <div className="mt-1 w-64 h-5 overflow-hidden relative flex justify-center items-center opacity-70">
+      <div className="mt-1 w-64 h-5 overflow-hidden relative flex justify-center items-center bg-stone-950/60 border border-amber-900/40 rounded-full px-2 shadow-inner opacity-85">
         <div
-          className="flex whitespace-nowrap text-[10px] font-mono text-amber-300/80 transition-transform duration-75"
-          style={{ transform: `translateX(${-deg * 2 + 180}px)` }}
+          className="flex whitespace-nowrap text-[10px] font-mono text-amber-300/80 transition-transform duration-75 ease-out"
+          style={{ transform: `translateX(${-172 - deg * 1.6}px)` }}
         >
-          {Array.from({ length: 36 }).map((_, i) => {
-            const angle = i * 10;
-            const isCardinal = angle % 90 === 0;
-            const cardinalLabel = angle === 0 ? 'N' : angle === 90 ? 'E' : angle === 180 ? 'S' : angle === 270 ? 'W' : '';
+          {Array.from({ length: 49 }).map((_, i) => {
+            const angle = -180 + i * 15;
+            const norm = ((angle % 360) + 360) % 360;
+            const isCardinal = norm % 90 === 0;
+            const isInter = norm % 45 === 0 && !isCardinal;
+            const cardinalLabel = norm === 0 ? 'N' : norm === 90 ? 'E' : norm === 180 ? 'S' : norm === 270 ? 'W' : isInter ? (norm === 45 ? 'NE' : norm === 135 ? 'SE' : norm === 225 ? 'SW' : 'NW') : '';
             return (
-              <span key={i} className="inline-block w-[20px] text-center">
+              <span key={i} className="inline-flex items-center justify-center w-[24px] text-center shrink-0">
                 {isCardinal ? (
-                  <strong className="text-amber-200 font-bold">{cardinalLabel}</strong>
+                  <strong className="text-amber-200 font-bold text-[11px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">{cardinalLabel}</strong>
+                ) : isInter ? (
+                  <span className="text-amber-400/90 font-semibold text-[9px] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">{cardinalLabel}</span>
                 ) : (
-                  <span className="text-stone-400">|</span>
+                  <span className="text-stone-500/80 text-[10px]">|</span>
                 )}
               </span>
             );
           })}
         </div>
-        <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-0.5 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+        <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-0.5 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)] z-10" />
       </div>
 
       {/* Dynamic Four Peaks Sightline & Alignment Status */}

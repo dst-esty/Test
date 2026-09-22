@@ -154,7 +154,7 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   const peraltaCarve = computeCanyonCarve(distToPeralta, z, 4.5, 26.0, -155, 145, 22.0, 15.0);
 
   // Canyon B: Needle Canyon Gorge & East Chasm (East of Weaver's Needle towards Mine)
-  // Sweeps east of Weaver's Needle (80, 15) and winds between Eye Bluff and Lost Dutchman approach
+  // Sweeps east of Weaver's Needle (0, 15) and winds between Eye Bluff and Lost Dutchman approach
   const needleCanyonX = 118 + Math.sin(z * 0.024 + 0.6) * 30 + Math.cos(z * 0.01) * 16;
   const distToNeedleCanyon = Math.abs(x - needleCanyonX);
   const needleCanyonCarve = computeCanyonCarve(distToNeedleCanyon, z, 4.2, 26.0, -95, 160, 20.0, 16.5);
@@ -395,8 +395,8 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   }
 
   // Special landmark features:
-  // 1. Weaver's Needle base hill (broad volcanic scree pedestal cone)
-  const distToNeedle = Math.hypot(x - 80, z - 15);
+  // 1. Weaver's Needle base hill (broad volcanic scree pedestal cone) - Due South (0, 15)
+  const distToNeedle = Math.hypot(x - 0, z - 15);
   let needleBase = 0;
   if (distToNeedle < 65) {
     const coneRadius = 65.0;
@@ -481,7 +481,7 @@ export function getBaseTerrainHeight(x: number, z: number): number {
   }
 
   // 7. Malapais Mountain Massif (USGS Elev. 4,229 ft / 1,289m - Historic "Black Mountain")
-  // Prominent volcanic basalt massif north of Weaver's Needle (80, 15) and east of La Barge Canyon.
+  // Prominent volcanic basalt massif north of Weaver's Needle (0, 15) and east of La Barge Canyon.
   // Matches USGS Weavers Needle 7.5-minute topographic quadrangle & authentic geological surveys:
   // - Main South Peak (USGS 4,229 ft) basalt mesa tableland at (95, -205)
   // - North Peak (USGS 4,159 ft) volcanic dome at (96, -242) separated by North Col saddle (95.5, -223)
@@ -835,8 +835,8 @@ export function isHighPointOrPeak(x: number, z: number, y?: number, slope?: numb
   const distBlackTop = Math.hypot(x - 25, z - (-45));
   if (distBlackTop < 38) return true;
 
-  // 3. Weaver's Needle Base Pedestal (x: 80, z: 15)
-  const distNeedle = Math.hypot(x - 80, z - 15);
+  // 3. Weaver's Needle Base Pedestal (x: 0, z: 15)
+  const distNeedle = Math.hypot(x - 0, z - 15);
   if (distNeedle < 48) return true;
 
   // 4. Superstition Peak Caldera Massif (x: -180, z: 65)

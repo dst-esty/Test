@@ -339,8 +339,8 @@ export function createLandmarkStructures(
   //   * South Peak (South Shoulder): Weathered, broader dacite crag
   // - Expansive talus apron anchored 22 units into bedrock with fallen corestones
   const needleGroup = new THREE.Group();
-  const needleY = getTerrainHeight(80, 15);
-  needleGroup.position.set(80, needleY, 15);
+  const needleY = getTerrainHeight(0, 15);
+  needleGroup.position.set(0, needleY, 15);
 
   const spireAnchor = 22.0; // Anchored subterranean into bedrock for 100% gapless footing
   const spireHeight = 96.0; // Full 1,000-ft scale relief matching the real landmark
@@ -572,7 +572,7 @@ export function createLandmarkStructures(
     bGeo.computeBoundingSphere();
 
     const boulderMesh = new THREE.Mesh(bGeo, needleRockMat);
-    const worldX = 80 + tb.x;
+    const worldX = 0 + tb.x;
     const worldZ = 15 + tb.z;
     const groundY = getTerrainHeight(worldX, worldZ);
     // Embedded firmly into the talus scree slope

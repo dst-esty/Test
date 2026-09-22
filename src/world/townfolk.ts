@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getTerrainHeight } from './terrain';
 import { soundEngine } from '../audio/soundEffects';
 import { characterTextures } from './characterTextures';
+import { townWantedService } from '../services/townWantedService';
 
 export interface TownNPCData {
   id: string;
@@ -47,7 +48,13 @@ function safeRoundRect(
 /**
  * Creates a stylized, high-contrast 1880s Western nameplate sprite
  */
-function createNameplateTexture(name: string, title: string, badgeSymbol: string = ''): THREE.CanvasTexture {
+function createNameplateTexture(
+  name: string,
+  title: string,
+  badgeSymbol: string = '',
+  isDowned: boolean = false,
+  isAggro: boolean = false
+): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 140;
@@ -55,19 +62,27 @@ function createNameplateTexture(name: string, title: string, badgeSymbol: string
   if (!ctx) return new THREE.CanvasTexture(canvas);
 
   // Rounded plaque background with Western aged parchment / dark wood
-  ctx.fillStyle = 'rgba(22, 14, 9, 0.88)';
+  ctx.fillStyle = isDowned
+    ? 'rgba(40, 10, 10, 0.94)'
+    : isAggro
+    ? 'rgba(45, 18, 10, 0.94)'
+    : 'rgba(22, 14, 9, 0.88)';
   ctx.beginPath();
   safeRoundRect(ctx, 10, 10, 492, 120, 24);
   ctx.fill();
 
   // Ornate double border
-  ctx.strokeStyle = '#d4af37'; // Antique Gold
+  ctx.strokeStyle = isDowned ? '#ef4444' : isAggro ? '#f97316' : '#d4af37'; // Red / Orange / Antique Gold
   ctx.lineWidth = 4;
   ctx.beginPath();
   safeRoundRect(ctx, 14, 14, 484, 112, 20);
   ctx.stroke();
 
-  ctx.strokeStyle = 'rgba(212, 175, 55, 0.4)';
+  ctx.strokeStyle = isDowned
+    ? 'rgba(239, 68, 68, 0.4)'
+    : isAggro
+    ? 'rgba(249, 115, 22, 0.4)'
+    : 'rgba(212, 175, 55, 0.4)';
   ctx.lineWidth = 2;
   ctx.beginPath();
   safeRoundRect(ctx, 22, 22, 468, 96, 14);
@@ -76,20 +91,21 @@ function createNameplateTexture(name: string, title: string, badgeSymbol: string
   // Name
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#fff4dc';
-  ctx.font = 'bold 40px "Georgia", serif';
+  ctx.fillStyle = isDowned ? '#fca5a5' : '#fff4dc';
+  ctx.font = 'bold 38px "Georgia", serif';
   ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
   ctx.shadowBlur = 6;
   ctx.shadowOffsetX = 2;
   ctx.shadowOffsetY = 2;
   const fullName = badgeSymbol ? `${badgeSymbol} ${name}` : name;
-  ctx.fillText(fullName, 256, 54);
+  ctx.fillText(fullName, 256, 52);
 
   // Subtitle / Title
-  ctx.font = 'italic 24px "Georgia", serif';
-  ctx.fillStyle = '#dfb86c';
+  ctx.font = isDowned ? 'bold 24px "Georgia", serif' : 'italic 24px "Georgia", serif';
+  ctx.fillStyle = isDowned ? '#ef4444' : isAggro ? '#fdba74' : '#dfb86c';
   ctx.shadowBlur = 4;
-  ctx.fillText(title, 256, 96);
+  const displayTitle = isDowned ? '⚠️ INCAPACITATED / WOUNDED' : isAggro ? `⚔️ ${title}` : title;
+  ctx.fillText(displayTitle, 256, 96);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
@@ -166,6 +182,19 @@ export class TownNPC {
   public speakTimer: number = 0;
   public speakClock: number = 0;
 
+  // Combat & Outlaw System state
+  public health: number = 100;
+  public maxHealth: number = 100;
+  public isDowned: boolean = false;
+  public downedTimer: number = 0;
+  public isAggro: boolean = false;
+  public shootCooldown: number = 1.0 + Math.random() * 1.5;
+  public hitFlinchTimer: number = 0;
+  public muzzleFlash: THREE.PointLight | null = null;
+  public weaponMesh: THREE.Group | null = null;
+  public defaultBarPropsGroup: THREE.Group | null = null;
+  public coachGunGroup: THREE.Group | null = null;
+
   private dialogueIdx: number = 0;
   private animClock: number = Math.random() * 10;
   private currentDirection: number = 1;
@@ -179,6 +208,19 @@ export class TownNPC {
     this.group = new THREE.Group();
     this.group.position.copy(data.position);
     this.group.rotation.y = data.heading;
+
+    // Combat attributes customized by role
+    if (data.role === 'sheriff') {
+      this.health = this.maxHealth = 160;
+    } else if (data.id === 'barkeep_hank') {
+      this.health = this.maxHealth = 135;
+    } else if (data.id === 'hostler_silas') {
+      this.health = this.maxHealth = 110;
+    } else if (data.id === 'gus_blacksmith') {
+      this.health = this.maxHealth = 125;
+    } else {
+      this.health = this.maxHealth = 85;
+    }
 
     // --- Build Anatomic Articulated 3D Model ---
     this.torsoGroup = new THREE.Group();
@@ -618,13 +660,14 @@ export class TownNPC {
       mug.position.set(0, -0.32, 0.08);
       this.rightArmGroup.add(mug);
     } else if (role === 'barkeep') {
-      // Holding tall glass tumbler and bar towel
+      // Default Bar Props Group
+      const barProps = new THREE.Group();
       const glass = new THREE.Mesh(
         new THREE.CylinderGeometry(0.045, 0.04, 0.12, 8),
         new THREE.MeshStandardMaterial({ color: 0xbfe5f2, roughness: 0.1, transparent: true, opacity: 0.7 })
       );
       glass.position.set(0, -0.32, 0.06);
-      this.rightArmGroup.add(glass);
+      barProps.add(glass);
 
       const towel = new THREE.Mesh(
         new THREE.BoxGeometry(0.12, 0.18, 0.04),
@@ -632,6 +675,84 @@ export class TownNPC {
       );
       towel.position.set(0, -0.28, 0.02);
       this.leftArmGroup.add(towel);
+      this.rightArmGroup.add(barProps);
+      this.defaultBarPropsGroup = barProps;
+
+      // 12-Gauge Stagecoach Coach Gun (Double Barrel Shotgun)
+      const shotgunGroup = new THREE.Group();
+      shotgunGroup.position.set(0, -0.3, 0.12);
+      shotgunGroup.visible = false; // Drawn when aggro or mobilized
+
+      // Walnut Stock
+      const stock = new THREE.Mesh(
+        new THREE.BoxGeometry(0.045, 0.09, 0.28),
+        new THREE.MeshStandardMaterial({ color: 0x3d1c06, roughness: 0.65 })
+      );
+      stock.position.set(0, -0.02, -0.08);
+      stock.rotation.x = -0.15;
+      shotgunGroup.add(stock);
+
+      // Blued Receiver
+      const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.1), ironMat);
+      receiver.position.set(0, 0.03, 0.06);
+      shotgunGroup.add(receiver);
+
+      // Side-by-Side Twin Barrels
+      for (const offset of [-0.016, 0.016]) {
+        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.38, 8), ironMat);
+        b.rotation.x = Math.PI / 2;
+        b.position.set(offset, 0.03, 0.28);
+        shotgunGroup.add(b);
+      }
+
+      // Shotgun Muzzle Flash
+      const sFlash = new THREE.PointLight(0xff8811, 0, 9);
+      sFlash.position.set(0, 0.03, 0.48);
+      sFlash.visible = false;
+      shotgunGroup.add(sFlash);
+      this.muzzleFlash = sFlash;
+
+      this.coachGunGroup = shotgunGroup;
+      this.rightArmGroup.add(shotgunGroup);
+    } else if (role === 'sheriff') {
+      // Colt .45 Single Action Army Peacemaker Revolver
+      const gunGroup = new THREE.Group();
+      gunGroup.position.set(0, -0.32, 0.1);
+
+      // Walnut grip
+      const grip = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.1, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.6 })
+      );
+      grip.rotation.x = 0.3;
+      gunGroup.add(grip);
+
+      // Brass / blued frame
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.05, 0.08), ironMat);
+      frame.position.set(0, 0.04, 0.04);
+      gunGroup.add(frame);
+
+      // Fluted revolving cylinder
+      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.06, 8), ironMat);
+      cyl.rotation.x = Math.PI / 2;
+      cyl.position.set(0, 0.04, 0.04);
+      gunGroup.add(cyl);
+
+      // 7.5-inch Cavalry Barrel
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.24, 8), ironMat);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.set(0, 0.04, 0.18);
+      gunGroup.add(barrel);
+
+      // Muzzle Flash PointLight
+      const flash = new THREE.PointLight(0xffaa22, 0, 8);
+      flash.position.set(0, 0.04, 0.32);
+      flash.visible = false;
+      gunGroup.add(flash);
+      this.muzzleFlash = flash;
+
+      this.weaponMesh = gunGroup;
+      this.rightArmGroup.add(gunGroup);
     } else if (role === 'hostler') {
       // 3-Tined Wooden Hay Pitchfork
       const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.4, 6), woodMat);
@@ -749,6 +870,75 @@ export class TownNPC {
 
   public update(delta: number, playerPos: THREE.Vector3) {
     this.animClock += delta;
+
+    // --- Downed / Incapacitated Handling ---
+    if (this.isDowned) {
+      if (this.downedTimer > 0) {
+        this.downedTimer -= delta;
+        if (this.downedTimer <= 0) {
+          this.isDowned = false;
+          this.health = Math.floor(this.maxHealth * 0.5);
+          this.refreshNameplate();
+        }
+      }
+
+      // Incapacitated sitting / slouched posture on ground
+      this.torsoGroup.position.y = 0.35;
+      this.torsoGroup.rotation.x = 0.45;
+      this.headGroup.rotation.x = 0.55;
+      this.leftArmGroup.rotation.set(-0.5, 0.2, 0.2);
+      this.rightArmGroup.rotation.set(-0.3, -0.2, -0.2);
+      if (this.coachGunGroup) this.coachGunGroup.visible = false;
+      if (this.defaultBarPropsGroup) this.defaultBarPropsGroup.visible = false;
+      return;
+    }
+
+    // --- Hit Flinch Reaction ---
+    if (this.hitFlinchTimer > 0) {
+      this.hitFlinchTimer -= delta;
+      this.torsoGroup.position.y = 0.88;
+      this.torsoGroup.rotation.x = -0.32;
+      this.headGroup.rotation.x = -0.25;
+      return;
+    }
+
+    // --- Outlaw Retaliation & Cowering ---
+    if (this.isAggro) {
+      const isArmed = this.data.role === 'sheriff' || this.data.id === 'barkeep_hank';
+      const dx = playerPos.x - this.group.position.x;
+      const dz = playerPos.z - this.group.position.z;
+      const angle = Math.atan2(dx, dz);
+      this.group.rotation.y = angle;
+
+      if (isArmed) {
+        if (this.data.id === 'barkeep_hank') {
+          if (this.defaultBarPropsGroup) this.defaultBarPropsGroup.visible = false;
+          if (this.coachGunGroup) this.coachGunGroup.visible = true;
+        }
+
+        // Two-handed firearm aiming posture aimed at player
+        this.rightArmGroup.rotation.set(-Math.PI / 2 + 0.05, -0.15, 0.1);
+        this.leftArmGroup.rotation.set(-Math.PI / 2.3, 0.4, 0.25);
+        this.torsoGroup.position.y = 0.88;
+        this.torsoGroup.rotation.x = 0.05;
+
+        // Sheriff slowly corners the player within town limits
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (this.data.role === 'sheriff' && dist > 10.0 && dist < 45.0) {
+          const moveSpeed = 1.8;
+          this.group.position.x += Math.sin(angle) * moveSpeed * delta;
+          this.group.position.z += Math.cos(angle) * moveSpeed * delta;
+        }
+      } else {
+        // Civilians cower and duck
+        this.torsoGroup.position.y = 0.45;
+        this.torsoGroup.rotation.x = 0.4;
+        this.headGroup.rotation.x = 0.45;
+        this.leftArmGroup.rotation.set(-2.2, 0.3, 0.2);
+        this.rightArmGroup.rotation.set(-2.2, -0.3, -0.2);
+        return;
+      }
+    }
 
     // --- Procedural Natural Eye Blinking ---
     this.blinkTimer -= delta;
@@ -980,6 +1170,55 @@ export class TownNPC {
     return line;
   }
 
+  public refreshNameplate() {
+    const badge = this.data.role === 'sheriff' ? '★' : this.data.role === 'prospector' ? '⛏' : '•';
+    const tex = createNameplateTexture(this.data.name, this.data.title, badge, this.isDowned, this.isAggro);
+    if (this.nameplateSprite.material.map) {
+      this.nameplateSprite.material.map.dispose();
+    }
+    this.nameplateSprite.material.map = tex;
+    this.nameplateSprite.material.needsUpdate = true;
+  }
+
+  public takeDamage(amount: number, _attackerPos?: THREE.Vector3): { isDowned: boolean; prevHealth: number } {
+    const prevHealth = this.health;
+    if (this.isDowned) {
+      return { isDowned: true, prevHealth };
+    }
+
+    this.health = Math.max(0, this.health - amount);
+    this.hitFlinchTimer = 0.45;
+    this.isAggro = true;
+
+    // Cry out in alarm/reaction
+    this.startSpeaking(3.0);
+
+    if (this.health <= 0) {
+      this.isDowned = true;
+      this.downedTimer = 90.0;
+      this.isAggro = false;
+      this.refreshNameplate();
+      return { isDowned: true, prevHealth };
+    }
+
+    this.refreshNameplate();
+    return { isDowned: false, prevHealth };
+  }
+
+  public resetCombat() {
+    this.health = this.maxHealth;
+    this.isDowned = false;
+    this.downedTimer = 0;
+    this.isAggro = false;
+    this.hitFlinchTimer = 0;
+    this.torsoGroup.position.y = 0.88;
+    this.torsoGroup.rotation.set(0, 0, 0);
+    this.headGroup.rotation.set(0, 0, 0);
+    if (this.coachGunGroup) this.coachGunGroup.visible = false;
+    if (this.defaultBarPropsGroup) this.defaultBarPropsGroup.visible = true;
+    this.refreshNameplate();
+  }
+
   public dispose() {
     this.group.traverse((obj) => {
       if ((obj as THREE.Mesh).geometry) {
@@ -1177,10 +1416,332 @@ export class TownfolkManager {
     }
   }
 
-  public update(delta: number, playerPos: THREE.Vector3) {
+  public posseMembers: {
+    id: string;
+    name: string;
+    group: THREE.Group;
+    muzzleFlash: THREE.PointLight;
+    health: number;
+    maxHealth: number;
+    isDowned: boolean;
+    shootCooldown: number;
+  }[] = [];
+
+  private createPosseDeputy(id: string, name: string, startPos: THREE.Vector3) {
+    const group = new THREE.Group();
+    group.position.copy(startPos);
+
+    const dusterMat = new THREE.MeshStandardMaterial({ color: 0x271911, roughness: 0.8 });
+    const hatMat = new THREE.MeshStandardMaterial({ color: 0x1f140e, roughness: 0.75 });
+    const starMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.8, roughness: 0.3 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.85, roughness: 0.25 });
+
+    // Torso & Duster
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.58, 0.24), dusterMat);
+    torso.position.y = 0.88;
+    group.add(torso);
+
+    // Deputy Star Badge
+    const badge = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.015, 6), starMat);
+    badge.rotation.x = Math.PI / 2;
+    badge.position.set(0.1, 1.02, 0.13);
+    group.add(badge);
+
+    // Head & Hat
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.22, 0.2), new THREE.MeshStandardMaterial({ color: 0xdcb290 }));
+    head.position.y = 1.34;
+    group.add(head);
+
+    const hatBrim = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.02, 12), hatMat);
+    hatBrim.position.y = 1.46;
+    group.add(hatBrim);
+
+    const hatCrown = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.2, 0.16, 10), hatMat);
+    hatCrown.position.y = 1.54;
+    group.add(hatCrown);
+
+    // Arms & Winchester Carbine
+    const rArm = new THREE.Group();
+    rArm.position.set(0.24, 1.1, 0);
+    const rHand = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.28, 0.08), dusterMat);
+    rHand.position.y = -0.14;
+    rArm.add(rHand);
+
+    // Winchester rifle
+    const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.65), ironMat);
+    rifle.position.set(0, -0.2, 0.24);
+    rArm.add(rifle);
+
+    const flash = new THREE.PointLight(0xffa500, 0, 8);
+    flash.position.set(0, -0.2, 0.6);
+    flash.visible = false;
+    rArm.add(flash);
+
+    rArm.rotation.set(-Math.PI / 2 + 0.1, -0.15, 0);
+    group.add(rArm);
+
+    // Nameplate Sprite
+    const canvas = document.createElement('canvas');
+    canvas.width = 384;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = 'rgba(30, 10, 10, 0.9)';
+      ctx.fillRect(8, 8, 368, 80);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(10, 10, 364, 76);
+      ctx.fillStyle = '#fef3c7';
+      ctx.font = 'bold 28px Georgia, serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`★ ${name}`, 192, 44);
+      ctx.font = 'italic 18px Georgia, serif';
+      ctx.fillStyle = '#fcd34d';
+      ctx.fillText('Pinal County Posse Deputy', 192, 72);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const nameplate = new THREE.Sprite(spriteMat);
+    nameplate.scale.set(2.0, 0.5, 1.0);
+    nameplate.position.set(0, 1.95, 0);
+    group.add(nameplate);
+
+    this.root.add(group);
+
+    return {
+      id,
+      name,
+      group,
+      muzzleFlash: flash,
+      health: 95,
+      maxHealth: 95,
+      isDowned: false,
+      shootCooldown: 1.6 + Math.random() * 1.5,
+    };
+  }
+
+  public mobilizeAgainstPlayer(playerPos: THREE.Vector3) {
+    for (const npc of this.npcs) {
+      if (!npc.isDowned) {
+        npc.isAggro = true;
+        npc.refreshNameplate();
+      }
+    }
+
+    // Spawn 2 Posse deputies if not already spawned
+    if (this.posseMembers.length === 0) {
+      const townY = getTerrainHeight(0, -250);
+      const d1 = this.createPosseDeputy('deputy_boone', 'Deputy Jesse Boone', new THREE.Vector3(15, townY + 0.1, -262));
+      const d2 = this.createPosseDeputy('deputy_miller', 'Deputy Frank Miller', new THREE.Vector3(-15, townY + 0.1, -260));
+      this.posseMembers.push(d1, d2);
+    }
+
+    townWantedService.triggerMobilization();
+  }
+
+  public checkBulletHit(
+    cameraPos: THREE.Vector3,
+    cameraDir: THREE.Vector3,
+    onHit: (victimName: string, damage: number, isDowned: boolean) => void
+  ): boolean {
+    const ray = new THREE.Raycaster(cameraPos, cameraDir, 0.5, 80);
+
+    // 1. Check against townfolk NPCs
+    for (const npc of this.npcs) {
+      const npcPos = new THREE.Vector3(npc.group.position.x, npc.group.position.y + 0.9, npc.group.position.z);
+      const distToRay = ray.ray.distanceToPoint(npcPos);
+      if (distToRay < 0.85) {
+        const dist = cameraPos.distanceTo(npcPos);
+        if (dist < 75) {
+          const res = npc.takeDamage(60, cameraPos);
+          if (res.isDowned) {
+            townWantedService.reportDownedNPC(npc.data.id, npc.data.name, npc.data.role === 'sheriff');
+          } else {
+            townWantedService.reportAssaultNPC(npc.data.id, npc.data.name, 60, npc.data.role === 'sheriff');
+          }
+          this.mobilizeAgainstPlayer(cameraPos);
+          onHit(npc.data.name, 60, res.isDowned);
+          return true;
+        }
+      }
+    }
+
+    // 2. Check against spawned posse deputies
+    for (const deputy of this.posseMembers) {
+      if (deputy.isDowned) continue;
+      const dPos = new THREE.Vector3(deputy.group.position.x, deputy.group.position.y + 0.9, deputy.group.position.z);
+      const distToRay = ray.ray.distanceToPoint(dPos);
+      if (distToRay < 0.85) {
+        deputy.health -= 55;
+        if (deputy.health <= 0) {
+          deputy.isDowned = true;
+          deputy.group.position.y -= 0.6;
+          deputy.group.rotation.x = Math.PI / 2.2;
+          townWantedService.reportDownedNPC(deputy.id, deputy.name, true);
+          onHit(deputy.name, 55, true);
+        } else {
+          townWantedService.reportAssaultNPC(deputy.id, deputy.name, 55, true);
+          onHit(deputy.name, 55, false);
+        }
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  public update(
+    delta: number,
+    playerPos: THREE.Vector3,
+    onPlayerDamage?: (dmg: number, attackerName: string) => void,
+    onSpawnTracer?: (start: THREE.Vector3, end: THREE.Vector3) => void
+  ) {
     for (let i = 0; i < this.npcs.length; i++) {
       this.npcs[i].update(delta, playerPos);
     }
+
+    const isMobilized = townWantedService.isTownMobilized();
+
+    // Combat shooting logic for armed NPCs & Posse Deputies
+    if (isMobilized) {
+      // Sheriff Wyatt Vance
+      const sheriff = this.getNPCById('sheriff_vance');
+      if (sheriff && !sheriff.isDowned) {
+        const sDist = sheriff.group.position.distanceTo(playerPos);
+        if (sDist < 42.0) {
+          sheriff.shootCooldown -= delta;
+          if (sheriff.shootCooldown <= 0) {
+            sheriff.shootCooldown = 2.0 + Math.random() * 1.2;
+            soundEngine.playBanditShot();
+
+            if (sheriff.muzzleFlash) {
+              sheriff.muzzleFlash.visible = true;
+              sheriff.muzzleFlash.intensity = 3.5;
+              setTimeout(() => {
+                if (sheriff.muzzleFlash) {
+                  sheriff.muzzleFlash.visible = false;
+                  sheriff.muzzleFlash.intensity = 0;
+                }
+              }, 75);
+            }
+
+            const origin = sheriff.group.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+            const target = playerPos.clone().add(new THREE.Vector3(
+              (Math.random() - 0.5) * 0.7,
+              0.8 + (Math.random() - 0.5) * 0.4,
+              (Math.random() - 0.5) * 0.7
+            ));
+
+            if (onSpawnTracer) onSpawnTracer(origin, target);
+
+            // Calculate hit probability with spread
+            if (origin.distanceTo(target) < 38.0) {
+              const dmg = Math.floor(16 + Math.random() * 8);
+              if (onPlayerDamage) onPlayerDamage(dmg, 'Sheriff Wyatt Vance');
+            }
+          }
+        }
+      }
+
+      // Barkeep Hank Miller (Coach Shotgun)
+      const hank = this.getNPCById('barkeep_hank');
+      if (hank && !hank.isDowned) {
+        const hDist = hank.group.position.distanceTo(playerPos);
+        if (hDist < 26.0) {
+          hank.shootCooldown -= delta;
+          if (hank.shootCooldown <= 0) {
+            hank.shootCooldown = 2.8 + Math.random() * 1.4;
+            soundEngine.playBanditShot();
+
+            if (hank.muzzleFlash) {
+              hank.muzzleFlash.visible = true;
+              hank.muzzleFlash.intensity = 4.0;
+              setTimeout(() => {
+                if (hank.muzzleFlash) {
+                  hank.muzzleFlash.visible = false;
+                  hank.muzzleFlash.intensity = 0;
+                }
+              }, 85);
+            }
+
+            const origin = hank.group.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+            const target = playerPos.clone().add(new THREE.Vector3(
+              (Math.random() - 0.5) * 1.2,
+              0.8 + (Math.random() - 0.5) * 0.5,
+              (Math.random() - 0.5) * 1.2
+            ));
+
+            if (onSpawnTracer) onSpawnTracer(origin, target);
+
+            if (origin.distanceTo(target) < 24.0) {
+              const dmg = Math.floor(18 + Math.random() * 10);
+              if (onPlayerDamage) onPlayerDamage(dmg, 'Hank Miller (12ga Shotgun)');
+            }
+          }
+        }
+      }
+
+      // Update Posse Deputies
+      for (const deputy of this.posseMembers) {
+        if (deputy.isDowned) continue;
+
+        const dx = playerPos.x - deputy.group.position.x;
+        const dz = playerPos.z - deputy.group.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const angle = Math.atan2(dx, dz);
+        deputy.group.rotation.y = angle;
+
+        // Pursue player if far
+        if (dist > 12.0 && dist < 55.0) {
+          const moveSpeed = 2.2;
+          deputy.group.position.x += Math.sin(angle) * moveSpeed * delta;
+          deputy.group.position.z += Math.cos(angle) * moveSpeed * delta;
+        }
+
+        // Fire carbine
+        if (dist < 45.0) {
+          deputy.shootCooldown -= delta;
+          if (deputy.shootCooldown <= 0) {
+            deputy.shootCooldown = 2.2 + Math.random() * 1.5;
+            soundEngine.playBanditShot();
+
+            deputy.muzzleFlash.visible = true;
+            deputy.muzzleFlash.intensity = 3.0;
+            setTimeout(() => {
+              deputy.muzzleFlash.visible = false;
+              deputy.muzzleFlash.intensity = 0;
+            }, 75);
+
+            const origin = deputy.group.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+            const target = playerPos.clone().add(new THREE.Vector3(
+              (Math.random() - 0.5) * 0.8,
+              0.8 + (Math.random() - 0.5) * 0.4,
+              (Math.random() - 0.5) * 0.8
+            ));
+
+            if (onSpawnTracer) onSpawnTracer(origin, target);
+
+            if (dist < 38.0) {
+              const dmg = Math.floor(12 + Math.random() * 8);
+              if (onPlayerDamage) onPlayerDamage(dmg, deputy.name);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  public resetAllHostilities() {
+    for (const npc of this.npcs) {
+      npc.resetCombat();
+    }
+    for (const deputy of this.posseMembers) {
+      if (deputy.group.parent) {
+        deputy.group.parent.remove(deputy.group);
+      }
+    }
+    this.posseMembers = [];
+    townWantedService.standDownMobilization();
   }
 
   /**

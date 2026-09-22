@@ -387,7 +387,7 @@ export interface GameSettings {
 }
 
 export interface GameOverDetails {
-  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom' | 'apache_raid';
+  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom' | 'apache_raid' | 'fall';
   title: string;
   subtitle: string;
   cause: string;
@@ -398,6 +398,35 @@ export interface GameOverDetails {
   landmarksDiscovered: number;
   timeSurvivedSeconds: number;
   coordinates: { x: number; y: number; z: number };
+}
+
+export interface CoronersLogEntry {
+  id: string;
+  expeditionNumber: number;
+  timestamp: number;
+  formattedDate: string;
+  isHistoricalArchive: boolean;
+  prospectorName: string;
+  reason: 'fall' | 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom' | 'apache_raid';
+  title: string;
+  subtitle: string;
+  cause: string;
+  coordinates: { x: number; y: number; z: number };
+  locationName: string;
+  sectorQuad: string;
+  elevationFt: number;
+  depthMeters?: number;
+  strata?: string;
+  goldLost: number;
+  blocksDug: number;
+  landmarksDiscovered: number;
+  timeSurvivedSeconds: number;
+  coronerVerdict: string;
+  preventionAdvisory: {
+    heading: string;
+    actionRule: string;
+    equipmentRecommended: string;
+  };
 }
 
 export interface MultiplayerPlayer {

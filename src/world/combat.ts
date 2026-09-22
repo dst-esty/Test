@@ -229,7 +229,7 @@ export class CombatManager {
   }
 
   // --- BULLET TRACER VISUAL EFFECT ---
-  private spawnTracer(start: THREE.Vector3, end: THREE.Vector3, isEnemy: boolean) {
+  public spawnTracer(start: THREE.Vector3, end: THREE.Vector3, isEnemy: boolean) {
     const points = [start.clone(), end.clone()];
     const geo = new THREE.BufferGeometry().setFromPoints(points);
     const mat = new THREE.LineBasicMaterial({

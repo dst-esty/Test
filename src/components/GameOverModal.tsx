@@ -15,14 +15,16 @@ import {
   ChevronDown,
   Droplets,
   Flame,
+  FileText,
 } from 'lucide-react';
 
 interface GameOverModalProps {
   details: GameOverDetails;
   onRestart: () => void;
+  onOpenCoronersLog?: () => void;
 }
 
-export const GameOverModal: React.FC<GameOverModalProps> = ({ details, onRestart }) => {
+export const GameOverModal: React.FC<GameOverModalProps> = ({ details, onRestart, onOpenCoronersLog }) => {
   const [isMinimized, setIsMinimized] = useState(false);
 
   const formatTime = (seconds: number) => {
@@ -87,6 +89,15 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ details, onRestart
           glow: 'from-emerald-950/80 via-stone-950/90 to-black/95',
           icon: <Skull className="w-8 h-8 text-emerald-400 animate-pulse" />,
           epitaphHeader: 'OVERCOME BY DEADLY DESERT VENOM',
+        };
+      case 'fall':
+        return {
+          badge: 'FATAL GRAVITATIONAL PLUNGE',
+          color: 'text-indigo-300',
+          borderColor: 'border-indigo-800/60',
+          glow: 'from-indigo-950/80 via-stone-950/90 to-black/95',
+          icon: <Mountain className="w-8 h-8 text-indigo-300 animate-pulse" />,
+          epitaphHeader: 'PLUNGED FROM PRECIPICE INTO THE DARK',
         };
       case 'dynamite':
       default:
@@ -260,7 +271,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ details, onRestart
         </p>
 
         {/* Action Controls */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2 flex-wrap">
           <button
             onClick={onRestart}
             className="w-full sm:w-auto px-8 py-3.5 rounded-xl font-mono text-sm font-bold bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-stone-950 transition-all shadow-[0_0_25px_rgba(245,158,11,0.25)] hover:shadow-[0_0_35px_rgba(245,158,11,0.4)] flex items-center justify-center gap-2.5 cursor-pointer uppercase tracking-wider active:scale-95"
@@ -268,6 +279,17 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ details, onRestart
             <RotateCcw className="w-4 h-4" />
             <span>Restart Expedition</span>
           </button>
+
+          {onOpenCoronersLog && (
+            <button
+              onClick={onOpenCoronersLog}
+              className="w-full sm:w-auto px-6 py-3.5 rounded-xl font-mono text-sm font-semibold bg-red-950/80 hover:bg-red-900 border border-red-700/70 text-red-200 hover:text-white transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              title="Open the Territorial Coroner's Inquest Dossiers in your Journal"
+            >
+              <FileText className="w-4 h-4 text-red-400" />
+              <span>Review Coroner&apos;s Log</span>
+            </button>
+          )}
 
           <button
             onClick={() => setIsMinimized(true)}

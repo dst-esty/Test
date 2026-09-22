@@ -40,6 +40,7 @@ import { VigilanceStatus } from './services/apacheVigilanceService';
 import { WorldScaleMode, formatUsgsDistance } from './world/superstitionTopography';
 import { isScatteredSkullClue } from './services/curseNarrativeEngine';
 import { armImmediateFullscreenOnFirstGesture, enterFullscreen } from './utils/fullscreen';
+import { recordCoronersLogEntry } from './services/coronersLogService';
 
 export default function App() {
   // Player State
@@ -194,6 +195,7 @@ export default function App() {
   const [hasShownWelcome, setHasShownWelcome] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [isJournalOpen, setIsJournalOpen] = useState(false);
+  const [journalInitialTab, setJournalInitialTab] = useState<'all' | 'gold' | 'curse' | 'coroner'>('all');
   const [isGuidebookOpen, setIsGuidebookOpen] = useState(false);
   const [isVictoryOpen, setIsVictoryOpen] = useState(false);
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
@@ -1268,11 +1270,11 @@ export default function App() {
 
   // Fast travel from Map, Claim Deed, or Stagecoach
   const handleFastTravel = (targetPos: Vector3D, destinationLabel?: string) => {
-    // If destination is Weaver's Needle monolithic core, place the player safely at the scenic lookout saddle (55, 18) looking up at the spire!
+    // If destination is Weaver's Needle monolithic core, place the player safely at the scenic lookout saddle (-25, 18) looking up at the spire!
     let targetX = targetPos.x;
     let targetZ = targetPos.z;
-    if (Math.hypot(targetPos.x - 80, targetPos.z - 15) < 16) {
-      targetX = 55;
+    if (Math.hypot(targetPos.x - 0, targetPos.z - 15) < 16) {
+      targetX = -25;
       targetZ = 18;
     }
 
@@ -1354,6 +1356,11 @@ export default function App() {
 
     showBanner('🌅 A New Expedition Begins at Historic Tortilla Flat! Provision at the Saloon & keep your canteen full.');
   }, [showBanner]);
+
+  const handlePlayerDeath = useCallback((details: GameOverDetails) => {
+    setGameOverDetails(details);
+    recordCoronersLogEntry(details);
+  }, []);
 
   // Keyboard shortcuts (M, J, B, V, 1-9, Esc)
   useEffect(() => {
@@ -1571,7 +1578,7 @@ export default function App() {
           shoreHandlerRef.current = fn;
         }}
         isGameOver={Boolean(gameOverDetails)}
-        onPlayerDeath={(details) => setGameOverDetails(details)}
+        onPlayerDeath={handlePlayerDeath}
         onRegisterRestartHandler={(fn) => {
           restartHandlerRef.current = fn;
         }}
@@ -1882,6 +1889,11 @@ export default function App() {
         onClose={() => setIsJournalOpen(false)}
         clues={clues}
         goldFound={playerState.goldFound}
+        initialTab={journalInitialTab}
+        onOpenMap={() => {
+          setIsJournalOpen(false);
+          setIsMapOpen(true);
+        }}
         onOpenGuidebook={() => {
           setIsJournalOpen(false);
           setIsGuidebookOpen(true);
@@ -2091,6 +2103,10 @@ export default function App() {
         <GameOverModal
           details={gameOverDetails}
           onRestart={handleRestartExpedition}
+          onOpenCoronersLog={() => {
+            setJournalInitialTab('coroner');
+            setIsJournalOpen(true);
+          }}
         />
       )}
     </div>

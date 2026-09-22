@@ -2248,6 +2248,57 @@ class SoundEngine {
     tone.stop(t + 2.3);
   }
 
+  // Fatal high-velocity gravity impact from walking off a mountain cliff or ledge at night
+  public playFatalLedgeFall() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // 1. Heavy physical bone/rock ground impact thud (low-frequency slam)
+    const slamOsc = this.ctx.createOscillator();
+    const slamGain = this.ctx.createGain();
+    slamOsc.type = 'triangle';
+    slamOsc.frequency.setValueAtTime(140, t);
+    slamOsc.frequency.exponentialRampToValueAtTime(24, t + 0.35);
+
+    slamGain.gain.setValueAtTime(0.85, t);
+    slamGain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+
+    slamOsc.connect(slamGain);
+    slamGain.connect(this.ctx.destination);
+    slamOsc.start(t);
+    slamOsc.stop(t + 0.5);
+
+    // 2. Jagged rock crunch / talus gravel shatter
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.28);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.08));
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(320, t);
+    filter.Q.setValueAtTime(2.0, t);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.65, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.28);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.ctx.destination);
+    noise.start(t);
+
+    // 3. Heartbeat flatline / hollow desert death tone
+    this.playPlayerDeath();
+  }
+
   public playOreChime() {
     if (this.isMuted) return;
     this.init();
@@ -4199,6 +4250,99 @@ class SoundEngine {
 
     jingleOsc.start(t);
     jingleOsc.stop(t + 0.14);
+  }
+
+  /**
+   * Frontier town alarm bell (heavy cast bronze bell tolling) for Tortilla Flat mobilization
+   */
+  public playTownAlarmBell(volume: number = 0.14) {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const vol = Math.max(0, Math.min(1.0, volume));
+    if (vol <= 0.002) return;
+
+    const t = this.ctx.currentTime;
+    // Bell strike fundamental + strike tone + warmer inharmonic bell partials
+    const bellFrequencies = [440, 523.25, 784, 1174.66, 1760];
+    const decays = [1.9, 1.5, 1.1, 0.7, 0.4];
+    const baseAmps = [0.15, 0.10, 0.07, 0.04, 0.02];
+
+    bellFrequencies.forEach((freq, idx) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+
+      const amp = baseAmps[idx] * (vol / 0.14);
+      gain.gain.setValueAtTime(amp, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + decays[idx]);
+
+      osc.connect(gain);
+      gain.connect(this.ctx!.destination);
+
+      osc.start(t);
+      osc.stop(t + decays[idx] + 0.05);
+    });
+
+    // Metallic clapper attack click (subtle)
+    const click = this.ctx.createOscillator();
+    const clickGain = this.ctx.createGain();
+    click.type = 'triangle';
+    click.frequency.setValueAtTime(1400, t);
+    clickGain.gain.setValueAtTime(0.05 * (vol / 0.14), t);
+    clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+    click.connect(clickGain);
+    clickGain.connect(this.ctx.destination);
+    click.start(t);
+    click.stop(t + 0.05);
+  }
+
+  /**
+   * Dramatic Western Outlaw sting / Territorial Most Wanted badge fanfare
+   */
+  public playOutlawBadgeEarned() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Low sinister brass/horn notes in minor interval + heavy woodcut stamp thud
+    const chord = [110, 130.81, 164.81, 220]; // A minor chord low
+    chord.forEach((freq, i) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, t);
+      const filter = this.ctx!.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(350 + i * 150, t);
+      filter.frequency.exponentialRampToValueAtTime(120, t + 1.2);
+
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx!.destination);
+
+      osc.start(t);
+      osc.stop(t + 1.6);
+    });
+
+    // Heavy stamp thud (Wanted poster gavel)
+    const thud = this.ctx.createOscillator();
+    const thudGain = this.ctx.createGain();
+    thud.type = 'triangle';
+    thud.frequency.setValueAtTime(80, t);
+    thud.frequency.exponentialRampToValueAtTime(20, t + 0.3);
+    thudGain.gain.setValueAtTime(0.4, t);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    thud.connect(thudGain);
+    thudGain.connect(this.ctx.destination);
+    thud.start(t);
+    thud.stop(t + 0.36);
   }
 }
 

@@ -380,27 +380,26 @@ export function buildSuperstitionPeaksAndSprings(
   // 5. Four Peaks Massif (USGS Elev. 7,657 ft / 2,334m - Mazatzal Mountains)
   // Real USGS Quadrangle: Four Peaks 7.5' Quad (N3337.5-W11115/7.5)
   // Geology: Proterozoic Mazatzal Quartzite (1.7 Ga) & Hydrothermal Amethyst Lode
-  // Lost Dutchman Lore: From the high ridge above Waltz's mine (X: 150, Z: 60),
-  // gazing north at 11.5° azimuth, all four peaks line up collinear to appear as ONE.
+  // Lost Dutchman Lore: Four Peaks rises Due North (azimuth 0.0° True North).
+  // Gaze north along the central meridian to see all four peaks line up collinear to appear as ONE.
   // When viewed from elsewhere, they fan out into the iconic four-toothed crown.
   // =========================================================================
   const fourPeaksGroup = new THREE.Group();
 
-  // Base massif center in game coordinates (looming north across Salt River canyon)
-  const massifCenterX = 285.6;
+  // Base massif center in game coordinates (looming Due North across Salt River canyon)
+  const massifCenterX = 0.0;
   const massifCenterZ = -606.3;
   const massifBaseY = getTerrainHeight(massifCenterX, massifCenterZ);
   fourPeaksGroup.position.set(massifCenterX, massifBaseY, massifCenterZ);
 
-  // Sightline vectors from high ridge above the mine (+150, +60):
-  // Ground truth transit line azimuth = 11.5° East of North
-  const sightDirX = 0.19937;
-  const sightDirZ = -0.97992;
-  const sightPerpX = 0.97992;
-  const sightPerpZ = 0.19937;
+  // Sightline vectors: Due North strike alignment (Azimuth 0.0° True North)
+  const sightDirX = 0.0;
+  const sightDirZ = -1.0;
+  const sightPerpX = 1.0;
+  const sightPerpZ = 0.0;
 
   // Unified Mazatzal Mountain Range Massif:
-  // Continuous photorealistic procedural heightfield oriented along the 11.5° strike
+  // Continuous photorealistic procedural heightfield oriented along the North-South strike
   // Dimensions: 360m along strike (S: -180 to +180), 260m across strike (T: -130 to +130)
   const gridM = 110; // Along strike resolution
   const gridN = 80;  // Across strike resolution

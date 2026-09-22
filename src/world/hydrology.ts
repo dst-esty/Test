@@ -50,13 +50,13 @@ const createBoxCanyonPoints = (): WaterChannelPoint[] => {
   return pts;
 };
 
-// 2. Needle Canyon Mountain Creek (Drains Weaver's Needle amphitheater)
+// 2. Needle Canyon Mountain Creek (Drains Weaver's Needle amphitheater at x: 0, z: 15)
 const NEEDLE_CREEK_POINTS: WaterChannelPoint[] = [
-  { x: 78, z: 52, width: 4.5, baseDepth: 0.8, maxFloodRise: 1.5 },
-  { x: 68, z: 32, width: 5.4, baseDepth: 1.0, maxFloodRise: 1.8 },
-  { x: 50, z: 24, width: 6.0, baseDepth: 1.1, maxFloodRise: 1.9 },
-  { x: 35, z: 18, width: 6.8, baseDepth: 1.2, maxFloodRise: 2.0 },
-  { x: 20, z: 14, width: 7.5, baseDepth: 1.3, maxFloodRise: 2.2 },
+  { x: 2,  z: 42, width: 4.5, baseDepth: 0.8, maxFloodRise: 1.5 },
+  { x: 2,  z: 32, width: 5.4, baseDepth: 1.0, maxFloodRise: 1.8 },
+  { x: 3,  z: 24, width: 6.0, baseDepth: 1.1, maxFloodRise: 1.9 },
+  { x: 4,  z: 18, width: 6.8, baseDepth: 1.2, maxFloodRise: 2.0 },
+  { x: 5,  z: 14, width: 7.5, baseDepth: 1.3, maxFloodRise: 2.2 },
   { x: 6,  z: 11, width: 8.2, baseDepth: 1.4, maxFloodRise: 2.4 },
 ];
 

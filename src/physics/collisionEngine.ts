@@ -21,8 +21,8 @@ export interface LandmarkObstacle {
 
 // Fixed iconic landmarks with solid physical geometry that cannot be walked through
 export const LANDMARK_OBSTACLES: LandmarkObstacle[] = [
-  // 1. Weaver's Needle monolithic volcanic core
-  { name: "Weaver's Needle", x: 80, z: 15, radius: 19.5, height: 140 },
+  // 1. Weaver's Needle monolithic volcanic core - Due South
+  { name: "Weaver's Needle", x: 0, z: 15, radius: 19.5, height: 140 },
   // 2. Eye of the Needle rock arch pillars
   { name: 'Eye of the Needle (West Pillar)', x: 126.5, z: -40, radius: 2.2, height: 14 },
   { name: 'Eye of the Needle (East Pillar)', x: 133.5, z: -40, radius: 2.2, height: 14 },

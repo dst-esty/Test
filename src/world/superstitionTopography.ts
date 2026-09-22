@@ -52,8 +52,8 @@ export const REAL_USGS_TOPOGRAPHY: UsgsTopographicFeature[] = [
     elevationMeters: 1388,
     quadrangle: "Weavers Needle 7.5' Quad",
     geology: 'Eroded Volcanic Dacite Neck / Conduit Plug',
-    historicalNotes: 'Iconic 1,000-foot monolith named after mountain man Pauline Weaver in 1853. The legendary keystone of Waltz\'s Lost Dutchman Mine clues.',
-    position: { x: 80, z: 15 },
+    historicalNotes: 'Iconic 1,000-foot monolith named after mountain man Pauline Weaver in 1853. Rising Due South on the Dutchman Transit Meridian (azimuth 180° South). The legendary keystone of Waltz\'s Lost Dutchman Mine clues.',
+    position: { x: 0, z: 15 },
     featureCategory: 'spire',
   },
   {
@@ -352,8 +352,8 @@ export const REAL_USGS_TOPOGRAPHY: UsgsTopographicFeature[] = [
     elevationMeters: 2334,
     quadrangle: "Four Peaks 7.5' Quad",
     geology: 'Proterozoic Mazatzal Quartzite (1.7 Ga) & Hydrothermal Amethyst Vein',
-    historicalNotes: 'Dominant 4-summited crown in the Mazatzal Range north across the Salt River (highest point Brown\'s Peak at 7,657 ft). Keystone of Waltz\'s Lost Dutchman sightline clue: when viewed from the high ridge above the mine, the four peaks line up to appear as a single solitary mountain peak.',
-    position: { x: 286, z: -606 },
+    historicalNotes: 'Dominant 4-summited crown in the Mazatzal Range Due North across the Salt River (highest point Brown\'s Peak at 7,657 ft). Keystone of Waltz\'s Lost Dutchman sightline clue: when viewed gazing north along the transit meridian, the four peaks line up to appear as a single solitary mountain peak.',
+    position: { x: 0, z: -606 },
     featureCategory: 'summit',
   },
 ];
@@ -361,14 +361,14 @@ export const REAL_USGS_TOPOGRAPHY: UsgsTopographicFeature[] = [
 /**
  * Authentic Four Peaks Lost Dutchman Sightline Alignment Calculator
  *
- * Ground truth transit line passes through the High Ridge above the mine (150, 60)
- * pointing along azimuth 11.5° (NNE) toward the 4 summits of Four Peaks.
+ * Ground truth transit line passes along the central meridian (X: 0)
+ * pointing Due North (azimuth 0.0° True North) toward the 4 summits of Four Peaks.
  */
 export interface FourPeaksSightlineStatus {
   isAlignedAsOne: boolean; // True if within 0.35° of collinear alignment
   spreadDeg: number;       // Angular spread between summits (0.0° when aligned as one)
   perpDistanceM: number;   // Distance in meters to the Dutchman Transit Line
-  transitAzimuthDeg: number; // Azimuth looking toward the summits (~11.5°)
+  transitAzimuthDeg: number; // Azimuth looking toward the summits (0.0° North)
   statusLabel: string;
 }
 
@@ -376,22 +376,22 @@ export function getFourPeaksSightlineStatus(
   playerX: number,
   playerZ: number
 ): FourPeaksSightlineStatus {
-  // Transit anchor: High Ridge above the Lost Dutchman Mine
-  const anchorX = 150;
-  const anchorZ = 60;
-  const bearingRad = (11.5 * Math.PI) / 180;
-  const dirX = Math.sin(bearingRad);  // 0.19937
-  const dirZ = -Math.cos(bearingRad); // -0.97992
+  // Transit anchor: Central Dutchman Sightline Meridian (Due North, X: 0)
+  const anchorX = 0;
+  const anchorZ = 0;
+  const bearingRad = 0;
+  const dirX = 0;
+  const dirZ = -1;
 
-  // The 4 summits positioned along the true strike:
-  const centerDist = 680;
-  const amethystOffset = -90;
-  const brownsOffset = 90;
+  // The 4 summits positioned along the true North-South Mazatzal strike (Z: -606.3):
+  const centerDist = 606.3;
+  const amethystOffset = -84;
+  const brownsOffset = 84;
 
-  const amethystX = anchorX + dirX * (centerDist + amethystOffset);
-  const amethystZ = anchorZ + dirZ * (centerDist + amethystOffset);
-  const brownsX = anchorX + dirX * (centerDist + brownsOffset);
-  const brownsZ = anchorZ + dirZ * (centerDist + brownsOffset);
+  const amethystX = anchorX;
+  const amethystZ = -(centerDist + amethystOffset);
+  const brownsX = anchorX;
+  const brownsZ = -(centerDist + brownsOffset);
 
   // Azimuths from player to South and North summits
   const angAmethyst = (Math.atan2(amethystX - playerX, -(amethystZ - playerZ)) * 180) / Math.PI;
@@ -399,14 +399,14 @@ export function getFourPeaksSightlineStatus(
 
   const spreadDeg = Math.abs(angBrowns - angAmethyst);
 
-  // Perpendicular distance to the Dutchman Transit Line
-  const perpDist = Math.abs((playerX - anchorX) * (-dirZ) - (playerZ - anchorZ) * dirX);
+  // Perpendicular distance to the Due North Dutchman Transit Line (X = 0)
+  const perpDist = Math.abs(playerX);
 
   const isAlignedAsOne = spreadDeg <= 0.35 || perpDist <= 4.5;
 
   let statusLabel = '';
   if (isAlignedAsOne) {
-    statusLabel = '✦ ALIGNED AS ONE (Dutchman Transit Line)';
+    statusLabel = '✦ ALIGNED AS ONE (Due North Transit Line)';
   } else if (spreadDeg < 2.0) {
     statusLabel = `▲ Crown Fanning (${spreadDeg.toFixed(1)}° spread)`;
   } else {
@@ -417,7 +417,7 @@ export function getFourPeaksSightlineStatus(
     isAlignedAsOne,
     spreadDeg,
     perpDistanceM: perpDist,
-    transitAzimuthDeg: 11.5,
+    transitAzimuthDeg: 0.0,
     statusLabel,
   };
 }
@@ -426,11 +426,11 @@ export function getFourPeaksSightlineStatus(
  * Authentic 1:1 USGS Superstition Mountain Quadrangle Horizontal Scale Calibration.
  *
  * In the USGS 7.5-minute topographic survey:
- * - Distance from Peralta Trailhead (-120, -120) to Weaver's Needle (80, 15) is 4.20 km (2.61 miles / 4,200 meters).
+ * - Distance from Peralta Trailhead (-120, -120) to Weaver's Needle (0, 15) Due South on the meridian is 4.20 km (2.61 miles / 4,200 meters).
  * - Distance from Weaver's Needle to Tortilla Flat (0, -252) is 4.85 km straight-line (10.8 km pack trail via Canyon).
  * - Distance from Peralta Trailhead to Superstition Peak (-180, 65) is 3.82 km (2.37 miles).
  *
- * In local engine coordinate space, Peralta -> Weaver's Needle is hypot(200, 135) = 241.3 units.
+ * In local engine coordinate space, Peralta -> Weaver's Needle is hypot(120, 135) = 180.6 units.
  * Therefore, 1 coordinate unit represents 17.406 real-world meters (1:17.4 simulation ratio).
  */
 export const USGS_1TO1_HORIZONTAL_SCALE = 17.406;
@@ -521,7 +521,7 @@ export function getUsgsElevation(
     { x: 25, z: -40, datumFt: 2480 }, // Charlebois / Needle Canyon Basin
     { x: -180, z: -150, datumFt: 2360 }, // Hieroglyphic Canyon Wash
     { x: 180, z: -120, datumFt: 3400 }, // Reavis Valley Plateau
-    { x: 286, z: -606, datumFt: 4600 }, // Mazatzal Massif Base
+    { x: 0, z: -606, datumFt: 4600 }, // Mazatzal Massif Base
   ];
 
   let totalWeight = 0;

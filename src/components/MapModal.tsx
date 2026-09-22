@@ -720,9 +720,9 @@ export const MapModal: React.FC<MapModalProps> = ({
               );
             })()}
 
-            {/* 2. Weaver's Needle Volcanic Dacite Core (Real world x = 80, z = 15 • USGS Elev. 4,553 ft) */}
+            {/* 2. Weaver's Needle Volcanic Dacite Core (Real world x = 0, z = 15 • USGS Elev. 4,553 ft • Due South Transit) */}
             {(() => {
-              const wx = toSvgX(80);
+              const wx = toSvgX(0);
               const wy = toSvgY(15);
               const rBase = toSvgDist(45);
               const rCore = toSvgDist(24);
@@ -1418,27 +1418,27 @@ export const MapModal: React.FC<MapModalProps> = ({
                 </text>
 
                 {/* Jacob Waltz Lost Dutchman Four Peaks Transit Sightline */}
-                {/* True bearing = 11.5° (NNE) passing from Four Peaks through High Ridge (150, 60) */}
+                {/* True bearing = 0.0° Due North passing straight to Four Peaks */}
                 <line
-                  x1={toSvgX(150 + 0.19937 * 770)}
-                  y1={toSvgY(60 - 0.97992 * 770)}
-                  x2={toSvgX(150 - 0.19937 * 220)}
-                  y2={toSvgY(60 + 0.97992 * 220)}
+                  x1={toSvgX(0)}
+                  y1={toSvgY(-610)}
+                  x2={toSvgX(0)}
+                  y2={toSvgY(250)}
                   stroke="#d97706"
                   strokeWidth="2.2"
                   strokeDasharray="6 4"
                   strokeOpacity="0.85"
                 />
                 <text
-                  x={toSvgX(150 + 0.19937 * 160) + 6}
-                  y={toSvgY(60 - 0.97992 * 160)}
+                  x={toSvgX(0) + 6}
+                  y={toSvgY(-120)}
                   fill="#b45309"
                   fontSize="8"
                   fontFamily="serif"
                   fontStyle="italic"
-                  transform={`rotate(-78.5 ${toSvgX(150 + 0.19937 * 160) + 6} ${toSvgY(60 - 0.97992 * 160)})`}
+                  transform={`rotate(-90 ${toSvgX(0) + 6} ${toSvgY(-120)})`}
                 >
-                  Dutchman Transit: Four Peaks As One (11.5°)
+                  Dutchman Transit: Four Peaks Due North (0°)
                 </text>
 
                 {/* Peralta Stone Map Inscribed Ciphers & Spanish Glyphs */}
@@ -1720,7 +1720,7 @@ export const MapModal: React.FC<MapModalProps> = ({
                             ⛰️ Weaver&apos;s Needle (El Sombrero • 4,553 FT)
                           </span>
                           <span className="block text-[10px] text-amber-400 font-mono mt-0.5">
-                            USGS Elev: 4,553 ft (1,388 m) • Coords: 80E, 15S (33°25′47″N, 111°22′18″W)
+                            USGS Elev: 4,553 ft (1,388 m) • Coords: 0E, 15S (33°25′47″N, 111°22′18″W) • Due South Transit
                           </span>
                           <span className="block text-[10px] text-stone-300 font-mono">
                             Distance: {distToPlayer > 1000 ? `${(distToPlayer / 1000).toFixed(1)} km` : `${distToPlayer} m`}

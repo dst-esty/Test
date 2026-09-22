@@ -76,6 +76,8 @@ import { Skull } from 'lucide-react';
 import { isScatteredSkullClue } from '../services/curseNarrativeEngine';
 import { enterFullscreen } from '../utils/fullscreen';
 import { desertShadeService } from '../services/desertShadeService';
+import { townWantedService } from '../services/townWantedService';
+import { TownWantedOverlay } from './TownWantedOverlay';
 
 /**
  * Authentic Historic & Forensic Locations of Scattered Skulls & Headless Remains
@@ -404,6 +406,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         playerPitch.current = 0;
         verticalVelocity.current = 0;
         isGrounded.current = true;
+        fallStartEyeY.current = townY;
+        isWalkedOffLedgeRef.current = false;
+        fallAtNightRef.current = false;
         if (characterMeshRef.current) {
           characterMeshRef.current.rotation.set(0, 0, 0);
           characterMeshRef.current.visible = viewMode === 'third';
@@ -437,6 +442,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         lastSentPos.current.set(targetPos.x, groundY + 1.7, targetPos.z);
         verticalVelocity.current = 0;
         isGrounded.current = true;
+        fallStartEyeY.current = groundY + 1.7;
+        isWalkedOffLedgeRef.current = false;
+        fallAtNightRef.current = false;
         if (cameraRef.current) {
           cameraRef.current.position.set(targetPos.x, groundY + 1.7, targetPos.z);
         }
@@ -606,6 +614,46 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   const wasUndergroundRef = useRef<boolean>(false);
   const isWindowFocusedRef = useRef<boolean>(true);
   const isHunkeredDownRef = useRef<boolean>(playerState.isHunkeredDown ?? false);
+
+  // Gravity and Night Ledge Fall Tracking
+  const fallStartEyeY = useRef<number>(playerPos.current.y);
+  const isWalkedOffLedgeRef = useRef<boolean>(false);
+  const fallAtNightRef = useRef<boolean>(false);
+
+  const handleNightFallDeath = useCallback(
+    (fallDistance: number) => {
+      if (isGameOverRef.current) return;
+      currentHealthRef.current = 0;
+      soundEngine.playFatalLedgeFall();
+      if (onTriggerDamageFlash) onTriggerDamageFlash();
+
+      setPlayerState((prev) => ({
+        ...prev,
+        health: 0,
+        isRidingMount: false,
+      }));
+
+      const dropMeters = Math.max(fallDistance, 2.0);
+      const dropFeet = Math.round(dropMeters * 3.28084);
+
+      triggerDeath({
+        reason: 'fall',
+        title: 'Fatal Plunge from Mountain Ledge',
+        subtitle: 'Succumbed to Gravity in the Pitch-Black Night',
+        cause: `In the pitch-black Arizona desert night, your prospector lost footing and plunged ${dropFeet} feet (${dropMeters.toFixed(1)}m) off a sheer mountain precipice onto the jagged volcanic boulders below. Gravitational impact proved immediately fatal. Navigating the unlit cliffs, razorback ridges, and canyon drop-offs of the Superstitions in the dark is deadly—rest by a campfire until dawn!`,
+        goldFound: playerStateRef.current.goldFound || 0,
+        blocksDug: playerStateRef.current.blocksDug || 0,
+        landmarksDiscovered: playerStateRef.current.discoveredLandmarks?.length || 0,
+        timeSurvivedSeconds: Math.floor((Date.now() - expeditionStartTime.current) / 1000),
+        coordinates: {
+          x: Math.round(playerPos.current.x * 10) / 10,
+          y: Math.round(playerPos.current.y * 10) / 10,
+          z: Math.round(playerPos.current.z * 10) / 10,
+        },
+      });
+    },
+    [onTriggerDamageFlash, setPlayerState, triggerDeath]
+  );
 
   const executeToggleHunker = useCallback(() => {
     if (isGameOverRef.current) return;
@@ -2674,6 +2722,31 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           }
         }
 
+        // 1c. High-caliber Winchester strike against Tortilla Flat Townfolk NPCs & Lawmen
+        if (!bulletHitTarget && townfolkManagerRef.current) {
+          const hitTownNPC = townfolkManagerRef.current.checkBulletHit(cam.position, lookDir, (victimName, damage, isDowned) => {
+            if (onTriggerHitMarker) onTriggerHitMarker();
+            soundEngine.playRicochet();
+            if (isDowned) {
+              if (onShowBanner) {
+                onShowBanner(`⚠️ CRIME COMMITTED: ${victimName} has been shot down! The Town Posse has been mobilized!`);
+              }
+            } else {
+              if (onShowBanner) {
+                onShowBanner(`⚠️ ARMED ASSAULT: Shot ${victimName} for ${damage} damage! Outlaw status increased!`);
+              }
+            }
+          });
+          if (hitTownNPC) {
+            bulletHitTarget = true;
+          }
+        }
+
+        // Report gunfire infraction within Tortilla Flat settlement boundary
+        if (Math.hypot(cam.position.x, cam.position.z - (-250.0)) < 70.0) {
+          townWantedService.reportGunfireInTown();
+        }
+
         // 2. High-caliber bullet strike against wildlife & hunting game (deer, sheep, rabbits, snakes)
         if (wildlifeManagerRef.current) {
           const wRay = new THREE.Raycaster(cam.position, lookDir, 0.5, 65.0);
@@ -3001,6 +3074,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             }
             verticalVelocity.current = 7.5;
             isGrounded.current = false;
+            fallStartEyeY.current = playerPos.current.y;
+            isWalkedOffLedgeRef.current = false;
+            fallAtNightRef.current = timeOfDayRef.current >= 19.5 || timeOfDayRef.current < 5.5;
             soundEngine.playJump();
           }
         }
@@ -3417,6 +3493,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         }
         verticalVelocity.current = 7.5;
         isGrounded.current = false;
+        fallStartEyeY.current = playerPos.current.y;
+        isWalkedOffLedgeRef.current = false;
+        fallAtNightRef.current = timeOfDayRef.current >= 19.5 || timeOfDayRef.current < 5.5;
         soundEngine.playJump();
       }
     };
@@ -5313,8 +5392,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             }
           }
         }
-        // 9. Weaver's Needle Summit (USGS Benchmark Elev. 4,553 ft / 1,388m)
-        else if (Math.hypot(curX - 80, curZ - 15) < 22 && curY > 52) {
+        // 9. Weaver's Needle Summit (USGS Benchmark Elev. 4,553 ft / 1,388m) - Due South (0, 15)
+        else if (Math.hypot(curX - 0, curZ - 15) < 22 && curY > 52) {
           if (!discoveredSummitsRef.current.has('weavers_needle_summit')) {
             discoveredSummitsRef.current.add('weavers_needle_summit');
             soundEngine.playDiscovery();
@@ -5698,21 +5777,47 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             // Stepped over a canyon rim or sharp outcrop edge: smoothly fall with gravity instead of teleporting down in 1 frame!
             isGrounded.current = false;
             verticalVelocity.current = -1.2;
+            fallStartEyeY.current = playerPos.current.y;
+            isWalkedOffLedgeRef.current = true;
+            fallAtNightRef.current = timeOfDayRef.current >= 19.5 || timeOfDayRef.current < 5.5;
           } else {
             // Cleanly clamped to terrain - walking up/down dunes and ridges is buttery smooth!
             playerPos.current.y = targetEyeY;
             verticalVelocity.current = 0;
+            fallStartEyeY.current = playerPos.current.y;
+            isWalkedOffLedgeRef.current = false;
+            fallAtNightRef.current = false;
           }
         } else {
-          // Airborne jump physics
+          // Airborne gravity physics
           verticalVelocity.current -= 22.0 * delta;
           playerPos.current.y += verticalVelocity.current * delta;
 
           if (playerPos.current.y <= targetEyeY) {
             playerPos.current.y = targetEyeY;
+            const fallDistance = fallStartEyeY.current - targetEyeY;
+            const impactSpeed = Math.abs(verticalVelocity.current);
             verticalVelocity.current = 0;
             isGrounded.current = true;
-            soundEngine.playLand();
+
+            const isNightNow = timeOfDayRef.current >= 19.5 || timeOfDayRef.current < 5.5;
+            const isFatalNightLedgeFall =
+              (isNightNow || fallAtNightRef.current) &&
+              !isGameOverRef.current &&
+              (
+                (isWalkedOffLedgeRef.current && (fallDistance >= 1.6 || impactSpeed >= 6.5)) ||
+                fallDistance >= 2.8 ||
+                impactSpeed >= 10.5
+              );
+
+            if (isFatalNightLedgeFall) {
+              handleNightFallDeath(fallDistance);
+            } else {
+              soundEngine.playLand();
+            }
+
+            isWalkedOffLedgeRef.current = false;
+            fallAtNightRef.current = false;
           }
         }
       }
@@ -5723,9 +5828,14 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           uLayers.layers.find((l) => l.level === uLayers.maxUnlockedLevel) || uLayers.layers[0];
         const minSafeY = uLayers.surfaceY - deepestL.depthMeters - 2.5;
         if (playerPos.current.y < minSafeY || isNaN(playerPos.current.y)) {
-          playerPos.current.y = currentGroundY + 1.7;
-          verticalVelocity.current = 0;
-          isGrounded.current = true;
+          const isNightNow = timeOfDayRef.current >= 19.5 || timeOfDayRef.current < 5.5;
+          if ((isNightNow || fallAtNightRef.current) && !isGameOverRef.current && (isWalkedOffLedgeRef.current || fallStartEyeY.current - playerPos.current.y >= 2.5)) {
+            handleNightFallDeath(Math.max(12, fallStartEyeY.current - playerPos.current.y));
+          } else {
+            playerPos.current.y = currentGroundY + 1.7;
+            verticalVelocity.current = 0;
+            isGrounded.current = true;
+          }
         }
       } else {
         const tunnelCheck = foliageManagerRef.current?.mountainHoleManager?.isInsideMountainTunnel(
@@ -5740,9 +5850,14 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             : getTerrainHeight(playerPos.current.x, playerPos.current.z);
 
         if (playerPos.current.y < minSurfaceY - 4.0 || isNaN(playerPos.current.y)) {
-          playerPos.current.y = minSurfaceY + 1.7;
-          verticalVelocity.current = 0;
-          isGrounded.current = true;
+          const isNightNow = timeOfDayRef.current >= 19.5 || timeOfDayRef.current < 5.5;
+          if ((isNightNow || fallAtNightRef.current) && !isGameOverRef.current) {
+            handleNightFallDeath(Math.max(12, fallStartEyeY.current - playerPos.current.y));
+          } else {
+            playerPos.current.y = minSurfaceY + 1.7;
+            verticalVelocity.current = 0;
+            isGrounded.current = true;
+          }
         }
       }
 
@@ -6635,9 +6750,46 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         );
       }
 
-      // 5b-5. Tortilla Flat Historic Townfolk NPCs animation & logic
+      // 5b-5. Tortilla Flat Historic Townfolk NPCs animation, law enforcement mobilization & combat logic
+      townWantedService.updatePlayerPosition(playerPos.current.x, playerPos.current.z);
       if (townfolkManagerRef.current) {
-        townfolkManagerRef.current.update(delta, playerPos.current);
+        townfolkManagerRef.current.update(
+          delta,
+          playerPos.current,
+          (dmg, attackerName) => {
+            if (onTriggerDamageFlash) onTriggerDamageFlash();
+            setPlayerState((prev) => {
+              const nextHealth = prev.health - dmg;
+              if (nextHealth <= 0 && prev.health > 0) {
+                soundEngine.playPlayerDeath();
+                triggerDeath({
+                  reason: 'bandit',
+                  title: 'Shot Down by Territorial Law Enforcement',
+                  subtitle: 'Demise of a Most Wanted Outlaw',
+                  cause: `Gunned down by ${attackerName} in Tortilla Flat after being declared a Territorial Most Wanted Outlaw by the Pinal County Sheriff's Department.`,
+                  goldFound: prev.goldFound || 0,
+                  blocksDug: prev.blocksDug || 0,
+                  landmarksDiscovered: prev.discoveredLandmarks?.length || 1,
+                  timeSurvivedSeconds: Math.floor((Date.now() - expeditionStartTime.current) / 1000),
+                  coordinates: { x: playerPos.current.x, y: playerPos.current.y, z: playerPos.current.z },
+                });
+                return {
+                  ...prev,
+                  health: 0,
+                };
+              }
+              return {
+                ...prev,
+                health: nextHealth,
+              };
+            });
+          },
+          (start, end) => {
+            if (combatManagerRef.current) {
+              combatManagerRef.current.spawnTracer(start, end, true);
+            }
+          }
+        );
       }
 
       // 5b-6. Fort McDowell US Cavalry Patrol Column
@@ -7464,6 +7616,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         opticalZoom={gogglesZoomLevel}
         onCycleZoom={handleCycleGogglesZoom}
       />
+
+      {/* 1880s Pinal County Most Wanted & Posse Mobilization HUD */}
+      <TownWantedOverlay />
     </div>
   );
 };

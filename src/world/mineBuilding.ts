@@ -200,7 +200,7 @@ export function validateStructurePlacement(
         reason: '⚠️ Cannot erect headframe on the jagged Superstition perimeter mountain wall! Build on valley floors, washes, or open plateaus.',
       };
     }
-    const distToNeedle = Math.hypot(pos.x - 80, pos.z - 15);
+    const distToNeedle = Math.hypot(pos.x - 0, pos.z - 15);
     if (distToNeedle < 28) {
       return {
         valid: false,
