@@ -72,6 +72,8 @@ import {
   PERALTA_SOLVES,
   PeraltaSolveId,
   peraltaStoneMapService,
+  PERALTA_STONE_ARTIFACTS,
+  PeraltaStoneArtifact,
 } from '../services/peraltaStoneMapService';
 import { TownfolkManager } from '../world/townfolk';
 import { isTortillaFlatTownLimits } from '../world/townBoundaries';
@@ -200,6 +202,8 @@ interface WorldCanvasProps {
   lunarPhase?: number;
   onOpenFrontierDiscovery?: (discovery: FrontierDiscoveryDef, isLooted: boolean) => void;
   onTriggerSolve?: (solveId: PeraltaSolveId) => void;
+  onRecoverPeraltaArtifact?: (artifact: PeraltaStoneArtifact) => void;
+  onInspectMineLock?: () => void;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
@@ -284,6 +288,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   lunarPhase = 0.5,
   onOpenFrontierDiscovery,
   onTriggerSolve,
+  onRecoverPeraltaArtifact,
+  onInspectMineLock,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
@@ -4614,15 +4620,40 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         }
       }
 
-      // 3. Lost Dutchman Mine entrance
+      // 3. Lost Dutchman Mine entrance (requires all 3 physical Peralta Stone Map fragments)
       const distToMine = Math.hypot(px - 160, pz - 110);
       if (distToMine < 6.5) {
-        if (executeAction) {
-          onEnterMine();
+        const hasAllFragments = peraltaStoneMapService.hasAllFragments();
+        const collectedCount = peraltaStoneMapService.getCollectedCount();
+        const totalCount = peraltaStoneMapService.getTotalArtifactCount();
+
+        if (!hasAllFragments) {
+          const prompt = `🔒 Peralta Stone Seal Intact (${collectedCount}/${totalCount} Fragments Recovered) [E]`;
+          const handleInspectLock = () => {
+            if (onInspectMineLock) {
+              onInspectMineLock();
+            } else if (onShowBanner) {
+              onShowBanner(
+                `🔒 The mine entrance is sealed by ancient Peralta ciphers! Recover all 3 stone fragments across the desert biomes (${collectedCount}/${totalCount} found).`
+              );
+            }
+          };
+
+          if (executeAction) {
+            handleInspectLock();
+          } else {
+            onPromptInteract(prompt, handleInspectLock);
+          }
+          return;
         } else {
-          onPromptInteract('Enter Lost Dutchman Mine [E]', () => onEnterMine());
+          const prompt = '⚡ Unseal & Enter Lost Dutchman Mine [E]';
+          if (executeAction) {
+            onEnterMine();
+          } else {
+            onPromptInteract(prompt, () => onEnterMine());
+          }
+          return;
         }
-        return;
       }
 
       // 3b. Historic Town of Tortilla Flat (Saloon, Mercantile, Campfire, Artesian Trough & Tortilla Creek Landing)
@@ -5045,6 +5076,30 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             handleTriggerSolve();
           } else {
             onPromptInteract(prompt, handleTriggerSolve);
+          }
+          return;
+        }
+      }
+
+      // 4d. Peralta Stone Map Physical Artifacts (3 Distinct Fragments across biomes)
+      for (const artifact of PERALTA_STONE_ARTIFACTS) {
+        const dist = Math.hypot(px - artifact.position.x, pz - artifact.position.z);
+        if (dist < 4.5) {
+          const isCollected = peraltaStoneMapService.isArtifactCollected(artifact.id);
+          const prompt = isCollected
+            ? `🪨 ${artifact.name}: Inspected Excavation Site [E]`
+            : `🪨 Recover ${artifact.name} (${artifact.biomeShort}) [E]`;
+
+          const handleCollectArtifact = () => {
+            if (onRecoverPeraltaArtifact) {
+              onRecoverPeraltaArtifact(artifact);
+            }
+          };
+
+          if (executeAction) {
+            handleCollectArtifact();
+          } else {
+            onPromptInteract(prompt, handleCollectArtifact);
           }
           return;
         }

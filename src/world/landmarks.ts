@@ -9,6 +9,7 @@ import { buildRuthMysteryAndSkeletons } from './ruthMysteryAndSkeletons';
 import { buildDickHolmesCluesSite } from './dickHolmesCluesSite';
 import { buildFrontierExplorationDiscoveries } from './frontierExplorationDiscoveries';
 import { buildPeraltaSolveSites } from './peraltaSolveSites';
+import { buildPeraltaArtifactSites } from './peraltaArtifactSites';
 
 export interface LandmarkMeshes {
   weaversNeedle: THREE.Group;
@@ -39,6 +40,8 @@ export interface LandmarkMeshes {
   dickHolmesSite?: THREE.Group;
   frontierDiscoveries?: Map<string, THREE.Group>;
   peraltaSolveSites?: THREE.Group;
+  peraltaArtifactSites?: THREE.Group;
+  updatePeraltaArtifactsVisibility?: () => void;
   waterRefillPoints: THREE.Vector3[];
 }
 
@@ -1124,6 +1127,15 @@ export function createLandmarkStructures(
   // ==========================================
   const solveSitesData = buildPeraltaSolveSites(scene);
 
+  // ==========================================
+  // 18. Peralta Stone Map Physical Artifacts:
+  // Three distinct stone fragments scattered across different desert biomes
+  // 1. Trail Map Stone: Low Sonoran Wash (-72X, -228Z)
+  // 2. Priest & Dagger Stone: Volcanic Box Canyon (84X, -60Z)
+  // 3. Heart Stone Key: High Basalt Mesa (26X, -42Z)
+  // ==========================================
+  const artifactSitesData = buildPeraltaArtifactSites(scene);
+
   return {
     weaversNeedle: needleGroup,
     trailhead: trailheadGroup,
@@ -1153,6 +1165,8 @@ export function createLandmarkStructures(
     dickHolmesSite: dickHolmesData.rootGroup,
     frontierDiscoveries: discoveriesData.groups,
     peraltaSolveSites: solveSitesData.rootGroup,
+    peraltaArtifactSites: artifactSitesData.rootGroup,
+    updatePeraltaArtifactsVisibility: artifactSitesData.updateVisibility,
     waterRefillPoints,
   };
 }
