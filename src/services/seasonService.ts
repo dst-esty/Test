@@ -1,6 +1,7 @@
 import { SeasonType, SeasonInfo, WeatherType } from '../types';
 
 const SEASON_ORDER: SeasonType[] = ['spring', 'summer', 'autumn', 'winter'];
+export const DAYS_PER_SEASON = 30; // Seasons now last 30 full in-game days (~9 hours of active play per season)
 
 export const SEASONS_DATA: Record<SeasonType, SeasonInfo> = {
   spring: {
@@ -87,27 +88,60 @@ export const SEASONS_DATA: Record<SeasonType, SeasonInfo> = {
 
 class SeasonService {
   private currentSeason: SeasonType = 'spring';
-  private calendarDay: number = 1; // 1 to 28 days per season cycle
+  private calendarDay: number = 1; // 1 to DAYS_PER_SEASON days per season
   private year: number = 1884;
   private subscribers: Set<(season: SeasonType, info: SeasonInfo) => void> = new Set();
   private onBannerCallback?: (message: string) => void;
 
+  /**
+   * Deterministic Universal Synchronized Season:
+   * Uses real-world epoch time to guarantee that even before a WebSocket connection connects,
+   * every player on any device calculates the EXACT same season, calendar day, and historic year in lockstep.
+   * 1 in-game day = ~18 real minutes.
+   * 30 in-game days per season = 9 real hours per season.
+   * Full 4-season year = 36 real hours.
+   */
+  public static getUniversalEpochState(): { season: SeasonType; day: number; year: number } {
+    const epochOffsetMs = 1704067200000; // Reference epoch (Jan 1, 2024 UTC)
+    const elapsedMs = Math.max(0, Date.now() - epochOffsetMs);
+    const dayLengthMs = 18 * 60 * 1000; // 18 minutes per in-game day
+    const seasonLengthMs = DAYS_PER_SEASON * dayLengthMs; // 9 hours per season
+    const yearLengthMs = 4 * seasonLengthMs; // 36 hours per frontier year
+
+    const totalDays = Math.floor(elapsedMs / dayLengthMs);
+    const dayInSeason = (totalDays % DAYS_PER_SEASON) + 1;
+    const seasonIndex = Math.floor((elapsedMs % yearLengthMs) / seasonLengthMs);
+    const year = 1884 + Math.floor(elapsedMs / yearLengthMs);
+
+    return {
+      season: SEASON_ORDER[seasonIndex % SEASON_ORDER.length],
+      day: dayInSeason,
+      year,
+    };
+  }
+
   constructor() {
+    // Default initialize to the deterministic universal synchronized epoch state
+    const epochState = SeasonService.getUniversalEpochState();
+    this.currentSeason = epochState.season;
+    this.calendarDay = epochState.day;
+    this.year = epochState.year;
+
     try {
       const savedSeason = localStorage.getItem('superstition_current_season') as SeasonType;
       if (savedSeason && SEASONS_DATA[savedSeason]) {
         this.currentSeason = savedSeason;
       }
-      const savedDay = parseInt(localStorage.getItem('superstition_calendar_day') || '1', 10);
-      if (!isNaN(savedDay) && savedDay >= 1 && savedDay <= 120) {
+      const savedDay = parseInt(localStorage.getItem('superstition_calendar_day') || '', 10);
+      if (!isNaN(savedDay) && savedDay >= 1 && savedDay <= DAYS_PER_SEASON) {
         this.calendarDay = savedDay;
       }
-      const savedYear = parseInt(localStorage.getItem('superstition_calendar_year') || '1884', 10);
-      if (!isNaN(savedYear)) {
+      const savedYear = parseInt(localStorage.getItem('superstition_calendar_year') || '', 10);
+      if (!isNaN(savedYear) && savedYear >= 1880) {
         this.year = savedYear;
       }
     } catch {
-      // Safe fallback in sandboxed iframes
+      // Safe fallback in sandboxed environments
     }
   }
 
@@ -132,26 +166,32 @@ class SeasonService {
     return this.year;
   }
 
-  public getFormattedDate(): string {
-    const info = this.getSeasonInfo();
-    // Deterministic month and day calculation based on calendar day (1-7 per season for brisk progression)
-    const monthNames: Record<SeasonType, string[]> = {
-      spring: ['March', 'April', 'May'],
-      summer: ['June', 'July', 'August'],
-      autumn: ['September', 'October', 'November'],
-      winter: ['December', 'January', 'February'],
-    };
-    const months = monthNames[this.currentSeason];
-    const monthIdx = Math.min(months.length - 1, Math.floor(((this.calendarDay - 1) / 7) * months.length));
-    const dayOfMonth = (((this.calendarDay - 1) * 4 + 7) % 28) + 1;
-    return `${months[monthIdx]} ${dayOfMonth}, ${this.year}`;
-  }
-
-  public setSeason(season: SeasonType, announce: boolean = true): SeasonInfo {
+  /**
+   * Synchronizes the authoritative universal season across all players.
+   * Called by the multiplayer server to ensure every prospector experiences the exact same season.
+   */
+  public syncUniversalSeason(
+    season: SeasonType,
+    day?: number,
+    year?: number,
+    announce: boolean = true
+  ): SeasonInfo {
     if (!SEASONS_DATA[season]) return this.getSeasonInfo();
+
+    const seasonChanged = this.currentSeason !== season;
     this.currentSeason = season;
+
+    if (typeof day === 'number' && day >= 1 && day <= DAYS_PER_SEASON) {
+      this.calendarDay = day;
+    }
+    if (typeof year === 'number' && year >= 1880) {
+      this.year = year;
+    }
+
     try {
-      localStorage.setItem('superstition_current_season', season);
+      localStorage.setItem('superstition_current_season', this.currentSeason);
+      localStorage.setItem('superstition_calendar_day', this.calendarDay.toString());
+      localStorage.setItem('superstition_calendar_year', this.year.toString());
     } catch {
       // Ignore
     }
@@ -159,30 +199,53 @@ class SeasonService {
     const info = this.getSeasonInfo();
     this.notifySubscribers();
 
-    if (announce && this.onBannerCallback) {
+    if (seasonChanged && announce && this.onBannerCallback) {
       this.onBannerCallback(
-        `${info.icon} ${info.name.toUpperCase()} has arrived! (${info.temperatureRange}). ${info.summary}`
+        `📅 The season turns! ${info.icon} ${info.name.toUpperCase()} has begun for all prospectors across Arizona! (${info.temperatureRange})`
       );
     }
 
     return info;
   }
 
-  public cycleSeason(announce: boolean = true): SeasonInfo {
-    const currentIndex = SEASON_ORDER.indexOf(this.currentSeason);
-    const nextSeason = SEASON_ORDER[(currentIndex + 1) % SEASON_ORDER.length];
-    return this.setSeason(nextSeason, announce);
+  public getFormattedDate(): string {
+    const monthNames: Record<SeasonType, string[]> = {
+      spring: ['March', 'April', 'May'],
+      summer: ['June', 'July', 'August'],
+      autumn: ['September', 'October', 'November'],
+      winter: ['December', 'January', 'February'],
+    };
+    const months = monthNames[this.currentSeason];
+    // 30 in-game days per season: 10 days per calendar month
+    const monthIdx = Math.min(months.length - 1, Math.floor((this.calendarDay - 1) / 10));
+    const dayInMonth = (((this.calendarDay - 1) % 10) * 3) + 1;
+    return `${months[monthIdx]} ${dayInMonth}, ${this.year}`;
   }
 
   /**
-   * Advances the calendar by 1 day (e.g., at midnight rollover or when resting until dawn)
+   * Players can no longer arbitrarily choose their season — all players share the same synchronized season.
+   */
+  public cycleSeason(): SeasonInfo {
+    console.warn('[SeasonService] Manual season cycling is disabled. Universal seasons are synchronized across all players.');
+    return this.getSeasonInfo();
+  }
+
+  /**
+   * Only allowed via authoritative sync.
+   */
+  public setSeason(season: SeasonType): SeasonInfo {
+    return this.syncUniversalSeason(season, this.calendarDay, this.year, false);
+  }
+
+  /**
+   * Advances the calendar by 1 day (e.g. on server diurnal day rollover)
    */
   public advanceDay(): { newSeason: SeasonType; isSeasonChanged: boolean; dateStr: string } {
     this.calendarDay += 1;
     let isSeasonChanged = false;
 
-    // 7 in-game days per season (~1 real-life hour of active play per season)
-    if (this.calendarDay > 7) {
+    // 30 full in-game days per season
+    if (this.calendarDay > DAYS_PER_SEASON) {
       this.calendarDay = 1;
       const curIdx = SEASON_ORDER.indexOf(this.currentSeason);
       const nextIdx = (curIdx + 1) % SEASON_ORDER.length;

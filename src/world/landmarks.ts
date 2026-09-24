@@ -7,6 +7,7 @@ import { buildPetersCanyonPinchAndBivouac } from './petersCanyonPinch';
 import { buildSuperstitionPeaksAndSprings } from './superstitionPeaks';
 import { buildRuthMysteryAndSkeletons } from './ruthMysteryAndSkeletons';
 import { buildDickHolmesCluesSite } from './dickHolmesCluesSite';
+import { buildFrontierExplorationDiscoveries } from './frontierExplorationDiscoveries';
 
 export interface LandmarkMeshes {
   weaversNeedle: THREE.Group;
@@ -35,6 +36,7 @@ export interface LandmarkMeshes {
   craveySite?: THREE.Group;
   massacreSkeletons?: THREE.Group;
   dickHolmesSite?: THREE.Group;
+  frontierDiscoveries?: Map<string, THREE.Group>;
   waterRefillPoints: THREE.Vector3[];
 }
 
@@ -1105,6 +1107,13 @@ export function createLandmarkStructures(
   // ==========================================
   const dickHolmesData = buildDickHolmesCluesSite(scene);
 
+  // ==========================================
+  // 16. Frontier Exploration Discoveries:
+  // Spanish Arrastras, Lost Saddlebags in Rock Crevices,
+  // Hidden Cave Petroglyphs, and Abandoned Miner Bivouacs
+  // ==========================================
+  const discoveriesData = buildFrontierExplorationDiscoveries(scene);
+
   return {
     weaversNeedle: needleGroup,
     trailhead: trailheadGroup,
@@ -1132,6 +1141,7 @@ export function createLandmarkStructures(
     craveySite: ruthMystery.craveySite,
     massacreSkeletons: ruthMystery.massacreSkeletons,
     dickHolmesSite: dickHolmesData.rootGroup,
+    frontierDiscoveries: discoveriesData.groups,
     waterRefillPoints,
   };
 }

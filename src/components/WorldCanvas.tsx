@@ -63,6 +63,11 @@ import { friendshipService } from '../services/friendshipService';
 import { safeLocalStorage } from '../utils/storage';
 import { bountyService } from '../services/bountyService';
 import { MountManager } from '../world/mountManager';
+import {
+  FRONTIER_DISCOVERIES,
+  FrontierDiscoveryDef,
+  getLootedDiscoveries,
+} from '../world/frontierExplorationDiscoveries';
 import { TownfolkManager } from '../world/townfolk';
 import { isTortillaFlatTownLimits } from '../world/townBoundaries';
 import { townfolkVoice } from '../services/townfolkVoiceService';
@@ -188,6 +193,7 @@ interface WorldCanvasProps {
   onRegisterToggleHunkerHandler?: (fn: () => void) => void;
   onToggleHunkerDown?: () => void;
   lunarPhase?: number;
+  onOpenFrontierDiscovery?: (discovery: FrontierDiscoveryDef, isLooted: boolean) => void;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
@@ -270,12 +276,14 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   onRegisterToggleHunkerHandler,
   onToggleHunkerDown,
   lunarPhase = 0.5,
+  onOpenFrontierDiscovery,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
   const virtualJoystickInput = useRef<{ forward: number; right: number }>({ forward: 0, right: 0 });
   const isUIOpenRef = useRef(isUIOpen);
   const activeBuildingTypeRef = useRef<MineStructureType>(activeBuildingType);
+  const lootedDiscoveriesRef = useRef<Set<string>>(getLootedDiscoveries());
 
   const areGogglesActiveRef = useRef(areGogglesActive);
   areGogglesActiveRef.current = areGogglesActive;
@@ -4975,6 +4983,41 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
         }
       }
 
+      // 4b. Frontier Exploration Discoveries:
+      // Spanish Arrastras, Lost Saddlebags in Rock Crevices,
+      // Hidden Cave Petroglyphs, and Abandoned Miner Bivouacs
+      for (const disc of FRONTIER_DISCOVERIES) {
+        const dist = Math.hypot(px - disc.position.x, pz - disc.position.z);
+        if (dist < disc.radius) {
+          const isLooted = lootedDiscoveriesRef.current.has(disc.id);
+          let prompt = disc.promptAction;
+          if (isLooted) {
+            if (disc.type === 'arrastra') {
+              prompt = '⚙️ Spanish Arrastra: Inspect Ore Milling Basin [E]';
+            } else if (disc.type === 'petroglyph') {
+              prompt = '☀️ Cave Petroglyph: Review Archaic Rock Glyphs [E]';
+            } else if (disc.type === 'saddlebag') {
+              prompt = '🎒 Empty Leather Saddlebag [E]';
+            } else {
+              prompt = "⛺ Abandoned Miner's Bivouac [E]";
+            }
+          }
+
+          const handleOpenDiscovery = () => {
+            if (onOpenFrontierDiscovery) {
+              onOpenFrontierDiscovery(disc, isLooted);
+            }
+          };
+
+          if (executeAction) {
+            handleOpenDiscovery();
+          } else {
+            onPromptInteract(prompt, handleOpenDiscovery);
+          }
+          return;
+        }
+      }
+
       // 5. Buried Gold Deposits (Pickaxe)
       for (const gd of goldDepositsRef.current) {
         if (!gd.mined) {
@@ -5614,6 +5657,21 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             soundEngine.playDiscovery();
             if (onShowBanner) {
               onShowBanner('✨ Historic Legend: Dick Holmes Clues & 1891 Candle Box • Discovered the "Face in the Rock" pass and the wooden candle box with ~48 lbs of wire gold ore from Jacob Waltz\'s deathbed!');
+            }
+          }
+        }
+
+        // 14. Frontier Exploration Discoveries (Arrastras, Saddlebags, Petroglyphs, Bivouacs)
+        for (const disc of FRONTIER_DISCOVERIES) {
+          const dSite = Math.hypot(curX - disc.position.x, curZ - disc.position.z);
+          if (dSite < 14) {
+            const flagKey = `disc_site_${disc.id}`;
+            if (!discoveredSummitsRef.current.has(flagKey)) {
+              discoveredSummitsRef.current.add(flagKey);
+              soundEngine.playDiscovery();
+              if (onShowBanner) {
+                onShowBanner(`🔎 Frontier Discovery: ${disc.title} • ${disc.subtitle} (${disc.locationName})`);
+              }
             }
           }
         }

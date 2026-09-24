@@ -64,10 +64,12 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
   const [activeTab, setActiveTab] = useState<TortillaFlatTab>(initialTab);
   const [editingMountName, setEditingMountName] = useState(false);
   const [customNameInput, setCustomNameInput] = useState('');
+  const [isRentingRoom, setIsRentingRoom] = useState(false);
 
   useEffect(() => {
     if (isOpen && initialTab) {
       setActiveTab(initialTab);
+      setIsRentingRoom(false);
     }
   }, [isOpen, initialTab]);
 
@@ -792,11 +794,19 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
 
                   <button
                     onClick={() => {
+                      if (isRentingRoom) return;
+                      setIsRentingRoom(true);
                       if (onSleepInHotel) {
-                        onSleepInHotel('cash');
+                        const success = onSleepInHotel('cash');
+                        if (success !== false) {
+                          onClose();
+                        } else {
+                          setIsRentingRoom(false);
+                        }
                       } else {
-                        if (cash < 2.0) {
+                        if (cash < 1.99) {
                           if (onShowBanner) onShowBanner("⚠️ Need $2.00 cash to rent a room! Cash in gold at the Assayer counter.");
+                          setIsRentingRoom(false);
                           return;
                         }
                         soundEngine.playHotelRest();
@@ -805,21 +815,23 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
                           cashDollars: Math.max(0, (prev.cashDollars || 0) - 2.0),
                           health: 100,
                           hydration: 100,
+                          vigour: 100,
+                          isExhausted: false,
                           canteenOunces: 32,
                         }));
                         if (onShowBanner) onShowBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health & Hydration fully restored.");
                         onClose();
                       }
                     }}
-                    disabled={cash < 2.0}
+                    disabled={cash < 1.99 || isRentingRoom}
                     className={`w-full py-2.5 px-4 rounded-lg font-serif text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
-                      cash >= 2.0
+                      cash >= 1.99 && !isRentingRoom
                         ? 'bg-emerald-700 hover:bg-emerald-600 text-emerald-50 hover:scale-[1.02]'
                         : 'bg-stone-800 text-stone-500 cursor-not-allowed'
                     }`}
                   >
                     <Bed className="w-4 h-4" />
-                    <span>Rent Room & Sleep until Dawn ($2.00 Cash)</span>
+                    <span>{isRentingRoom ? 'Retiring Upstairs...' : 'Rent Room & Sleep until Dawn ($2.00 Cash)'}</span>
                   </button>
                 </div>
 
@@ -837,17 +849,25 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
                       Direct barter with placer gold dust or crushed bonanza quartz.
                     </p>
                     <div className="mt-2 text-[11px] font-mono text-stone-400">
-                      Your Gold Dust: <span className="text-amber-300 font-bold">{gold.toFixed(1)} oz</span>
+                      Your Gold Dust: <span className="text-amber-300 font-bold">{gold.toFixed(2)} oz</span>
                     </div>
                   </div>
 
                   <button
                     onClick={() => {
+                      if (isRentingRoom) return;
+                      setIsRentingRoom(true);
                       if (onSleepInHotel) {
-                        onSleepInHotel('gold');
+                        const success = onSleepInHotel('gold');
+                        if (success !== false) {
+                          onClose();
+                        } else {
+                          setIsRentingRoom(false);
+                        }
                       } else {
-                        if (gold < 0.1) {
+                        if (gold < 0.099) {
                           if (onShowBanner) onShowBanner("⚠️ Need 0.10 oz gold ore to pay for a hotel room!");
+                          setIsRentingRoom(false);
                           return;
                         }
                         soundEngine.playHotelRest();
@@ -856,21 +876,23 @@ export const TortillaFlatModal: React.FC<TortillaFlatModalProps> = ({
                           goldFound: Math.max(0, (prev.goldFound || 0) - 0.1),
                           health: 100,
                           hydration: 100,
+                          vigour: 100,
+                          isExhausted: false,
                           canteenOunces: 32,
                         }));
                         if (onShowBanner) onShowBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Health & Hydration fully restored.");
                         onClose();
                       }
                     }}
-                    disabled={gold < 0.1}
+                    disabled={gold < 0.099 || isRentingRoom}
                     className={`w-full py-2.5 px-4 rounded-lg font-serif text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
-                      gold >= 0.1
+                      gold >= 0.099 && !isRentingRoom
                         ? 'bg-amber-700 hover:bg-amber-600 text-stone-950 hover:scale-[1.02]'
                         : 'bg-stone-800 text-stone-500 cursor-not-allowed'
                     }`}
                   >
                     <Coins className="w-4 h-4" />
-                    <span>Pay with Gold Dust (0.10 oz Gold)</span>
+                    <span>{isRentingRoom ? 'Retiring Upstairs...' : 'Pay with Gold Dust (0.10 oz Gold)'}</span>
                   </button>
                 </div>
               </div>

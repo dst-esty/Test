@@ -1623,13 +1623,13 @@ class SoundEngine {
     });
   }
 
-  public playHotelRest() {
+  public playHotelKeyLock() {
     if (this.isMuted) return;
     this.init();
     if (!this.ctx) return;
 
     const t = this.ctx.currentTime;
-    // 1. Heavy brass key turn and bolt latch lock
+    // Heavy brass key turn and bolt latch lock
     const clickOsc = this.ctx.createOscillator();
     const clickGain = this.ctx.createGain();
     clickOsc.type = 'triangle';
@@ -1642,7 +1642,7 @@ class SoundEngine {
     clickOsc.start(t);
     clickOsc.stop(t + 0.08);
 
-    // 2. Second solid latch engagement
+    // Second solid latch engagement
     const latchOsc = this.ctx.createOscillator();
     const latchGain = this.ctx.createGain();
     latchOsc.type = 'sine';
@@ -1654,23 +1654,100 @@ class SoundEngine {
     latchGain.connect(this.ctx.destination);
     latchOsc.start(t + 0.12);
     latchOsc.stop(t + 0.26);
+  }
 
-    // 3. Peaceful morning dawn chime chord (E4, G#4, B4, E5)
-    const dawnNotes = [329.63, 415.30, 493.88, 659.25];
+  public playMorningDawn() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Peaceful morning dawn chime chord (E4, G#4, B4, E5, G#5)
+    const dawnNotes = [329.63, 415.30, 493.88, 659.25, 830.61];
     dawnNotes.forEach((freq, i) => {
       if (!this.ctx) return;
-      const noteTime = t + 0.35 + i * 0.15;
+      const noteTime = t + i * 0.14;
       const noteOsc = this.ctx.createOscillator();
       const noteGain = this.ctx.createGain();
       noteOsc.type = 'sine';
       noteOsc.frequency.setValueAtTime(freq, noteTime);
-      noteGain.gain.setValueAtTime(0.16, noteTime);
-      noteGain.gain.exponentialRampToValueAtTime(0.0001, noteTime + 1.2);
+      noteGain.gain.setValueAtTime(0.18, noteTime);
+      noteGain.gain.exponentialRampToValueAtTime(0.0001, noteTime + 1.4);
       noteOsc.connect(noteGain);
       noteGain.connect(this.ctx.destination);
       noteOsc.start(noteTime);
-      noteOsc.stop(noteTime + 1.2);
+      noteOsc.stop(noteTime + 1.4);
     });
+
+    // Gentle desert morning bird chirp
+    const chirpTime = t + 0.8;
+    const chirpOsc = this.ctx.createOscillator();
+    const chirpGain = this.ctx.createGain();
+    chirpOsc.type = 'sine';
+    chirpOsc.frequency.setValueAtTime(2800, chirpTime);
+    chirpOsc.frequency.exponentialRampToValueAtTime(4200, chirpTime + 0.06);
+    chirpOsc.frequency.exponentialRampToValueAtTime(3200, chirpTime + 0.12);
+    chirpGain.gain.setValueAtTime(0.08, chirpTime);
+    chirpGain.gain.exponentialRampToValueAtTime(0.001, chirpTime + 0.14);
+    chirpOsc.connect(chirpGain);
+    chirpGain.connect(this.ctx.destination);
+    chirpOsc.start(chirpTime);
+    chirpOsc.stop(chirpTime + 0.14);
+  }
+
+  /**
+   * Peaceful morning desert songbird chirping melody (canyon wren & cactus wren dawn chorus)
+   * Triggers when the player wakes up at 6:00 AM dawn.
+   */
+  public playMorningBirdChirp() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Multi-phrase melodic desert songbird trill (warm, peaceful dawn birds)
+    const birdPhrases = [
+      { delay: 0.05, startF: 2600, peakF: 3950, endF: 3200, dur: 0.10, vol: 0.14 },
+      { delay: 0.20, startF: 3100, peakF: 4600, endF: 3750, dur: 0.12, vol: 0.16 },
+      { delay: 0.42, startF: 3450, peakF: 4950, endF: 4100, dur: 0.14, vol: 0.15 },
+      { delay: 0.70, startF: 2900, peakF: 4200, endF: 3400, dur: 0.09, vol: 0.12 },
+      { delay: 0.86, startF: 3350, peakF: 4800, endF: 3900, dur: 0.14, vol: 0.15 },
+      { delay: 1.12, startF: 3800, peakF: 5400, endF: 4300, dur: 0.18, vol: 0.13 },
+      // Subtle reverberant echo chirps from canyon walls
+      { delay: 1.45, startF: 3200, peakF: 4400, endF: 3600, dur: 0.10, vol: 0.08 },
+      { delay: 1.62, startF: 3600, peakF: 4900, endF: 4000, dur: 0.12, vol: 0.09 },
+    ];
+
+    birdPhrases.forEach(({ delay, startF, peakF, endF, dur, vol }) => {
+      if (!this.ctx) return;
+      const chirpTime = t + delay;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(startF, chirpTime);
+      osc.frequency.exponentialRampToValueAtTime(peakF, chirpTime + dur * 0.45);
+      osc.frequency.exponentialRampToValueAtTime(endF, chirpTime + dur);
+
+      gain.gain.setValueAtTime(0.0001, chirpTime);
+      gain.gain.exponentialRampToValueAtTime(vol, chirpTime + dur * 0.25);
+      gain.gain.exponentialRampToValueAtTime(0.0001, chirpTime + dur);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(chirpTime);
+      osc.stop(chirpTime + dur);
+    });
+  }
+
+  public playMorningBirds() {
+    this.playMorningBirdChirp();
+  }
+
+  public playHotelRest() {
+    this.playHotelKeyLock();
+    this.playMorningDawn();
   }
 
   public playDiscovery() {

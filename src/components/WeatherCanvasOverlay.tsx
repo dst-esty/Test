@@ -1216,13 +1216,6 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
     dynamicWeatherEngine.syncWeather(nextWeather);
   };
 
-  const handleCycleSeason = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const nextInfo = seasonService.cycleSeason(true);
-    setCurrentSeason(nextInfo.id);
-    setSeasonInfo(nextInfo);
-  };
-
   const currentFeelsLikeF =
     temperatureFeelsLikeF ??
     desertTemperatureService.queryTemperature({
@@ -1512,19 +1505,6 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
                 {/* Right Action Controls */}
                 <div className="flex items-center gap-1.5 shrink-0">
                   {contextAction}
-
-                  {/* Cycle Season Button */}
-                  <button
-                    type="button"
-                    id="weather-cycle-season-btn"
-                    onClick={handleCycleSeason}
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-stone-900/90 hover:bg-stone-850 text-amber-300 hover:text-amber-100 border border-amber-600/40 text-xs transition active:scale-95 cursor-pointer shadow font-mono"
-                    title={`Active Season: ${seasonInfo.name} (${seasonInfo.temperatureRange}). Click to cycle seasons.`}
-                    aria-label="Cycle season"
-                  >
-                    <span className="text-sm">{seasonInfo.icon}</span>
-                    <span className="hidden md:inline text-[11px] font-bold">{seasonInfo.name.split(' ')[0]}</span>
-                  </button>
 
                   {/* Trigger Seasonal Event Button */}
                   <button

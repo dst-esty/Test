@@ -1,5 +1,6 @@
 import { MultiplayerChatMessage, MultiplayerColorPreset, MultiplayerPlayer, WeatherType } from '../types';
 import { safeLocalStorage } from '../utils/storage';
+import { seasonService } from '../services/seasonService';
 
 export type MultiplayerEventHandler = {
   onConnected?: (selfId: string, selfData: any) => void;
@@ -377,6 +378,9 @@ class MultiplayerService {
         if (typeof msg.universalTimeOfDay === 'number') {
           this.state.universalTimeOfDay = msg.universalTimeOfDay;
         }
+        if (msg.universalSeason) {
+          seasonService.syncUniversalSeason(msg.universalSeason, msg.universalCalendarDay, msg.universalYear, false);
+        }
         if (msg.universalWeather) {
           this.dispatch('onWeatherSync', {
             weather: msg.universalWeather,
@@ -602,6 +606,9 @@ class MultiplayerService {
         }
         if (typeof msg.timeOfDay === 'number') {
           this.state.universalTimeOfDay = msg.timeOfDay;
+        }
+        if (msg.season) {
+          seasonService.syncUniversalSeason(msg.season, msg.calendarDay, msg.year, true);
         }
         this.notify();
         this.dispatch('onWeatherSync', {

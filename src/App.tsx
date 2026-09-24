@@ -20,6 +20,12 @@ import { TortillaFlatModal } from './components/TortillaFlatModal';
 import { TownfolkDialogueOverlay, DialogueNPCInfo } from './components/TownfolkDialogueOverlay';
 import { GameOverModal } from './components/GameOverModal';
 import { IdleSleepModal } from './components/IdleSleepModal';
+import { SleepOverlay } from './components/SleepOverlay';
+import { FrontierDiscoveryModal } from './components/FrontierDiscoveryModal';
+import {
+  FrontierDiscoveryDef,
+  markDiscoveryAsLooted,
+} from './world/frontierExplorationDiscoveries';
 import { idleManager } from './services/idleManager';
 import { CompassHUD } from './components/CompassHUD';
 import { CinematicSplash } from './components/CinematicSplash';
@@ -218,6 +224,16 @@ export default function App() {
   const [payDirtAlert, setPayDirtAlert] = useState<{ ounces: number } | null>(null);
   const [isIdleAsleep, setIsIdleAsleep] = useState(false);
   const [isSelfAfk, setIsSelfAfk] = useState(false);
+  const [activeSleepSession, setActiveSleepSession] = useState<{
+    isOpen: boolean;
+    sleepType: 'hotel' | 'camp';
+    initialTime: number;
+    paymentMethod?: 'cash' | 'gold';
+  } | null>(null);
+  const [activeFrontierDiscovery, setActiveFrontierDiscovery] = useState<{
+    discovery: FrontierDiscoveryDef;
+    isLooted: boolean;
+  } | null>(null);
   const payDirtTimerRef = useRef<NodeJS.Timeout | null>(null);
   const restartHandlerRef = useRef<(() => void) | null>(null);
   const teleportHandlerRef = useRef<((pos: Vector3D) => void) | null>(null);
@@ -408,9 +424,11 @@ export default function App() {
     isClaimDeedOpen ||
     isDepotOpen ||
     isTortillaFlatOpen ||
+    Boolean(activeSleepSession?.isOpen) ||
     Boolean(activeDialogueNPC) ||
     Boolean(claimPrompt) ||
     Boolean(activeClueDialog) ||
+    Boolean(activeFrontierDiscovery) ||
     Boolean(gameOverDetails);
 
   const [hitMarkerActive, setHitMarkerActive] = useState(false);
@@ -588,89 +606,133 @@ export default function App() {
     showBanner("🔥 Rested by the fire! Warm coffee brewed, canteen filled, and vigour fully restored.");
   }, [showBanner]);
 
-  const handleSleepUntilDawn = useCallback(() => {
-    soundEngine.playCampfire();
-    setTimeOfDay(6.0); // 6:00 AM Sunrise
+  const handleApplySleepEffects = useCallback(() => {
+    if (!activeSleepSession) return;
+    const isHotel = activeSleepSession.sleepType === 'hotel';
+    const paymentMethod = activeSleepSession.paymentMethod;
+
+    // 1. Advance time to 6:00 AM Sunrise & advance the day in the calendar
+    setTimeOfDay(6.0);
     seasonService.advanceDay();
     setLunarPhase((lp) => {
       const updated = (lp + 1 / 29.5) % 1.0;
       safeLocalStorage.setItem('lost_dutchman_lunar_phase', updated.toString());
       return updated;
     });
+
+    // 2. Clear any active desert sandstorm or monsoon storm to a fresh morning
+    setWeather((cur) => {
+      if (cur === 'sandstorm' || cur === 'storm') {
+        multiplayer.changeWeather('clear');
+        dynamicWeatherEngine.syncWeather('clear');
+        return 'clear';
+      }
+      return cur;
+    });
+
+    // 3. Replenish player vitals, deduct hotel payment if applicable, stoke structures if camp
     setPlayerState((prev) => {
-      const updatedStructures = (prev.builtStructures || []).map((s) => {
-        if (s.type === 'campfire' || s.type === 'prospector_camp') {
-          const newFuel = Math.max(0, (s.fuelHoursRemaining ?? 12.0) - 8.0);
-          return {
-            ...s,
-            fuelHoursRemaining: newFuel,
-            isLit: newFuel > 0,
-          };
-        }
-        return s;
-      });
+      let updatedStructures = prev.builtStructures || [];
+      if (!isHotel) {
+        updatedStructures = updatedStructures.map((s) => {
+          if (s.type === 'campfire' || s.type === 'prospector_camp') {
+            const newFuel = Math.max(0, (s.fuelHoursRemaining ?? 12.0) - 8.0);
+            return {
+              ...s,
+              fuelHoursRemaining: newFuel,
+              isLit: newFuel > 0,
+            };
+          }
+          return s;
+        });
+      }
+
       return {
         ...prev,
+        cashDollars:
+          isHotel && paymentMethod === 'cash'
+            ? Math.max(0, (prev.cashDollars || 0) - 2.0)
+            : prev.cashDollars,
+        goldFound:
+          isHotel && paymentMethod === 'gold'
+            ? Math.max(0, (prev.goldFound || 0) - 0.1)
+            : prev.goldFound,
         health: 100,
         hydration: 100,
         vigour: 100,
         isExhausted: false,
         canteenOunces: 32,
+        isHunkeredDown: false,
+        isRidingMount: false,
         builtStructures: updatedStructures,
       };
     });
+
+    // 4. Trigger peaceful morning bird-chirping sound effect at 6:00 AM dawn
+    soundEngine.playMorningBirdChirp();
+  }, [activeSleepSession]);
+
+  const handleFinishSleepSession = useCallback(() => {
+    if (!activeSleepSession) return;
+    const isHotel = activeSleepSession.sleepType === 'hotel';
+    setActiveSleepSession(null);
+
     const coolResult = townWantedService.coolOffOnSleep();
-    if (coolResult.message) {
-      showBanner(`🌅 Slept safely through the cold desert night until 6:00 AM! ${coolResult.message}`);
+    if (isHotel) {
+      if (coolResult.message) {
+        showBanner(`🌅 Rested comfortably in Room #4 at the Superstition Hotel until 6:00 AM! ${coolResult.message}`);
+      } else {
+        showBanner("🌅 Rested comfortably in Room #4 at the Superstition Hotel until 6:00 AM! Health, Vigour, and Canteen fully replenished.");
+      }
     } else {
-      showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Vigour, health, and hydration fully restored.");
+      if (coolResult.message) {
+        showBanner(`🌅 Slept safely by the warm campfire until 6:00 AM! ${coolResult.message}`);
+      } else {
+        showBanner("🌅 Slept safely through the cold desert night until 6:00 AM! Vigour, health, and hydration fully restored.");
+      }
     }
-  }, [showBanner]);
+  }, [activeSleepSession, showBanner]);
+
+  const handleSleepUntilDawn = useCallback(() => {
+    setIsCampModalOpen(false);
+    setActiveSleepSession({
+      isOpen: true,
+      sleepType: 'camp',
+      initialTime: timeOfDay,
+    });
+  }, [timeOfDay]);
 
   const handleSleepInHotel = useCallback((paymentMethod: 'cash' | 'gold') => {
-    const cash = playerState.cashDollars || 0;
-    const gold = playerState.goldFound || 0;
+    // Read directly from playerStateRef for guaranteed fresh cash and gold balances
+    const cash = playerStateRef.current.cashDollars || 0;
+    const gold = playerStateRef.current.goldFound || 0;
 
     if (paymentMethod === 'cash') {
-      if (cash < 2.0) {
+      if (cash < 1.99) {
         showBanner("⚠️ Not enough cash to rent a room! ($2.00 required). Cash in gold at the Assayer counter.");
         return false;
       }
     } else {
-      if (gold < 0.1) {
+      if (gold < 0.099) {
         showBanner("⚠️ Not enough gold ore to barter for a room! (0.10 oz required).");
         return false;
       }
     }
 
-    soundEngine.playHotelRest();
-    setTimeOfDay(6.0); // 6:00 AM Sunrise
-    seasonService.advanceDay();
-    setLunarPhase((lp) => {
-      const updated = (lp + 1 / 29.5) % 1.0;
-      safeLocalStorage.setItem('lost_dutchman_lunar_phase', updated.toString());
-      return updated;
-    });
-    setPlayerState((prev) => ({
-      ...prev,
-      cashDollars: paymentMethod === 'cash' ? Math.max(0, (prev.cashDollars || 0) - 2.0) : prev.cashDollars,
-      goldFound: paymentMethod === 'gold' ? Math.max(0, (prev.goldFound || 0) - 0.1) : prev.goldFound,
-      health: 100,
-      hydration: 100,
-      vigour: 100,
-      isExhausted: false,
-      canteenOunces: 32,
-    }));
-
+    // Close any town dialogues or menus
     setIsTortillaFlatOpen(false);
-    const coolResult = townWantedService.coolOffOnSleep();
-    if (coolResult.message) {
-      showBanner(`🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! ${coolResult.message}`);
-    } else {
-      showBanner("🌅 Rested comfortably in the Superstition Hotel until 6:00 AM! Vigour and vitals fully replenished.");
-    }
+    setActiveDialogueNPC(null);
+
+    // Trigger Sleep Overlay (eyelids begin closing into black)
+    setActiveSleepSession({
+      isOpen: true,
+      sleepType: 'hotel',
+      initialTime: timeOfDay,
+      paymentMethod,
+    });
+
     return true;
-  }, [playerState.cashDollars, playerState.goldFound, showBanner]);
+  }, [timeOfDay, showBanner]);
 
   const handleToggleDayNight = useCallback(() => {
     setTimeOfDay((prev) => {
@@ -1285,6 +1347,38 @@ export default function App() {
     [clues, landmarks, showBanner]
   );
 
+  // Handle Frontier Exploration Discoveries (Arrastras, Saddlebags, Petroglyphs, Bivouacs)
+  const handleOpenFrontierDiscovery = useCallback(
+    (discovery: FrontierDiscoveryDef, isLooted: boolean) => {
+      setActiveFrontierDiscovery({ discovery, isLooted });
+    },
+    []
+  );
+
+  const handleClaimFrontierLoot = useCallback(() => {
+    if (!activeFrontierDiscovery) return;
+    const { discovery } = activeFrontierDiscovery;
+    markDiscoveryAsLooted(discovery.id);
+    setActiveFrontierDiscovery((prev) => (prev ? { ...prev, isLooted: true } : null));
+
+    const r = discovery.rewards;
+    setPlayerState((prev) => ({
+      ...prev,
+      cashDollars: (prev.cashDollars || 0) + (r.cashDollars || 0),
+      goldFound: (prev.goldFound || 0) + (r.goldOunces || 0),
+      ammo: (prev.ammo || 0) + (r.ammo || 0),
+      dynamite: (prev.dynamite || 0) + (r.dynamite || 0),
+      canteenOunces: r.waterOz ? Math.min(32, (prev.canteenOunces || 0) + r.waterOz) : prev.canteenOunces,
+      provisionsRations: (prev.provisionsRations || 0) + (r.provisions || 0),
+      woodPlanks: (prev.woodPlanks || 0) + (r.woodPlanks || 0),
+      vigour: r.specialItemName?.includes('Coffee') ? 100 : prev.vigour,
+    }));
+
+    soundEngine.playCoins();
+    soundEngine.playDiscovery();
+    showBanner(`🌟 Recovered: ${r.specialItemName || discovery.title}!`);
+  }, [activeFrontierDiscovery, showBanner]);
+
   // Multiplayer Actions
   const handleUpdateProfile = useCallback((name: string, color: string, metadata?: Record<string, any>) => {
     multiplayer.onUpdateProfile(name, color, metadata);
@@ -1745,6 +1839,7 @@ export default function App() {
           toggleHunkerRef.current = fn;
         }}
         onToggleHunkerDown={handleToggleHunkerDown}
+        onOpenFrontierDiscovery={handleOpenFrontierDiscovery}
       />
 
       {/* Dynamic Weather Screen Atmosphere, Haboob Sandstorm, Shimmering Heat Haze & Freezing Frost Overlay */}
@@ -2261,6 +2356,27 @@ export default function App() {
       <IdleSleepModal
         isOpen={isIdleAsleep}
         onWakeUp={handleWakeUp}
+      />
+
+      {/* Cinematic Eyelid Fade-Out Sleep Overlay (Hotel Rooms & Campfires) */}
+      {activeSleepSession && (
+        <SleepOverlay
+          isOpen={activeSleepSession.isOpen}
+          sleepType={activeSleepSession.sleepType}
+          initialTimeOfDay={activeSleepSession.initialTime}
+          onApplySleepEffects={handleApplySleepEffects}
+          onFinished={handleFinishSleepSession}
+          roomNumber={4}
+        />
+      )}
+
+      {/* Frontier Exploration Discoveries (Spanish Arrastras, Lost Saddlebags, Cave Petroglyphs, Miner Bivouacs) */}
+      <FrontierDiscoveryModal
+        discovery={activeFrontierDiscovery?.discovery || null}
+        isOpen={Boolean(activeFrontierDiscovery)}
+        isAlreadyLooted={Boolean(activeFrontierDiscovery?.isLooted)}
+        onClose={() => setActiveFrontierDiscovery(null)}
+        onClaimLoot={handleClaimFrontierLoot}
       />
     </div>
   );

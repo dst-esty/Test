@@ -140,6 +140,7 @@ async function startServer() {
     ],
     barkeep_hank: [
       "Welcome into the Saloon, friend! Dust your boots and pull up a cedar stool. Fresh canteens and hot salt-pork beans are on the counter whenever you need replenishment.",
+      "If you're looking to rent a room for the night, head right up the pine stairs outside! Miss Clara keeps clean feather ticks in room four for two dollars cash or ten cents gold—sleeps you safe till six in the morning!",
       "I hear all kinds of talk over these floorboards. Just yesterday a team from Phoenix swore they spotted ancient carved stone markers high above Peters Canyon!",
       "Rule number one out here: never head into the Superstition canyons without at least two full canteens and a pack of matches. The desert heat has claimed many a brave prospector.",
       "Old-timers say Jacob Waltz swore on his deathbed that anyone who tracked his drift would lose their head. Folk laughed until Dr. Ruth came with his Mexican parchment, wrote 'Veni, Vidi, Vici' in his diary, and ended up decapitated in Needle Canyon.",
@@ -228,6 +229,9 @@ async function startServer() {
       minesBuilt: builtMines.size,
       universalWeather,
       universalTimeOfDay,
+      universalSeason,
+      universalCalendarDay,
+      universalYear,
     });
   });
 
@@ -400,6 +404,22 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
 
   // Authoritative Universal Weather & Celestial Sky Simulation
   type WeatherType = 'clear' | 'clouds' | 'sunset' | 'storm' | 'sandstorm' | 'light_rain' | 'night';
+  type SeasonType = 'spring' | 'summer' | 'autumn' | 'winter';
+  const SEASON_ORDER: SeasonType[] = ['spring', 'summer', 'autumn', 'winter'];
+  const DAYS_PER_SEASON = 30; // Seasons last 30 full in-game days
+
+  // Compute epoch-synchronized authoritative start
+  const epochOffsetMs = 1704067200000;
+  const elapsedMs = Math.max(0, Date.now() - epochOffsetMs);
+  const dayLengthMs = 18 * 60 * 1000;
+  const seasonLengthMs = DAYS_PER_SEASON * dayLengthMs;
+  const yearLengthMs = 4 * seasonLengthMs;
+
+  const totalEpochDays = Math.floor(elapsedMs / dayLengthMs);
+  let universalCalendarDay = (totalEpochDays % DAYS_PER_SEASON) + 1;
+  const seasonIndex = Math.floor((elapsedMs % yearLengthMs) / seasonLengthMs);
+  let universalSeason: SeasonType = SEASON_ORDER[seasonIndex % SEASON_ORDER.length];
+  let universalYear = 1884 + Math.floor(elapsedMs / yearLengthMs);
 
   let universalTimeOfDay = 9.5; // Start at 9:30 AM in crisp, bright morning desert sunshine
   let universalWeather: WeatherType = 'clear';
@@ -504,9 +524,31 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
 
   // Run authoritative universal clock & meteorological cycle
   setInterval(() => {
+    const prevHour = universalTimeOfDay;
     universalTimeOfDay = advanceDiurnalTime(universalTimeOfDay, 1);
     currentWeatherElapsed += 1;
     serverUptimeSeconds += 1;
+
+    // Check midnight rollover (in-game day advance)
+    if (prevHour > 23.0 && universalTimeOfDay < 1.0) {
+      universalCalendarDay += 1;
+      if (universalCalendarDay > DAYS_PER_SEASON) {
+        universalCalendarDay = 1;
+        const curIdx = SEASON_ORDER.indexOf(universalSeason);
+        const nextIdx = (curIdx + 1) % SEASON_ORDER.length;
+        if (nextIdx === 0) {
+          universalYear += 1;
+        }
+        universalSeason = SEASON_ORDER[nextIdx];
+        addChatMessage({
+          senderId: 'system_weather',
+          senderName: 'Frontier Calendar',
+          senderColor: '#eab308',
+          text: `📅 The seasons turn! Universal ${universalSeason.toUpperCase()} has begun across the Superstition Mountains!`,
+          type: 'system',
+        });
+      }
+    }
 
     if (currentWeatherElapsed >= currentWeatherDuration) {
       currentWeatherElapsed = 0;
@@ -529,6 +571,9 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
         weather: universalWeather,
         timeOfDay: universalTimeOfDay,
         label: nextPhase.label,
+        season: universalSeason,
+        calendarDay: universalCalendarDay,
+        year: universalYear,
       });
     } else if (currentWeatherElapsed % 4 === 0) {
       // Periodic synchronization of celestial time every 4 seconds
@@ -537,6 +582,9 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
         weather: universalWeather,
         timeOfDay: universalTimeOfDay,
         label: currentWeatherLabel,
+        season: universalSeason,
+        calendarDay: universalCalendarDay,
+        year: universalYear,
       });
     }
   }, 1000);
@@ -620,6 +668,9 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
         colorPresets: COLOR_PRESETS,
         universalWeather,
         universalTimeOfDay,
+        universalSeason,
+        universalCalendarDay,
+        universalYear,
       }));
     } catch (err) {
       console.warn(`[WS Client ${playerId}] Failed to send init:`, err);

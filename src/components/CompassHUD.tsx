@@ -76,13 +76,6 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
     });
   }, []);
 
-  const handleCycleSeason = () => {
-    const nextInfo = seasonService.cycleSeason(true);
-    setSeason(nextInfo.id);
-    setSeasonInfo(nextInfo);
-    setCalendarDate(seasonService.getFormattedDate());
-  };
-
   const elevationFt = playerCoords && playerCoords.y !== undefined
     ? getUsgsElevation(playerCoords.y, playerCoords.x, playerCoords.z).feet
     : 2050;
@@ -269,15 +262,13 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
           </div>
         </button>
 
-        {/* Frontier Season & Historic Calendar Date Badge (Interactive: click to cycle season) */}
-        <button
-          id="hud-season-btn"
-          type="button"
-          onClick={handleCycleSeason}
-          title={`Frontier Season: ${seasonInfo.name} (${calendarDate}) • ${seasonInfo.temperatureRange}. ${seasonInfo.summary} Dehydration multiplier: ${seasonInfo.thirstMultiplier}x. Click to cycle seasons (Spring -> Summer -> Autumn -> Winter)!`}
-          className="pointer-events-auto flex items-center gap-1.5 border-r border-amber-800/60 pr-3.5 text-xs font-mono px-2.5 py-1 -my-1 rounded-full transition-all cursor-pointer group bg-stone-900/85 hover:bg-stone-800 hover:border-amber-500/70 border border-stone-700/60 active:scale-95 shadow-sm"
+        {/* Frontier Season & Historic Calendar Date Badge (Authoritative: Synchronized across all players) */}
+        <div
+          id="hud-season-badge"
+          title={`Universal Frontier Season: ${seasonInfo.name} (${calendarDate}) • ${seasonInfo.temperatureRange}. ${seasonInfo.summary} Dehydration multiplier: ${seasonInfo.thirstMultiplier}x. Synchronized for all prospectors across Arizona.`}
+          className="pointer-events-auto flex items-center gap-1.5 border-r border-amber-800/60 pr-3.5 text-xs font-mono px-2.5 py-1 -my-1 rounded-full bg-stone-900/85 border border-stone-700/60 shadow-sm select-none"
         >
-          <span className="text-sm group-hover:scale-125 transition-transform">{seasonInfo.icon}</span>
+          <span className="text-sm">{seasonInfo.icon}</span>
           <div className="flex items-center gap-1">
             <span className={`font-bold ${seasonInfo.textColor}`}>{seasonInfo.name}</span>
             <span className="text-[10px] text-stone-400 font-sans hidden sm:inline">• {calendarDate}</span>
@@ -285,7 +276,7 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
           <span className="text-[9px] bg-stone-800/90 text-amber-300/80 border border-amber-500/30 px-1 py-0.2 rounded hidden lg:inline font-mono">
             {seasonInfo.thirstMultiplier}x Thirst
           </span>
-        </button>
+        </div>
 
         {/* Nearest Landmark */}
         {nearestLandmarkName && (
