@@ -68,13 +68,20 @@ class DynamicWeatherEngine {
 
   public subscribe(listener: (status: WeatherEngineStatus) => void): () => void {
     this.listeners.add(listener);
-    listener(this.getStatus(false));
     return () => this.listeners.delete(listener);
   }
 
   public notifyListeners(isHunkered: boolean = false) {
     const status = this.getStatus(isHunkered);
-    this.listeners.forEach((fn) => fn(status));
+    queueMicrotask(() => {
+      this.listeners.forEach((fn) => {
+        try {
+          fn(status);
+        } catch (err) {
+          console.error('Error notifying dynamic weather listener:', err);
+        }
+      });
+    });
   }
 
   public getCurrentSeasonalEvent(): SeasonalEventType {

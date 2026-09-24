@@ -224,6 +224,8 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
   isRidingMount = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const heatHazeRefractionLayerRef = useRef<HTMLDivElement | null>(null);
+  const displacementMapRef = useRef<SVGFEDisplacementMapElement | null>(null);
 
   // Dynamic Weather Engine status subscription
   const [engineStatus, setEngineStatus] = useState<WeatherEngineStatus>(() =>
@@ -245,7 +247,7 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
     return dynamicWeatherEngine.subscribe((status) => {
       setEngineStatus(status);
     });
-  }, [isHunkeredDown]);
+  }, []);
 
   // Weather Warning Modal Visibility & Auto-Dismiss Lifecycle
   const [isModalVisible, setIsModalVisible] = useState(true);
@@ -254,14 +256,22 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
   const dismissTimerRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
 
-  // Synced visual warning UI intensities
-  const [heatHazeIntensity, setHeatHazeIntensity] = useState<number>(0);
-  const [freezingIntensity, setFreezingIntensity] = useState<number>(0);
-  const [campfireThawIntensity, setCampfireThawIntensity] = useState<number>(0);
+  // Current effective temperature for severe condition detection
+  const currentTempCalc = desertTemperatureService.queryTemperature({
+    timeOfDay,
+    weather,
+    season: currentSeason,
+    isUnderground,
+    isInShade,
+    isHunkeredDown,
+    nearbyCampfireActive: isNearCampfire,
+  });
+  const currentEffectiveFeelsLikeF = temperatureFeelsLikeF ?? currentTempCalc.feelsLikeF;
 
-  // Severe environmental condition detection
-  const isExtremeHeat = heatHazeIntensity > 0.35 && !isInShade && !isUnderground;
-  const isExtremeFrost = freezingIntensity > 0.35 && !isNearCampfire && !isUnderground;
+  // Severe environmental condition detection derived directly from physical state
+  const isExtremeHeat = currentEffectiveFeelsLikeF >= 96 && !isInShade && !isUnderground;
+  const isExtremeFrost = currentEffectiveFeelsLikeF <= 40 && !isNearCampfire && !isUnderground;
+  const isCampfireThawing = isNearCampfire && currentEffectiveFeelsLikeF <= 48 && !isUnderground;
   const isHaboobWarning = engineStatus.phase === 'warning' && !isUnderground;
   const isSandstormActive = weather === 'sandstorm' && !isUnderground;
   const isStormActive = weather === 'storm' && !isUnderground;
@@ -580,12 +590,18 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
       alphas.freezing += (targetFreezing - alphas.freezing) * (dt * 2.5);
       alphas.campfireThaw += (targetCampfireThaw - alphas.campfireThaw) * (dt * 4.0);
 
-      // Throttled UI state sync for warning alert pills & SVG filter scale
-      if (now - lastUiUpdateRef.current > 140) {
-        lastUiUpdateRef.current = now;
-        setHeatHazeIntensity(Math.round(alphas.heatHaze * 100) / 100);
-        setFreezingIntensity(Math.round(alphas.freezing * 100) / 100);
-        setCampfireThawIntensity(Math.round(alphas.campfireThaw * 100) / 100);
+      // Update SVG feDisplacementMap scale & backdrop layer directly via DOM refs without React state churn
+      if (displacementMapRef.current) {
+        displacementMapRef.current.setAttribute('scale', String(Math.round(15 * alphas.heatHaze)));
+      }
+      if (heatHazeRefractionLayerRef.current) {
+        if (alphas.heatHaze > 0.05 && !isUnd) {
+          heatHazeRefractionLayerRef.current.style.opacity = String(Math.min(1.0, alphas.heatHaze * 1.25));
+          heatHazeRefractionLayerRef.current.style.display = 'block';
+        } else {
+          heatHazeRefractionLayerRef.current.style.opacity = '0';
+          heatHazeRefractionLayerRef.current.style.display = 'none';
+        }
       }
 
       ctx.clearRect(0, 0, width, height);
@@ -1239,9 +1255,10 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
               />
             </feTurbulence>
             <feDisplacementMap
+              ref={displacementMapRef}
               in="SourceGraphic"
               in2="heatNoise"
-              scale={Math.round(15 * heatHazeIntensity)}
+              scale={0}
               xChannelSelector="R"
               yChannelSelector="G"
             />
@@ -1257,20 +1274,20 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
       />
 
       {/* Shimmering Heat Haze Optical Refraction Backdrop Layer */}
-      {heatHazeIntensity > 0.05 && !isUnderground && (
-        <div
-          id="heat-haze-refraction-layer"
-          className="absolute inset-x-0 bottom-0 pointer-events-none z-10 transition-opacity duration-300"
-          style={{
-            top: '38%',
-            opacity: Math.min(1.0, heatHazeIntensity * 1.25),
-            backdropFilter: 'url(#desert-heat-haze-refraction)',
-            WebkitBackdropFilter: 'url(#desert-heat-haze-refraction)',
-            maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.65) 20%, black 100%)',
-            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.65) 20%, black 100%)',
-          }}
-        />
-      )}
+      <div
+        ref={heatHazeRefractionLayerRef}
+        id="heat-haze-refraction-layer"
+        className="absolute inset-x-0 bottom-0 pointer-events-none z-10 transition-opacity duration-300"
+        style={{
+          top: '38%',
+          opacity: 0,
+          display: isUnderground ? 'none' : 'block',
+          backdropFilter: 'url(#desert-heat-haze-refraction)',
+          WebkitBackdropFilter: 'url(#desert-heat-haze-refraction)',
+          maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.65) 20%, black 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.65) 20%, black 100%)',
+        }}
+      />
 
       {/* Dynamic Weather Warning Modal - Positioned Bottom Center with Auto-Dismiss & Manual Turn Off */}
       {isModalVisible && !isDismissed && (
@@ -1458,7 +1475,7 @@ export const WeatherCanvasOverlay: React.FC<WeatherCanvasOverlayProps> = ({
               modalSubtitle = 'Flash flood caution in mountain washes! Torrential rain chilling air.';
               modalTag = 'FLASH FLOOD CAUTION';
               modalTagStyle = 'bg-cyan-900/60 border-cyan-300 text-cyan-200';
-            } else if (campfireThawIntensity > 0.25 && !isUnderground) {
+            } else if (isCampfireThawing) {
               modalTag = 'THAWING FROST';
               modalTagStyle = 'bg-amber-950/70 border-amber-500/60 text-amber-300';
             }

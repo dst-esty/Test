@@ -230,7 +230,6 @@ class SeasonService {
 
   public subscribe(fn: (season: SeasonType, info: SeasonInfo) => void): () => void {
     this.subscribers.add(fn);
-    fn(this.currentSeason, this.getSeasonInfo());
     return () => {
       this.subscribers.delete(fn);
     };
@@ -238,12 +237,14 @@ class SeasonService {
 
   private notifySubscribers() {
     const info = this.getSeasonInfo();
-    this.subscribers.forEach((fn) => {
-      try {
-        fn(this.currentSeason, info);
-      } catch (err) {
-        console.error('Error notifying season subscriber:', err);
-      }
+    queueMicrotask(() => {
+      this.subscribers.forEach((fn) => {
+        try {
+          fn(this.currentSeason, info);
+        } catch (err) {
+          console.error('Error notifying season subscriber:', err);
+        }
+      });
     });
   }
 }

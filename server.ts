@@ -271,8 +271,14 @@ async function startServer() {
 
       res.json({ status: "fallback", message: "No audio stream returned" });
     } catch (err: any) {
-      console.warn("[Townfolk TTS API] Gemini TTS error:", err?.message || err);
-      res.json({ status: "fallback", error: err?.message || "TTS error" });
+      const errStr = String(err?.message || err);
+      const isQuotaOrCredits = errStr.includes("402") || errStr.includes("prepayment") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("quota");
+      if (isQuotaOrCredits) {
+        console.log("[Townfolk TTS API] Gemini credits/quota depleted. Client Web Speech API will handle frontier dialogue voice.");
+      } else {
+        console.warn("[Townfolk TTS API] Gemini TTS error:", errStr);
+      }
+      res.json({ status: "fallback", error: "TTS fallback", isQuota: isQuotaOrCredits });
     }
   });
 
@@ -351,8 +357,13 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
           },
         });
         audioPcmBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-      } catch (ttsErr) {
-        console.warn("[Townfolk Chat API] TTS failed for reply:", ttsErr);
+      } catch (ttsErr: any) {
+        const ttsStr = String(ttsErr?.message || ttsErr);
+        if (ttsStr.includes("402") || ttsStr.includes("prepayment") || ttsStr.includes("RESOURCE_EXHAUSTED") || ttsStr.includes("quota")) {
+          console.log("[Townfolk Chat API] TTS credits/quota depleted; skipping server audio.");
+        } else {
+          console.warn("[Townfolk Chat API] TTS failed for reply:", ttsStr);
+        }
       }
 
       res.json({
@@ -362,11 +373,26 @@ The prospector has discovered grim physical evidence of the Superstition Mountai
         sampleRate: 24000,
       });
     } catch (err: any) {
-      console.warn("[Townfolk Chat API] Error:", err?.message || err);
-      const fallbacks = NPC_FALLBACKS[req.body?.characterId] || NPC_FALLBACKS.old_dusty_pete;
+      const errStr = String(err?.message || err);
+      const isQuotaOrCredits = errStr.includes("402") || errStr.includes("prepayment") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("quota");
+      if (isQuotaOrCredits) {
+        console.log("[Townfolk Chat API] Gemini credits/quota depleted. Utilizing authentic frontier fallback dialogue.");
+      } else {
+        console.warn("[Townfolk Chat API] Error:", errStr);
+      }
+      const charKey = req.body?.characterId || "old_dusty_pete";
+      const fallbacks = NPC_FALLBACKS[charKey] || NPC_FALLBACKS.old_dusty_pete;
+      const isCurseQuery = /ruth|skull|curse|cravey|head|decapitat|murder|bullet|veni|massacre/i.test(String(req.body?.userQuestion || ''));
+      let selectedFallback = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+      if (isCurseQuery) {
+        const curseLines = fallbacks.filter((l) => /ruth|skull|curse|cravey|head|bullet/i.test(l));
+        if (curseLines.length > 0) {
+          selectedFallback = curseLines[Math.floor(Math.random() * curseLines.length)];
+        }
+      }
       res.json({
         status: "ok",
-        reply: fallbacks[Math.floor(Math.random() * fallbacks.length)],
+        reply: selectedFallback,
         audioPcmBase64: null,
       });
     }
