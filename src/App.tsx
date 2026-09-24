@@ -26,6 +26,12 @@ import {
   FrontierDiscoveryDef,
   markDiscoveryAsLooted,
 } from './world/frontierExplorationDiscoveries';
+import {
+  PERALTA_SOLVES,
+  PeraltaSolveDef,
+  PeraltaSolveId,
+  peraltaStoneMapService,
+} from './services/peraltaStoneMapService';
 import { idleManager } from './services/idleManager';
 import { CompassHUD } from './components/CompassHUD';
 import { CinematicSplash } from './components/CinematicSplash';
@@ -210,6 +216,7 @@ export default function App() {
   const [journalInitialTab, setJournalInitialTab] = useState<'all' | 'gold' | 'curse' | 'coroner'>('all');
   const [isGuidebookOpen, setIsGuidebookOpen] = useState(false);
   const [isVictoryOpen, setIsVictoryOpen] = useState(false);
+  const [activeVictorySolve, setActiveVictorySolve] = useState<PeraltaSolveDef | null>(null);
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [isCampModalOpen, setIsCampModalOpen] = useState(false);
   const [isClaimDeedOpen, setIsClaimDeedOpen] = useState(false);
@@ -1465,8 +1472,36 @@ export default function App() {
       prev.map((c) => (c.id === 'clue_mine' ? { ...c, discovered: true } : c))
     );
 
+    peraltaStoneMapService.markSolveCompleted('solve_needle_box');
+    const needleSolve = PERALTA_SOLVES.find((s) => s.id === 'solve_needle_box') || PERALTA_SOLVES[0];
+    setActiveVictorySolve(needleSolve);
     setIsVictoryOpen(true);
   }, []);
+
+  // Handle triggering any of the Peralta Stone Map Solves (The Several Solves)
+  const handleTriggerSolve = useCallback(
+    (solveId: PeraltaSolveId) => {
+      const solve = PERALTA_SOLVES.find((s) => s.id === solveId);
+      if (!solve) return;
+
+      peraltaStoneMapService.markSolveCompleted(solveId);
+      setPlayerState((prev) => ({
+        ...prev,
+        goldFound: (prev.goldFound || 0) + solve.bonusGoldOz,
+        cashDollars: (prev.cashDollars || 0) + solve.bonusCash,
+      }));
+
+      soundEngine.playDiscovery();
+      soundEngine.playCoins();
+      showBanner(`🏆 ${solve.victoryTitle}! ${solve.name} conquered!`);
+
+      setActiveVictorySolve(solve);
+      setIsVictoryOpen(true);
+
+      multiplayer.broadcastDiscovery(solve.name, solve.victorySubtitle);
+    },
+    [showBanner]
+  );
 
   // Fast travel from Map, Claim Deed, or Stagecoach
   const handleFastTravel = (targetPos: Vector3D, destinationLabel?: string) => {
@@ -1840,6 +1875,7 @@ export default function App() {
         }}
         onToggleHunkerDown={handleToggleHunkerDown}
         onOpenFrontierDiscovery={handleOpenFrontierDiscovery}
+        onTriggerSolve={handleTriggerSolve}
       />
 
       {/* Dynamic Weather Screen Atmosphere, Haboob Sandstorm, Shimmering Heat Haze & Freezing Frost Overlay */}
@@ -2102,6 +2138,7 @@ export default function App() {
         playerPosition={playerState.position}
         playerYaw={playerState.rotation.yaw}
         landmarks={landmarks}
+        clues={clues}
         onFastTravel={handleFastTravel}
         activeClaim={playerState.activeClaim}
         territoryClaims={registeredClaims}
@@ -2156,12 +2193,17 @@ export default function App() {
         }}
       />
 
-      {/* Victory Celebration when the mine is found */}
+      {/* Victory Celebration when any of the Peralta Solves is found */}
       <VictoryModal
         isOpen={isVictoryOpen}
         onClose={() => setIsVictoryOpen(false)}
         goldFound={playerState.goldFound}
         cluesCount={clues.filter((c) => c.discovered).length}
+        activeSolve={activeVictorySolve}
+        onOpenMap={() => {
+          setIsVictoryOpen(false);
+          setIsMapOpen(true);
+        }}
       />
 
       {/* Mine Construction & Blueprint Depot Modal */}

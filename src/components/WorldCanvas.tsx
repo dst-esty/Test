@@ -68,6 +68,11 @@ import {
   FrontierDiscoveryDef,
   getLootedDiscoveries,
 } from '../world/frontierExplorationDiscoveries';
+import {
+  PERALTA_SOLVES,
+  PeraltaSolveId,
+  peraltaStoneMapService,
+} from '../services/peraltaStoneMapService';
 import { TownfolkManager } from '../world/townfolk';
 import { isTortillaFlatTownLimits } from '../world/townBoundaries';
 import { townfolkVoice } from '../services/townfolkVoiceService';
@@ -194,6 +199,7 @@ interface WorldCanvasProps {
   onToggleHunkerDown?: () => void;
   lunarPhase?: number;
   onOpenFrontierDiscovery?: (discovery: FrontierDiscoveryDef, isLooted: boolean) => void;
+  onTriggerSolve?: (solveId: PeraltaSolveId) => void;
 }
 
 const getTargetPixelRatio = (quality: GraphicsQuality | string = 'balanced') => {
@@ -277,6 +283,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   onToggleHunkerDown,
   lunarPhase = 0.5,
   onOpenFrontierDiscovery,
+  onTriggerSolve,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
@@ -5013,6 +5020,31 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
             handleOpenDiscovery();
           } else {
             onPromptInteract(prompt, handleOpenDiscovery);
+          }
+          return;
+        }
+      }
+
+      // 4c. Peralta Stone Map Solves (Legendary Endgame Entrances)
+      for (const solve of PERALTA_SOLVES) {
+        if (solve.id === 'solve_needle_box') continue;
+        const dist = Math.hypot(px - solve.coordinates.x, pz - solve.coordinates.z);
+        if (dist < 4.5) {
+          const isCompleted = peraltaStoneMapService.isSolveCompleted(solve.id);
+          const prompt = isCompleted
+            ? `🏆 ${solve.name}: Survey Conquered Vault [E]`
+            : `⚡ ${solve.promptAction}`;
+
+          const handleTriggerSolve = () => {
+            if (onTriggerSolve) {
+              onTriggerSolve(solve.id);
+            }
+          };
+
+          if (executeAction) {
+            handleTriggerSolve();
+          } else {
+            onPromptInteract(prompt, handleTriggerSolve);
           }
           return;
         }

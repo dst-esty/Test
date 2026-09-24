@@ -23,13 +23,19 @@ import {
   Scroll,
   Globe,
 } from 'lucide-react';
-import { Landmark, Vector3D, ClaimInfo } from '../types';
+import { Landmark, Vector3D, ClaimInfo, ClueItem } from '../types';
 import { TerritoryClaim, territoryClaims as territoryClaimsService } from '../services/territoryClaimService';
 import {
   formatUsgsDistance,
   WorldScaleMode,
   USGS_1TO1_HORIZONTAL_SCALE,
 } from '../world/superstitionTopography';
+import {
+  peraltaStoneMapService,
+  PERALTA_SOLVES,
+  PeraltaSolveDef,
+  PeraltaSolveId,
+} from '../services/peraltaStoneMapService';
 
 interface MapModalProps {
   isOpen: boolean;
@@ -37,6 +43,7 @@ interface MapModalProps {
   playerPosition: Vector3D;
   playerYaw: number;
   landmarks: Landmark[];
+  clues?: ClueItem[];
   onFastTravel?: (target: Vector3D, label?: string) => void;
   activeClaim?: ClaimInfo | null;
   territoryClaims?: TerritoryClaim[];
@@ -53,6 +60,7 @@ export const MapModal: React.FC<MapModalProps> = ({
   playerPosition,
   playerYaw,
   landmarks,
+  clues = [],
   onFastTravel,
   activeClaim,
   territoryClaims = [],
@@ -62,6 +70,24 @@ export const MapModal: React.FC<MapModalProps> = ({
 }) => {
   // Map Archetype: Authentic Peralta Stone Map or USGS Topo Quadrangle
   const [mapArchetype, setMapArchetype] = useState<MapArchetype>('peralta_stone');
+  const [activeSolveId, setActiveSolveId] = useState<PeraltaSolveId>(() => peraltaStoneMapService.getActiveSolveId());
+  const [showSolvePanel, setShowSolvePanel] = useState<boolean>(true);
+
+  // Subscribe to peraltaStoneMapService updates
+  useEffect(() => {
+    return peraltaStoneMapService.subscribe(() => {
+      setActiveSolveId(peraltaStoneMapService.getActiveSolveId());
+    });
+  }, []);
+
+  const activeSolve = useMemo(() => {
+    return PERALTA_SOLVES.find((s) => s.id === activeSolveId) || PERALTA_SOLVES[0];
+  }, [activeSolveId]);
+
+  const mapProgress = useMemo(() => {
+    const discoveredLandmarks = landmarks.filter((l) => l.discovered).length;
+    return peraltaStoneMapService.calculateMapCompletionPercent(clues, discoveredLandmarks);
+  }, [clues, landmarks]);
 
   // Multi-level zoom state (scale multiplier):
   // 0.5x = Regional Wilderness (1,040m span)
@@ -583,6 +609,113 @@ export const MapModal: React.FC<MapModalProps> = ({
             </label>
           </div>
         </div>
+
+        {/* ================= PERALTA STONE MAP SOLVES (MULTIPLE ENDGAME THEORIES) ================= */}
+        {mapArchetype === 'peralta_stone' && (
+          <div className="mb-2 p-2.5 rounded-xl bg-[#ddbe96] border-2 border-[#8c6239] shadow-sm font-serif">
+            {/* Decipherment Progress Header */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 pb-2 border-b border-[#8c6239]/40 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-[#3a1e08] flex items-center gap-1.5">
+                  <Scroll className="w-4 h-4 text-amber-900" />
+                  Peralta Stone Map Decipherment:
+                </span>
+                <span className="font-mono font-bold text-amber-950 bg-[#c8a67c] px-2 py-0.5 rounded border border-[#8c6239]/40">
+                  {mapProgress.percent}% Solved
+                </span>
+                <span className="text-[11px] text-stone-700 italic">
+                  ({mapProgress.unlockedFragments.length} / 4 Stone Tablets Assembled)
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 text-[11px] font-mono text-stone-700">
+                <span className="font-bold text-amber-900">Active Endgame Solve:</span>
+                <span className="font-bold text-[#2d1505]">{activeSolve.name}</span>
+              </div>
+            </div>
+
+            {/* The Several Solves Selector Tabs */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 mt-2">
+              {PERALTA_SOLVES.map((solve) => {
+                const isSelected = solve.id === activeSolveId;
+                const isCompleted = peraltaStoneMapService.isSolveCompleted(solve.id);
+                const isUnlocked = mapProgress.percent >= solve.minMapCompletionPercent;
+
+                return (
+                  <button
+                    key={solve.id}
+                    type="button"
+                    onClick={() => {
+                      peraltaStoneMapService.setActiveSolve(solve.id);
+                      setActiveSolveId(solve.id);
+                    }}
+                    className={`p-2 rounded-lg text-left transition-all border flex flex-col justify-between cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#5c3e21] text-amber-100 border-[#3a1e08] shadow-md ring-2 ring-amber-500/60'
+                        : isCompleted
+                        ? 'bg-[#c2aa85] text-stone-900 border-emerald-700/60 hover:bg-[#b89e77]'
+                        : isUnlocked
+                        ? 'bg-[#ebdcc2] text-stone-900 border-[#8c6239]/60 hover:bg-[#decbb0]'
+                        : 'bg-[#cfbe9e]/60 text-stone-600 border-stone-400/40 opacity-75'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1 w-full mb-1">
+                      <span className="text-[10px] font-mono uppercase font-bold tracking-wider opacity-85 truncate">
+                        {solve.name.split(':')[0]}
+                      </span>
+                      {isCompleted ? (
+                        <span className="text-[9px] bg-emerald-800 text-emerald-100 font-mono px-1.5 py-0.2 rounded font-bold">
+                          Conquered 🏆
+                        </span>
+                      ) : isUnlocked ? (
+                        <span className="text-[9px] bg-amber-800 text-amber-100 font-mono px-1.5 py-0.2 rounded font-bold">
+                          Active ⚡
+                        </span>
+                      ) : (
+                        <span className="text-[9px] bg-stone-700 text-stone-300 font-mono px-1.5 py-0.2 rounded">
+                          {solve.minMapCompletionPercent}% Req
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-bold text-xs leading-tight line-clamp-1">
+                      {solve.name.split(':')[1]?.trim() || solve.name}
+                    </div>
+                    <div className="text-[10px] opacity-80 font-sans italic mt-0.5 line-clamp-1">
+                      {solve.historicalResearcher}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Selected Solve Details & Fast Travel Drawer */}
+            <div className="mt-2 pt-2 border-t border-[#8c6239]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+              <div className="min-w-0 pr-2">
+                <span className="font-bold text-[#3a1e08]">{activeSolve.theoryTitle}: </span>
+                <span className="text-stone-700 text-[11px] font-sans line-clamp-1">{activeSolve.description}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-between sm:justify-end">
+                <span className="font-mono text-[11px] font-bold text-amber-950 bg-[#ebdcc2] px-2 py-1 rounded border border-[#8c6239]/40">
+                  📍 {formatUsgsDistance(Math.hypot(playerPosition.x - activeSolve.coordinates.x, playerPosition.z - activeSolve.coordinates.z), worldScaleMode).formatted} away
+                </span>
+                {onFastTravel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onFastTravel(
+                        { x: activeSolve.coordinates.x, y: activeSolve.targetElevationFt * 0.3048, z: activeSolve.coordinates.z },
+                        activeSolve.name
+                      );
+                    }}
+                    className="px-2.5 py-1 bg-[#5c3e21] hover:bg-[#432a13] text-amber-100 rounded text-xs font-serif font-bold transition flex items-center gap-1 cursor-pointer shadow-sm"
+                    title={`Fast travel to ${activeSolve.locationName}`}
+                  >
+                    <span>Approach Site</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ================= INTERACTIVE MAP VIEWPORT (SVG + RESPONSIVE OVERLAY) ================= */}
         <div
@@ -1493,6 +1626,79 @@ export const MapModal: React.FC<MapModalProps> = ({
                         );
                       })}
                     </g>
+
+                    {/* Active Peralta Solve Sightline & Target Marker */}
+                    {activeSolve && (
+                      <g id="active-peralta-solve-overlay">
+                        {/* Golden/Amber Dashed Transit Line */}
+                        <line
+                          x1={toSvgX(activeSolve.solveSightline.start.x)}
+                          y1={toSvgY(activeSolve.solveSightline.start.z)}
+                          x2={toSvgX(activeSolve.solveSightline.end.x)}
+                          y2={toSvgY(activeSolve.solveSightline.end.z)}
+                          stroke={activeSolve.color}
+                          strokeWidth="3.2"
+                          strokeDasharray="6 4"
+                          strokeOpacity="0.9"
+                        />
+                        {/* Transit Line Label */}
+                        <text
+                          x={(toSvgX(activeSolve.solveSightline.start.x) + toSvgX(activeSolve.solveSightline.end.x)) / 2}
+                          y={(toSvgY(activeSolve.solveSightline.start.z) + toSvgY(activeSolve.solveSightline.end.z)) / 2 - 8}
+                          fill="#3a1e08"
+                          fontSize="9.5"
+                          fontFamily="serif"
+                          fontWeight="bold"
+                          textAnchor="middle"
+                          stroke="#ebdcc2"
+                          strokeWidth="2.5"
+                          paintOrder="stroke"
+                        >
+                          {activeSolve.solveSightline.label}
+                        </text>
+                        {/* Start Anchor */}
+                        <circle
+                          cx={toSvgX(activeSolve.solveSightline.start.x)}
+                          cy={toSvgY(activeSolve.solveSightline.start.z)}
+                          r="5.5"
+                          fill={activeSolve.color}
+                          stroke="#ffffff"
+                          strokeWidth="1.5"
+                        />
+                        {/* Solve Target Marker & Pulsing Ring */}
+                        <circle
+                          cx={toSvgX(activeSolve.coordinates.x)}
+                          cy={toSvgY(activeSolve.coordinates.z)}
+                          r="15"
+                          fill="none"
+                          stroke={activeSolve.color}
+                          strokeWidth="2.5"
+                          strokeDasharray="4 3"
+                        />
+                        <circle
+                          cx={toSvgX(activeSolve.coordinates.x)}
+                          cy={toSvgY(activeSolve.coordinates.z)}
+                          r="7.5"
+                          fill={activeSolve.color}
+                          stroke="#ffffff"
+                          strokeWidth="2"
+                        />
+                        <text
+                          x={toSvgX(activeSolve.coordinates.x)}
+                          y={toSvgY(activeSolve.coordinates.z) - 18}
+                          fill="#3a1e08"
+                          fontSize="11"
+                          fontFamily="serif"
+                          fontWeight="bold"
+                          textAnchor="middle"
+                          stroke="#ebdcc2"
+                          strokeWidth="3"
+                          paintOrder="stroke"
+                        >
+                          🎯 {activeSolve.name}
+                        </text>
+                      </g>
+                    )}
                   </g>
                 )}
               </g>

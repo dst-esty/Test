@@ -8,6 +8,7 @@ import { buildSuperstitionPeaksAndSprings } from './superstitionPeaks';
 import { buildRuthMysteryAndSkeletons } from './ruthMysteryAndSkeletons';
 import { buildDickHolmesCluesSite } from './dickHolmesCluesSite';
 import { buildFrontierExplorationDiscoveries } from './frontierExplorationDiscoveries';
+import { buildPeraltaSolveSites } from './peraltaSolveSites';
 
 export interface LandmarkMeshes {
   weaversNeedle: THREE.Group;
@@ -37,6 +38,7 @@ export interface LandmarkMeshes {
   massacreSkeletons?: THREE.Group;
   dickHolmesSite?: THREE.Group;
   frontierDiscoveries?: Map<string, THREE.Group>;
+  peraltaSolveSites?: THREE.Group;
   waterRefillPoints: THREE.Vector3[];
 }
 
@@ -1114,6 +1116,14 @@ export function createLandmarkStructures(
   // ==========================================
   const discoveriesData = buildFrontierExplorationDiscoveries(scene);
 
+  // ==========================================
+  // 17. The Peralta Stone Map Solves (Endgame Sites)
+  // Solve II: El Corazón & Sombrero Butte Altar (-65X, 95Z)
+  // Solve III: Black Top Mesa Sun Dagger & Two-Foot Funnel Pit (24X, -45Z)
+  // Solve IV: Upper La Barge Jesuit Ingot Vault (40X, -175Z)
+  // ==========================================
+  const solveSitesData = buildPeraltaSolveSites(scene);
+
   return {
     weaversNeedle: needleGroup,
     trailhead: trailheadGroup,
@@ -1142,6 +1152,7 @@ export function createLandmarkStructures(
     massacreSkeletons: ruthMystery.massacreSkeletons,
     dickHolmesSite: dickHolmesData.rootGroup,
     frontierDiscoveries: discoveriesData.groups,
+    peraltaSolveSites: solveSitesData.rootGroup,
     waterRefillPoints,
   };
 }
