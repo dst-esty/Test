@@ -1,8 +1,10 @@
-import React from 'react';
-import { Compass, Sun, Moon, MapPin, Flame, Mountain, Globe, Eye, Users, User, Navigation, Sparkles } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Compass, Sun, Moon, MapPin, Flame, Mountain, Globe, Eye, Users, User, Navigation, Sparkles, Thermometer, Snowflake } from 'lucide-react';
 import { getUsgsElevation, formatUsgsDistance, WorldScaleMode, getFourPeaksSightlineStatus } from '../world/superstitionTopography';
-import { MultiplayerPlayer } from '../types';
+import { MultiplayerPlayer, WeatherType, SeasonType, SeasonInfo } from '../types';
 import { getLunarPhaseInfo } from '../world/atmosphere';
+import { desertTemperatureService } from '../services/desertTemperatureService';
+import { seasonService } from '../services/seasonService';
 
 interface CompassHUDProps {
   yaw: number; // in radians
@@ -22,6 +24,11 @@ interface CompassHUDProps {
   onOpenMultiplayerModal?: () => void;
   lunarPhase?: number;
   onCycleLunarPhase?: () => void;
+  weather?: WeatherType;
+  temperatureF?: number;
+  temperatureFeelsLikeF?: number;
+  isInShade?: boolean;
+  shadeReason?: string;
 }
 
 export const CompassHUD: React.FC<CompassHUDProps> = ({
@@ -42,10 +49,58 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   onOpenMultiplayerModal,
   lunarPhase = 0.5,
   onCycleLunarPhase,
+  weather = 'clear',
+  temperatureF,
+  temperatureFeelsLikeF,
+  isInShade,
+  shadeReason,
 }) => {
   // Convert yaw to degrees (0 to 360)
   const deg = Math.round(((-yaw * 180) / Math.PI + 360) % 360);
   const phaseInfo = getLunarPhaseInfo(lunarPhase);
+
+  const [tempUnit, setTempUnit] = useState<'F' | 'C'>(() => desertTemperatureService.getUnit());
+  const [season, setSeason] = useState<SeasonType>(() => seasonService.getSeason());
+  const [seasonInfo, setSeasonInfo] = useState<SeasonInfo>(() => seasonService.getSeasonInfo());
+  const [calendarDate, setCalendarDate] = useState<string>(() => seasonService.getFormattedDate());
+
+  useEffect(() => {
+    return desertTemperatureService.subscribeUnit((u) => setTempUnit(u));
+  }, []);
+
+  useEffect(() => {
+    return seasonService.subscribe((s, info) => {
+      setSeason(s);
+      setSeasonInfo(info);
+      setCalendarDate(seasonService.getFormattedDate());
+    });
+  }, []);
+
+  const handleCycleSeason = () => {
+    const nextInfo = seasonService.cycleSeason(true);
+    setSeason(nextInfo.id);
+    setSeasonInfo(nextInfo);
+    setCalendarDate(seasonService.getFormattedDate());
+  };
+
+  const elevationFt = playerCoords && playerCoords.y !== undefined
+    ? getUsgsElevation(playerCoords.y, playerCoords.x, playerCoords.z).feet
+    : 2050;
+
+  const tempReading = desertTemperatureService.queryTemperature({
+    timeOfDay,
+    weather,
+    elevationFt,
+    isInShade,
+    shadeReason,
+    isUnderground: isInsideMine,
+  });
+
+  const displayAmbientF = temperatureF !== undefined ? temperatureF : tempReading.ambientF;
+  const displayFeelsLikeF = temperatureFeelsLikeF !== undefined ? temperatureFeelsLikeF : tempReading.feelsLikeF;
+  const displayAmbient = desertTemperatureService.formatTemp(displayAmbientF, tempUnit);
+  const displayFeelsLike = desertTemperatureService.formatTemp(displayFeelsLikeF, tempUnit);
+  const hasFeelsDiff = Math.abs(displayFeelsLikeF - displayAmbientF) >= 5;
 
   const getCardinal = (angle: number) => {
     const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -95,7 +150,36 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
       <div className="flex items-center gap-3 bg-stone-900/85 backdrop-blur-md text-amber-100 border border-amber-800/60 rounded-full px-5 py-2 shadow-xl">
         {/* Compass Cardinal & Degree */}
         <div className="flex items-center gap-2 border-r border-amber-800/60 pr-4">
-          <Compass className="w-5 h-5 text-amber-400 animate-pulse" />
+          {/* Authentic Mini Brass Compass with Real-Time Magnetic Needle */}
+          <div
+            className="relative w-6 h-6 flex items-center justify-center shrink-0"
+            title={`Compass Bearing: ${deg}° ${getCardinal(deg)} • Magnetic Needle points toward True North`}
+          >
+            {/* Outer Brass Bezel */}
+            <div className="absolute inset-0 rounded-full border border-amber-400/90 bg-stone-950 shadow-inner flex items-center justify-center">
+              {/* Forward Heading Sightline notch */}
+              <div className="absolute top-0.5 w-1 h-0.5 bg-amber-400 rounded-full" title="Forward Sightline" />
+              <div className="absolute bottom-0.5 w-0.5 h-0.5 bg-stone-600 rounded-full" />
+              <div className="absolute left-0.5 w-0.5 h-0.5 bg-stone-600 rounded-full" />
+              <div className="absolute right-0.5 w-0.5 h-0.5 bg-stone-600 rounded-full" />
+            </div>
+
+            {/* Rotating Magnetic Needle (counter-rotates by -deg so red tip always points True North) */}
+            <div
+              className="relative w-full h-full flex items-center justify-center transition-transform duration-75 ease-out"
+              style={{ transform: `rotate(${-deg}deg)` }}
+            >
+              <svg viewBox="0 0 24 24" className="w-5 h-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]" fill="none">
+                {/* North Needle Tip (Red Enameled) */}
+                <polygon points="12,2.5 14.5,12 12,10 9.5,12" fill="#ef4444" stroke="#991b1b" strokeWidth="0.5" />
+                {/* South Needle Tip (Silver Blued-Steel) */}
+                <polygon points="12,21.5 14.5,12 12,14 9.5,12" fill="#e2e8f0" stroke="#475569" strokeWidth="0.5" />
+                {/* Brass Center Pivot */}
+                <circle cx="12" cy="12" r="1.5" fill="#f59e0b" stroke="#78350f" strokeWidth="0.5" />
+              </svg>
+            </div>
+          </div>
+
           <span className="font-serif font-bold text-lg text-amber-200 tracking-wider">
             {getCardinal(deg)}
           </span>
@@ -148,6 +232,60 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
             </span>
           </button>
         )}
+
+        {/* Frontier Brass Thermometer & Climate Indicator (Interactive °F / °C toggle) */}
+        <button
+          id="hud-thermometer-btn"
+          type="button"
+          onClick={() => {
+            const next = desertTemperatureService.toggleUnit();
+            setTempUnit(next);
+          }}
+          title={`Sonoran Desert Thermometer: True Air ${displayAmbientF}°F (${desertTemperatureService.fToC(displayAmbientF)}°C) | Feels Like ${displayFeelsLikeF}°F (${desertTemperatureService.fToC(displayFeelsLikeF)}°C) • ${tempReading.categoryLabel}. ${isInShade ? `Sheltered in shade (${shadeReason || 'Cool canopy'}).` : isInsideMine ? 'Cool subterranean mine level (68°F).' : 'Direct desert sun thermal load.'} Click to toggle between °F & °C.`}
+          className={`pointer-events-auto flex items-center gap-1.5 border-r border-amber-800/60 pr-4 text-xs font-mono px-2 py-1 -my-1 rounded-full transition-all cursor-pointer group hover:bg-stone-800/60 ${tempReading.textColor}`}
+        >
+          {tempReading.category === 'freezing' || tempReading.category === 'cold' ? (
+            <Snowflake className="w-4 h-4 text-sky-300 group-hover:rotate-45 transition-transform" />
+          ) : tempReading.category === 'scorching' || tempReading.category === 'hyperthermia' ? (
+            <Flame className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform animate-pulse" />
+          ) : (
+            <Thermometer className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+          )}
+
+          <div className="flex items-center gap-1.5">
+            <span className="font-bold tracking-tight">{displayAmbient}</span>
+            {hasFeelsDiff && (
+              <span
+                className={`text-[9px] font-sans uppercase px-1.5 py-0.2 rounded border hidden sm:inline-flex items-center gap-1 font-semibold ${
+                  displayFeelsLikeF < displayAmbientF
+                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
+                    : 'bg-red-950/80 text-red-300 border-red-600/50'
+                }`}
+              >
+                <span>{displayFeelsLikeF < displayAmbientF ? 'Shade' : 'Sun'}</span>
+                <strong>{displayFeelsLike}</strong>
+              </span>
+            )}
+          </div>
+        </button>
+
+        {/* Frontier Season & Historic Calendar Date Badge (Interactive: click to cycle season) */}
+        <button
+          id="hud-season-btn"
+          type="button"
+          onClick={handleCycleSeason}
+          title={`Frontier Season: ${seasonInfo.name} (${calendarDate}) • ${seasonInfo.temperatureRange}. ${seasonInfo.summary} Dehydration multiplier: ${seasonInfo.thirstMultiplier}x. Click to cycle seasons (Spring -> Summer -> Autumn -> Winter)!`}
+          className="pointer-events-auto flex items-center gap-1.5 border-r border-amber-800/60 pr-3.5 text-xs font-mono px-2.5 py-1 -my-1 rounded-full transition-all cursor-pointer group bg-stone-900/85 hover:bg-stone-800 hover:border-amber-500/70 border border-stone-700/60 active:scale-95 shadow-sm"
+        >
+          <span className="text-sm group-hover:scale-125 transition-transform">{seasonInfo.icon}</span>
+          <div className="flex items-center gap-1">
+            <span className={`font-bold ${seasonInfo.textColor}`}>{seasonInfo.name}</span>
+            <span className="text-[10px] text-stone-400 font-sans hidden sm:inline">• {calendarDate}</span>
+          </div>
+          <span className="text-[9px] bg-stone-800/90 text-amber-300/80 border border-amber-500/30 px-1 py-0.2 rounded hidden lg:inline font-mono">
+            {seasonInfo.thirstMultiplier}x Thirst
+          </span>
+        </button>
 
         {/* Nearest Landmark */}
         {nearestLandmarkName && (
@@ -265,32 +403,62 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
         </div>
       )}
 
-      {/* Subtle compass ribbon underneath */}
-      <div className="mt-1 w-64 h-5 overflow-hidden relative flex justify-center items-center bg-stone-950/60 border border-amber-900/40 rounded-full px-2 shadow-inner opacity-85">
-        <div
-          className="flex whitespace-nowrap text-[10px] font-mono text-amber-300/80 transition-transform duration-75 ease-out"
-          style={{ transform: `translateX(${-172 - deg * 1.6}px)` }}
-        >
-          {Array.from({ length: 49 }).map((_, i) => {
-            const angle = -180 + i * 15;
-            const norm = ((angle % 360) + 360) % 360;
+      {/* Subtle compass ribbon underneath - 100% synchronized to True Heading */}
+      <div className="mt-1 w-72 h-6 overflow-hidden relative flex items-center bg-stone-950/85 border border-amber-900/50 rounded-full px-2 shadow-inner backdrop-blur-sm select-none">
+        {/* Left/Right Edge Vignette Gradient Fade */}
+        <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-stone-950 via-stone-950/80 to-transparent z-10 pointer-events-none" />
+        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-stone-950 via-stone-950/80 to-transparent z-10 pointer-events-none" />
+
+        {/* Dynamic Continuous Compass Degree Ticks */}
+        {(() => {
+          const ribbonCenter = 144; // w-72 is 288px, center = 144px
+          const pxPerDeg = 1.6; // 15° = 24px, 5° = 8px
+          const minAngle = Math.floor((deg - 90) / 5) * 5;
+          const maxAngle = Math.ceil((deg + 90) / 5) * 5;
+          const ticks = [];
+          for (let a = minAngle; a <= maxAngle; a += 5) {
+            const diff = a - deg;
+            const x = ribbonCenter + diff * pxPerDeg;
+            if (x < -20 || x > 308) continue;
+            const norm = ((a % 360) + 360) % 360;
             const isCardinal = norm % 90 === 0;
             const isInter = norm % 45 === 0 && !isCardinal;
-            const cardinalLabel = norm === 0 ? 'N' : norm === 90 ? 'E' : norm === 180 ? 'S' : norm === 270 ? 'W' : isInter ? (norm === 45 ? 'NE' : norm === 135 ? 'SE' : norm === 225 ? 'SW' : 'NW') : '';
-            return (
-              <span key={i} className="inline-flex items-center justify-center w-[24px] text-center shrink-0">
+            const isMajor = norm % 15 === 0;
+            const cardinalLabel =
+              norm === 0 ? 'N' : norm === 90 ? 'E' : norm === 180 ? 'S' : norm === 270 ? 'W' : '';
+            const interLabel =
+              norm === 45 ? 'NE' : norm === 135 ? 'SE' : norm === 225 ? 'SW' : norm === 315 ? 'NW' : '';
+
+            ticks.push(
+              <div
+                key={a}
+                className="absolute top-0 bottom-0 flex flex-col items-center justify-center pointer-events-none"
+                style={{ left: `${x}px`, transform: 'translateX(-50%)' }}
+              >
                 {isCardinal ? (
-                  <strong className="text-amber-200 font-bold text-[11px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">{cardinalLabel}</strong>
+                  <strong className="text-amber-200 font-bold text-[11px] font-mono drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] leading-none">
+                    {cardinalLabel}
+                  </strong>
                 ) : isInter ? (
-                  <span className="text-amber-400/90 font-semibold text-[9px] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">{cardinalLabel}</span>
+                  <span className="text-amber-400 font-semibold text-[9px] font-mono drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] leading-none">
+                    {interLabel}
+                  </span>
+                ) : isMajor ? (
+                  <span className="text-amber-500/70 text-[8px] font-mono leading-none">
+                    {norm}°
+                  </span>
                 ) : (
-                  <span className="text-stone-500/80 text-[10px]">|</span>
+                  <div className="w-[1px] h-2 bg-amber-600/50 rounded-full" />
                 )}
-              </span>
+              </div>
             );
-          })}
-        </div>
-        <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-0.5 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)] z-10" />
+          }
+          return ticks;
+        })()}
+
+        {/* Center Lubber Line Needle with Optical Glow */}
+        <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-0.5 bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_8px_rgba(251,191,36,0.95)] z-20 pointer-events-none" />
+        <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1 bg-amber-300 rounded-b shadow z-20 pointer-events-none" />
       </div>
 
       {/* Dynamic Four Peaks Sightline & Alignment Status */}

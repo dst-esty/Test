@@ -9,7 +9,7 @@ export interface CoronersLogEntry {
   formattedDate: string;
   isHistoricalArchive: boolean;
   prospectorName: string;
-  reason: 'fall' | 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom' | 'apache_raid';
+  reason: GameOverDetails['reason'];
   title: string;
   subtitle: string;
   cause: string;
@@ -239,6 +239,13 @@ export function getPreventionAdvisory(
         actionRule:
           'Midday Arizona sun drains stamina and fluid rapidly. Never let your canteen run dry. Refill at Hieroglyphic Spring, Tortilla Flat barrels, or mountain seeps. Rest in shade when vigour is low.',
         equipmentRecommended: 'Filled Frontier Canteen, Shade Ramada, Salt Tablets',
+      };
+    case 'hypothermia':
+      return {
+        heading: 'Nocturnal Desert Thermal Management',
+        actionRule:
+          'Desert night temperatures drop toward freezing (< 45°F), seizing muscles and stopping stamina recovery. Always erect a stone campfire [C], carry cut wood planks, or seek shelter by the Tortilla Flat saloon hearth before sundown.',
+        equipmentRecommended: 'Frontier Campfire (Stone & Wood), Canvas Bedroll, Cut Wood Logs',
       };
     case 'bandit':
       return {

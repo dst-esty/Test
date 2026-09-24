@@ -47,6 +47,8 @@ import {
   AlertTriangle,
   Film,
   Zap,
+  Thermometer,
+  Snowflake,
 } from 'lucide-react';
 import { MineStructureType, PlayerState, GraphicsQuality, ClaimInfo, TerritoryClaim } from '../types';
 import { STRUCTURE_BLUEPRINTS } from '../world/mineBuilding';
@@ -57,6 +59,7 @@ import { VirtualJoystick } from './VirtualJoystick';
 import { isMobileDevice } from '../utils/device';
 import { VigilanceStatus, SACRED_ZONES } from '../services/apacheVigilanceService';
 import { toggleFullscreen, isCurrentlyFullscreen } from '../utils/fullscreen';
+import { desertTemperatureService } from '../services/desertTemperatureService';
 
 interface ControlsOverlayProps {
   playerState: PlayerState;
@@ -223,6 +226,16 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
 
   const [dismissRotatePrompt, setDismissRotatePrompt] = useState<boolean>(false);
   const [isVigilanceModalOpen, setIsVigilanceModalOpen] = useState<boolean>(false);
+  const [tempUnit, setTempUnit] = useState<'F' | 'C'>(() => desertTemperatureService.getUnit());
+
+  useEffect(() => {
+    return desertTemperatureService.subscribeUnit((u) => setTempUnit(u));
+  }, []);
+
+  const ambientF = playerState.temperatureF ?? 88;
+  const feelsLikeF = playerState.temperatureFeelsLikeF ?? (playerState.isInShade ? ambientF - 18 : ambientF);
+  const isDangerousHeat = feelsLikeF >= 105;
+  const isDangerousCold = feelsLikeF < 45;
 
   // Release pointer lock whenever modals open so the user has full mouse/touch interaction
   useEffect(() => {
@@ -726,6 +739,43 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   </span>
                 </div>
 
+                <div className="w-px h-3 bg-stone-700/60" />
+
+                {/* Desert Temperature & Feels-Like Thermometer */}
+                <div
+                  className="flex items-center gap-1.5 group transition-all cursor-pointer hover:bg-stone-800/60 px-1.5 py-0.5 rounded-full"
+                  onClick={() => {
+                    const u = desertTemperatureService.toggleUnit();
+                    setTempUnit(u);
+                  }}
+                  title={`Desert Thermometer: True Air ${ambientF}°F (${desertTemperatureService.fToC(ambientF)}°C) | Feels Like ${feelsLikeF}°F (${desertTemperatureService.fToC(feelsLikeF)}°C) ${
+                    playerState.isInShade
+                      ? '• Sheltered in desert shade (-18°F cooling)'
+                      : '• Direct desert sun radiation'
+                  }. Click to toggle °F / °C.`}
+                >
+                  {isDangerousCold ? (
+                    <Snowflake className="w-3.5 h-3.5 text-sky-400 group-hover:rotate-45 transition-transform" />
+                  ) : isDangerousHeat ? (
+                    <Flame className="w-3.5 h-3.5 text-rose-500 fill-rose-500/30 animate-pulse group-hover:scale-110 transition-transform" />
+                  ) : (
+                    <Thermometer className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+                  )}
+                  <span
+                    className={`font-mono text-xs font-semibold ${
+                      isDangerousCold
+                        ? 'text-sky-300 font-bold'
+                        : isDangerousHeat
+                        ? 'text-rose-400 font-bold animate-pulse'
+                        : feelsLikeF > 92
+                        ? 'text-amber-400'
+                        : 'text-emerald-300'
+                    }`}
+                  >
+                    {desertTemperatureService.formatTemp(ambientF, tempUnit)}
+                  </span>
+                </div>
+
                 {/* Collapse Button */}
                 <button
                   onClick={() => setIsVitalsCollapsed(true)}
@@ -735,6 +785,53 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                   <ChevronLeft className="w-3 h-3" />
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Extreme Heat Sunstroke Alert Pill */}
+          {isDangerousHeat && !playerState.isInShade && (playerState.health || 0) > 0 && (
+            <div
+              id="hud-heatwave-alert"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-950/90 border border-rose-500/80 shadow-[0_0_14px_rgba(244,63,94,0.5)] backdrop-blur-md text-[10px] font-mono text-rose-200 animate-pulse select-none"
+              title={`Blistering Sonoran sun (${desertTemperatureService.formatTemp(feelsLikeF, tempUnit)} felt)! Thirst drain accelerated. Seek shade under cottonwoods, canyon cliffs, or mine tunnels.`}
+            >
+              <Flame className="w-3.5 h-3.5 text-rose-400 animate-bounce shrink-0" />
+              <span className="font-bold tracking-wide">
+                BLISTERING HEAT ({desertTemperatureService.formatTemp(feelsLikeF, tempUnit)}) • SEEK SHADE
+              </span>
+            </div>
+          )}
+
+          {/* Extreme Cold Desert Night Alert Pill */}
+          {isDangerousCold && !playerState.isNearCampfire && (playerState.health || 0) > 0 && (
+            <div
+              id="hud-cold-night-alert"
+              onClick={onOpenCamp}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-950/90 border border-sky-400/80 shadow-[0_0_14px_rgba(56,189,248,0.5)] backdrop-blur-md text-[10px] font-mono text-sky-200 select-none animate-pulse ${
+                onOpenCamp ? 'cursor-pointer hover:bg-sky-900 active:scale-95' : ''
+              }`}
+              title={`Freezing desert night (${desertTemperatureService.formatTemp(feelsLikeF, tempUnit)})! Vigour recovery halted by frost. Click or press [C] to light a campfire / pitch camp.`}
+            >
+              <Snowflake className="w-3.5 h-3.5 text-sky-300 animate-spin shrink-0" />
+              <span className="font-bold tracking-wide">
+                DESERT FREEZING NIGHT ({desertTemperatureService.formatTemp(feelsLikeF, tempUnit)}) • LIGHT CAMPFIRE
+              </span>
+              {onOpenCamp && <span className="text-[9px] text-sky-300 underline ml-0.5">CAMP [C]</span>}
+            </div>
+          )}
+
+          {/* Campfire Radiant Warmth Pill */}
+          {playerState.isNearCampfire && (playerState.health || 0) > 0 && (
+            <div
+              id="hud-campfire-warmth-badge"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/90 border border-amber-500/80 shadow-[0_0_14px_rgba(245,158,11,0.5)] backdrop-blur-md text-[10px] font-mono text-amber-200 select-none animate-fade-in"
+              title="Resting by active campfire! Radiant warmth protects from freezing nocturnal frost, restores vigour (+26/s) and mends health."
+            >
+              <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
+              <span className="font-bold tracking-wide">
+                CAMPFIRE HEARTH • WARMTH (+28°F)
+              </span>
+              <span className="text-[9px] text-amber-300 font-bold ml-0.5">WARMING +26/s</span>
             </div>
           )}
 
@@ -1655,6 +1752,45 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               </div>
             )}
 
+            {playerState.equippedTool === 'compass' && (
+              <div className="flex items-center gap-2.5 bg-stone-950/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-amber-500/70 text-amber-200 shadow-xl font-mono">
+                {/* Mini Rotating Compass Bezel */}
+                <div className="relative w-8 h-8 rounded-full border-2 border-amber-400 bg-stone-900 flex items-center justify-center shadow-inner shrink-0">
+                  {/* Forward Heading Sightline Notch */}
+                  <div className="absolute top-0.5 w-1 h-0.5 bg-amber-400 rounded-full z-10" title="Forward Sightline" />
+                  <div
+                    className="w-full h-full flex items-center justify-center transition-transform duration-75 ease-out"
+                    style={{
+                      transform: `rotate(${-(Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360))}deg)`,
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none">
+                      <polygon points="12,2 14.5,12 12,10 9.5,12" fill="#ef4444" stroke="#991b1b" strokeWidth="0.5" />
+                      <polygon points="12,22 14.5,12 12,14 9.5,12" fill="#d1d5db" stroke="#4b5563" strokeWidth="0.5" />
+                      <circle cx="12" cy="12" r="1.5" fill="#f59e0b" stroke="#78350f" strokeWidth="0.5" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="flex flex-col text-right">
+                  <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">
+                    SURVEY COMPASS [1]
+                  </span>
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span className="text-sm font-bold text-amber-300">
+                      {Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360)}°
+                    </span>
+                    <span className="text-xs font-serif text-amber-200 font-bold">
+                      {(() => {
+                        const d = Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360);
+                        const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                        return dirs[Math.round(d / 45) % 8];
+                      })()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {playerState.equippedTool === 'dynamite' && (
               <div className="flex items-center gap-2.5 bg-stone-950/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-red-600/70 text-red-200 shadow-xl font-mono">
                 <Flame className="w-4 h-4 text-red-400" />
@@ -1746,6 +1882,29 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               <div className="absolute w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(245,158,11,1)]" />
               <div className="absolute -bottom-5 text-[9px] font-mono tracking-widest text-amber-300 font-bold whitespace-nowrap drop-shadow">
                 THROW [L-CLICK] • PLACE [R-CLICK / E]
+              </div>
+            </div>
+          ) : playerState.equippedTool === 'compass' ? (
+            <div className="relative flex flex-col items-center justify-center">
+              {/* Surveyor's Azimuth Crosshair with Degree Ticks */}
+              <div className="relative w-14 h-14 flex items-center justify-center">
+                <div className="absolute w-full h-[1px] bg-amber-400/60" />
+                <div className="absolute h-full w-[1px] bg-amber-400/60" />
+                <div className="w-9 h-9 rounded-full border border-amber-400/70 border-dashed animate-pulse" />
+                <div className="absolute w-2 h-2 rounded-full border border-amber-300" />
+              </div>
+              <div className="absolute -bottom-6 flex items-center gap-1.5 bg-stone-950/90 px-2.5 py-0.5 rounded-full border border-amber-500/70 text-[10px] font-mono text-amber-300 shadow-lg backdrop-blur-sm whitespace-nowrap">
+                <Compass className="w-3 h-3 text-amber-400 animate-spin-slow" />
+                <span className="font-bold">
+                  {Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360)}°
+                </span>
+                <span className="text-amber-200 font-semibold">
+                  {(() => {
+                    const d = Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360);
+                    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                    return dirs[Math.round(d / 45) % 8];
+                  })()}
+                </span>
               </div>
             </div>
           ) : playerState.equippedTool === 'hands' ? (
@@ -1860,6 +2019,21 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             </span>
           </div>
         )}
+
+        {/* Field Compass Survey Ribbon */}
+        {playerState.equippedTool === 'compass' && (
+          <div className="pointer-events-auto flex items-center gap-3 bg-stone-900/95 backdrop-blur-md px-4 py-2 rounded-2xl border-2 border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.4)] text-xs">
+            <Compass className="w-4 h-4 text-amber-400 animate-spin-slow" />
+            <span className="font-bold text-amber-100">1880 Field Survey Compass:</span>
+            <span className="text-stone-300 text-[11px]">
+              Sighting Heading: <strong className="text-amber-300 font-mono">{Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360)}° {(() => {
+                const d = Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360);
+                const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                return dirs[Math.round(d / 45) % 8];
+              })()}</strong> • Magnetic Needle Points True North • <strong>[1]</strong> or <strong>[Esc]</strong> to stow
+            </span>
+          </div>
+        )}
       </div>
       )}
 
@@ -1898,7 +2072,168 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* Full Expedition Inventory Saddlebag & Frontier Assayer Modal */}
+      {/* Handheld 1880s Pocket Surveyor's Compass Dial (Visible when Survey Compass equipped) */}
+      {playerState.equippedTool === 'compass' && (
+        <div className="fixed bottom-28 sm:bottom-32 right-4 sm:right-6 z-40 pointer-events-auto flex flex-col items-center animate-in fade-in zoom-in-95 duration-200 select-none">
+          <div className="relative p-3 rounded-2xl bg-stone-950/92 backdrop-blur-md border-2 border-amber-600/80 shadow-[0_0_35px_rgba(245,158,11,0.35)] flex flex-col items-center">
+            {/* Pocket Watch / Compass Ring Handle */}
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-6 h-4 rounded-t-full border-2 border-amber-500/80 bg-stone-900/80 -z-10" />
+
+            {/* Top Lubber Sighting Index Arrow */}
+            <div className="absolute top-1 left-1/2 -translate-x-1/2 flex flex-col items-center z-20 pointer-events-none">
+              <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[7px] border-t-amber-400 drop-shadow" />
+            </div>
+
+            {/* Brass Outer Casing */}
+            <div className="relative w-36 h-36 sm:w-40 sm:h-40 rounded-full border-4 border-amber-700/90 bg-gradient-to-br from-[#dfceab] via-[#cbb184] to-[#a48858] shadow-[inset_0_2px_8px_rgba(0,0,0,0.6)] flex items-center justify-center overflow-hidden">
+              {/* Internal Glass Glare Sheen */}
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-white/25 pointer-events-none rounded-full z-30" />
+
+              {/* Synchronized Rotating 1880s Surveyor's Prismatic Compass Dial Card & Needle */}
+              {(() => {
+                const liveDeg = Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360);
+                return (
+                  <div
+                    className="relative w-full h-full flex items-center justify-center transition-transform duration-75 ease-out pointer-events-none"
+                    style={{ transform: `rotate(${-liveDeg}deg)` }}
+                  >
+                    {/* Azimuth Graduation Ring */}
+                    <svg viewBox="0 0 160 160" className="absolute inset-0 w-full h-full pointer-events-none">
+                      {/* 360 degree tick marks (every 5° and 15°) */}
+                      {Array.from({ length: 72 }).map((_, i) => {
+                        const angle = i * 5;
+                        const rad = (angle * Math.PI) / 180;
+                        const isMajor = angle % 30 === 0;
+                        const isMedium = angle % 15 === 0 && !isMajor;
+                        const r1 = isMajor ? 62 : isMedium ? 66 : 70;
+                        const r2 = 75;
+                        return (
+                          <line
+                            key={i}
+                            x1={80 + Math.sin(rad) * r1}
+                            y1={80 - Math.cos(rad) * r1}
+                            x2={80 + Math.sin(rad) * r2}
+                            y2={80 - Math.cos(rad) * r2}
+                            stroke={isMajor ? '#451a03' : '#78350f'}
+                            strokeWidth={isMajor ? '1.8' : isMedium ? '1.2' : '0.6'}
+                            opacity={isMajor ? 0.9 : 0.6}
+                          />
+                        );
+                      })}
+
+                      {/* 30° Numeral Labels */}
+                      {[
+                        { deg: 0, label: 'N' },
+                        { deg: 30, label: '30' },
+                        { deg: 60, label: '60' },
+                        { deg: 90, label: 'E' },
+                        { deg: 120, label: '120' },
+                        { deg: 150, label: '150' },
+                        { deg: 180, label: 'S' },
+                        { deg: 210, label: '210' },
+                        { deg: 240, label: '240' },
+                        { deg: 270, label: 'W' },
+                        { deg: 300, label: '300' },
+                        { deg: 330, label: '330' },
+                      ].map((item) => {
+                        const rad = (item.deg * Math.PI) / 180;
+                        const r = 53;
+                        const isCardinal = item.deg % 90 === 0;
+                        return (
+                          <text
+                            key={item.deg}
+                            x={80 + Math.sin(rad) * r}
+                            y={80 - Math.cos(rad) * r + 3}
+                            fill={item.deg === 0 ? '#b91c1c' : '#451a03'}
+                            fontSize={isCardinal ? '10' : '7'}
+                            fontWeight="bold"
+                            fontFamily="serif"
+                            textAnchor="middle"
+                          >
+                            {item.label}
+                          </text>
+                        );
+                      })}
+
+                      {/* Intercardinals */}
+                      {[
+                        { deg: 45, label: 'NE' },
+                        { deg: 135, label: 'SE' },
+                        { deg: 225, label: 'SW' },
+                        { deg: 315, label: 'NW' },
+                      ].map((item) => {
+                        const rad = (item.deg * Math.PI) / 180;
+                        const r = 40;
+                        return (
+                          <text
+                            key={item.deg}
+                            x={80 + Math.sin(rad) * r}
+                            y={80 - Math.cos(rad) * r + 2.5}
+                            fill="#854d0e"
+                            fontSize="6.5"
+                            fontWeight="600"
+                            fontFamily="sans-serif"
+                            textAnchor="middle"
+                          >
+                            {item.label}
+                          </text>
+                        );
+                      })}
+                    </svg>
+
+                    {/* Free-Floating Magnetic Needle mounted to Card */}
+                    <svg viewBox="0 0 160 160" className="w-full h-full drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)]" fill="none">
+                      {/* North Needle Half (Red Enameled) */}
+                      <polygon points="80,18 86,76 80,68 74,76" fill="#dc2626" stroke="#7f1d1d" strokeWidth="0.8" />
+                      <line x1="80" y1="18" x2="80" y2="76" stroke="#fecaca" strokeWidth="0.8" />
+                      {/* North Tip Fleur Marker */}
+                      <circle cx="80" cy="30" r="1.5" fill="#fef08a" />
+
+                      {/* South Needle Half (Blued Gunmetal / Silver) */}
+                      <polygon points="80,142 86,84 80,92 74,84" fill="#334155" stroke="#0f172a" strokeWidth="0.8" />
+                      <line x1="80" y1="84" x2="80" y2="142" stroke="#94a3b8" strokeWidth="0.8" />
+
+                      {/* Center Brass Gemstone Pivot */}
+                      <circle cx="80" cy="80" r="7" fill="#d97706" stroke="#78350f" strokeWidth="1.2" />
+                      <circle cx="80" cy="80" r="3" fill="#451a03" />
+                      <circle cx="79" cy="79" r="1" fill="#fef08a" />
+                    </svg>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Readout Plaque */}
+            <div className="mt-2 flex flex-col items-center text-center font-mono">
+              <div className="flex items-center gap-1.5 text-amber-200">
+                <span className="text-xs font-bold text-amber-300">
+                  {Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360)}°
+                </span>
+                <span className="text-xs font-serif font-bold text-amber-400">
+                  {(() => {
+                    const d = Math.round(((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360);
+                    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                    return dirs[Math.round(d / 45) % 8];
+                  })()}
+                </span>
+                <span className="text-[10px] text-stone-400">
+                  ({Math.round((((-playerState.rotation.yaw * 180) / Math.PI + 360) % 360) * 17.7778)} MIL)
+                </span>
+              </div>
+              <div className="text-[9px] text-amber-500/80 mt-0.5">
+                TRUE MAGNETIC NORTH ALIGNED
+              </div>
+              <button
+                type="button"
+                onClick={() => onSelectTool('hands')}
+                className="mt-1 px-2.5 py-0.5 rounded-full bg-stone-900 hover:bg-stone-800 text-stone-300 hover:text-amber-200 border border-stone-700 text-[10px] cursor-pointer transition active:scale-95"
+              >
+                Stow Compass [1]
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <InventoryModal
         isOpen={isInventoryOpen}
         onClose={() => setIsInventoryOpen(false)}

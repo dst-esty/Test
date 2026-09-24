@@ -45,6 +45,7 @@ import { armImmediateFullscreenOnFirstGesture, enterFullscreen } from './utils/f
 import { recordCoronersLogEntry } from './services/coronersLogService';
 import { townWantedService } from './services/townWantedService';
 import { bountyService } from './services/bountyService';
+import { seasonService } from './services/seasonService';
 
 export default function App() {
   // Player State
@@ -515,6 +516,7 @@ export default function App() {
         showBanner(message);
       },
     });
+    seasonService.setBannerCallback(showBanner);
   }, [showBanner]);
 
   const toggleHunkerRef = useRef<(() => void) | null>(null);
@@ -589,6 +591,7 @@ export default function App() {
   const handleSleepUntilDawn = useCallback(() => {
     soundEngine.playCampfire();
     setTimeOfDay(6.0); // 6:00 AM Sunrise
+    seasonService.advanceDay();
     setLunarPhase((lp) => {
       const updated = (lp + 1 / 29.5) % 1.0;
       safeLocalStorage.setItem('lost_dutchman_lunar_phase', updated.toString());
@@ -642,6 +645,7 @@ export default function App() {
 
     soundEngine.playHotelRest();
     setTimeOfDay(6.0); // 6:00 AM Sunrise
+    seasonService.advanceDay();
     setLunarPhase((lp) => {
       const updated = (lp + 1 / 29.5) % 1.0;
       safeLocalStorage.setItem('lost_dutchman_lunar_phase', updated.toString());
@@ -1079,6 +1083,7 @@ export default function App() {
         const next = advanceDiurnalTime(prev, 1);
         if (next < prev) {
           // Midnight rollover: natural synodic progression (~29.5 days per lunar cycle)
+          seasonService.advanceDay();
           setLunarPhase((lp) => {
             const updated = (lp + 1 / 29.5) % 1.0;
             safeLocalStorage.setItem('lost_dutchman_lunar_phase', updated.toString());
@@ -1742,13 +1747,20 @@ export default function App() {
         onToggleHunkerDown={handleToggleHunkerDown}
       />
 
-      {/* Dynamic Weather Screen Atmosphere & Haboob Sandstorm Overlay */}
+      {/* Dynamic Weather Screen Atmosphere, Haboob Sandstorm, Shimmering Heat Haze & Freezing Frost Overlay */}
       <WeatherCanvasOverlay
         weather={weather}
         timeOfDay={timeOfDay}
         isUnderground={playerState.isInsideMine}
         isHunkeredDown={playerState.isHunkeredDown}
+        temperatureF={playerState.temperatureF}
+        temperatureFeelsLikeF={playerState.temperatureFeelsLikeF}
+        isInShade={playerState.isInShade}
+        isNearCampfire={playerState.isNearCampfire}
+        vigour={playerState.vigour}
         onToggleHunkerDown={handleToggleHunkerDown}
+        onOpenCamp={() => setIsCampModalOpen(true)}
+        isRidingMount={playerState.isRidingMount}
       />
 
       {/* Compass & Diurnal Cycle HUD with Day/Night Illumination Toggle & Endless Coordinates */}
@@ -1771,6 +1783,11 @@ export default function App() {
           onOpenMultiplayerModal={() => setRosterModalTab('customize')}
           lunarPhase={lunarPhase}
           onCycleLunarPhase={handleCycleLunarPhase}
+          weather={weather}
+          temperatureF={playerState.temperatureF}
+          temperatureFeelsLikeF={playerState.temperatureFeelsLikeF}
+          isInShade={playerState.isInShade}
+          shadeReason={playerState.shadeReason}
         />
       )}
 

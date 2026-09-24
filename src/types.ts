@@ -234,6 +234,9 @@ export interface PlayerState {
   isExhausted?: boolean; // whether player is out of vigour/breath
   isHunkeredDown?: boolean; // whether player is crouched/prone in survival hunker stance
   shadeReason?: string; // descriptive source of shade (canopy, canyon wall, mine portal, etc.)
+  temperatureF?: number; // Ambient true air temperature in Fahrenheit
+  temperatureFeelsLikeF?: number; // Apparent/perceived temperature in Fahrenheit
+  isNearCampfire?: boolean; // whether player is basked in campfire radiant warmth
   isSprinting: boolean;
   isInsideMine: boolean;
   equippedTool:
@@ -378,6 +381,29 @@ export interface PortalExcavationState {
 
 export type WeatherType = 'clear' | 'clouds' | 'sunset' | 'storm' | 'night' | 'sandstorm' | 'light_rain';
 
+export type SeasonType = 'spring' | 'summer' | 'autumn' | 'winter';
+
+export interface SeasonInfo {
+  id: SeasonType;
+  name: string;
+  icon: string;
+  months: string;
+  historicalDate: string;
+  temperatureRange: string;
+  typicalDaytimeF: number;
+  typicalNighttimeF: number;
+  thirstMultiplier: number;
+  vigourMultiplier: number;
+  color: string;
+  borderColor: string;
+  textColor: string;
+  badgeBg: string;
+  summary: string;
+  floraAndFauna: string;
+  atmosphereLore: string;
+  defaultWeather: WeatherType;
+}
+
 export interface GameSettings {
   timeOfDay: number; // 0 to 24 (hours)
   autoCycleTime: boolean;
@@ -387,7 +413,7 @@ export interface GameSettings {
 }
 
 export interface GameOverDetails {
-  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom' | 'apache_raid' | 'fall';
+  reason: 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom' | 'apache_raid' | 'fall' | 'hypothermia';
   title: string;
   subtitle: string;
   cause: string;
@@ -409,7 +435,7 @@ export interface CoronersLogEntry {
   formattedDate: string;
   isHistoricalArchive: boolean;
   prospectorName: string;
-  reason: 'fall' | 'cave_in' | 'dehydration' | 'bandit' | 'dynamite' | 'drowning' | 'venom' | 'apache_raid';
+  reason: GameOverDetails['reason'];
   title: string;
   subtitle: string;
   cause: string;

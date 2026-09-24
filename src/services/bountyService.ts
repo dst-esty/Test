@@ -281,7 +281,7 @@ class BountyService {
 
   public abandonBounty(bountyId: string): boolean {
     const bounty = this.contracts.find((b) => b.id === bountyId);
-    if (!bounty || bounty.status !== 'active') return false;
+    if (!bounty || (bounty.status !== 'active' && bounty.status !== 'completed')) return false;
 
     bounty.status = 'available';
     bounty.currentAmount = 0;

@@ -24,8 +24,17 @@ import {
   Droplets,
   Flame,
   History,
+  Pickaxe,
+  Package,
+  Coins,
+  Clock,
+  Layers,
+  Store,
+  ArrowRight,
+  AlertCircle,
+  HelpCircle,
 } from 'lucide-react';
-import { ClueItem, CoronersLogEntry } from '../types';
+import { ClueItem, CoronersLogEntry, PlayerState } from '../types';
 import {
   evaluateCurseProgress,
   CURSE_CLUE_IDS,
@@ -33,6 +42,7 @@ import {
 } from '../services/curseNarrativeEngine';
 import { soundEngine } from '../audio/soundEffects';
 import { getCoronersLog, clearPlayerCoronersLog } from '../services/coronersLogService';
+import { bountyService, BountyContract } from '../services/bountyService';
 
 interface JournalModalProps {
   isOpen: boolean;
@@ -41,7 +51,10 @@ interface JournalModalProps {
   goldFound: number;
   onOpenGuidebook?: () => void;
   onOpenMap?: () => void;
-  initialTab?: 'all' | 'gold' | 'curse' | 'coroner';
+  initialTab?: 'all' | 'gold' | 'curse' | 'coroner' | 'bounties';
+  playerState?: PlayerState;
+  onOpenTortillaFlat?: (tab?: any) => void;
+  onShowBanner?: (msg: string) => void;
 }
 
 export const JournalModal: React.FC<JournalModalProps> = ({
@@ -52,13 +65,18 @@ export const JournalModal: React.FC<JournalModalProps> = ({
   onOpenGuidebook,
   onOpenMap,
   initialTab = 'all',
+  playerState,
+  onOpenTortillaFlat,
+  onShowBanner,
 }) => {
-  const [activeTab, setActiveTab] = useState<'all' | 'gold' | 'curse' | 'coroner'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'all' | 'gold' | 'curse' | 'coroner' | 'bounties'>(initialTab);
   const [showForensicDetails, setShowForensicDetails] = useState<boolean>(false);
   const [coronersEntries, setCoronersEntries] = useState<CoronersLogEntry[]>([]);
   const [coronerFilter, setCoronerFilter] = useState<'all' | 'player' | 'archive' | 'fall' | 'cave_in' | 'dehydration' | 'bandit'>('all');
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState<boolean>(false);
+  const [bounties, setBounties] = useState<BountyContract[]>(() => bountyService.getContracts());
+  const [abandonConfirmId, setAbandonConfirmId] = useState<string | null>(null);
 
   // Synchronize initialTab when modal opens
   useEffect(() => {
@@ -67,8 +85,36 @@ export const JournalModal: React.FC<JournalModalProps> = ({
         setActiveTab(initialTab);
       }
       setCoronersEntries(getCoronersLog());
+      if (playerState) {
+        bountyService.updateProgressFromPlayerState(playerState);
+      }
+      setBounties([...bountyService.getContracts()]);
     }
-  }, [isOpen, initialTab]);
+  }, [isOpen, initialTab, playerState]);
+
+  // Subscribe to real-time bounty updates
+  useEffect(() => {
+    const unsubscribe = bountyService.subscribe(() => {
+      setBounties([...bountyService.getContracts()]);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  const handleAbandonBounty = (bountyId: string) => {
+    const abandonedBounty = bounties.find((b) => b.id === bountyId);
+    const success = bountyService.abandonBounty(bountyId);
+    if (success) {
+      soundEngine.playPaperRustle?.();
+      setAbandonConfirmId(null);
+      if (onShowBanner) {
+        onShowBanner(
+          `📜 Abandoned bounty contract "${abandonedBounty?.title || 'Daily Bounty'}". Returned to Mercantile board.`
+        );
+      }
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -91,6 +137,13 @@ export const JournalModal: React.FC<JournalModalProps> = ({
   const totalGoldLost = coronersEntries
     .filter((e) => !e.isHistoricalArchive)
     .reduce((sum, e) => sum + (e.goldLost || 0), 0);
+
+  const activeBounties = bounties.filter(
+    (b) => b.status === 'active' || b.status === 'completed'
+  );
+  const readyToClaimCount = activeBounties.filter(
+    (b) => b.status === 'completed' || (playerState && bountyService.canClaim(b.id, playerState).eligible)
+  ).length;
 
   // Filtered coroner entries
   const displayedCoronerEntries = coronersEntries.filter((entry) => {
@@ -177,6 +230,72 @@ export const JournalModal: React.FC<JournalModalProps> = ({
     setShowClearConfirm(false);
   };
 
+  const getBountyCategory = (type: BountyContract['type']) => {
+    switch (type) {
+      case 'bring_rations':
+        return {
+          label: 'Provisions Delivery',
+          icon: <Package className="w-3.5 h-3.5 text-amber-700" />,
+          classes: 'bg-amber-100 text-amber-950 border-amber-300',
+        };
+      case 'map_landmark':
+        return {
+          label: 'Cartographic Survey',
+          icon: <MapPin className="w-3.5 h-3.5 text-sky-700" />,
+          classes: 'bg-sky-100 text-sky-950 border-sky-300',
+        };
+      case 'excavate_blocks':
+        return {
+          label: 'Hard Rock Quarrying',
+          icon: <Pickaxe className="w-3.5 h-3.5 text-stone-700" />,
+          classes: 'bg-stone-200 text-stone-900 border-stone-400',
+        };
+      case 'bring_planks':
+        return {
+          label: 'Timber Shoring',
+          icon: <Layers className="w-3.5 h-3.5 text-emerald-800" />,
+          classes: 'bg-emerald-100 text-emerald-950 border-emerald-300',
+        };
+      case 'bring_gold':
+        return {
+          label: 'Assayer Ore Delivery',
+          icon: <Coins className="w-3.5 h-3.5 text-yellow-800" />,
+          classes: 'bg-yellow-100 text-yellow-950 border-yellow-300',
+        };
+      case 'hunt_game':
+        return {
+          label: 'Wilderness Trapping',
+          icon: <Crosshair className="w-3.5 h-3.5 text-orange-800" />,
+          classes: 'bg-orange-100 text-orange-950 border-orange-300',
+        };
+      default:
+        return {
+          label: 'Expedition Contract',
+          icon: <Scroll className="w-3.5 h-3.5 text-stone-700" />,
+          classes: 'bg-stone-100 text-stone-900 border-stone-300',
+        };
+    }
+  };
+
+  const getBountyUnit = (type: BountyContract['type']) => {
+    switch (type) {
+      case 'bring_rations':
+        return 'rations';
+      case 'bring_planks':
+        return 'planks';
+      case 'bring_gold':
+        return 'oz gold';
+      case 'excavate_blocks':
+        return 'rock blocks';
+      case 'map_landmark':
+        return 'landmarks';
+      case 'hunt_game':
+        return 'meats';
+      default:
+        return 'units';
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-4xl bg-[#f7f1e1] text-stone-900 rounded-xl shadow-2xl border-4 border-[#6b4724] p-5 sm:p-6 overflow-hidden max-h-[92vh] flex flex-col font-serif">
@@ -186,6 +305,8 @@ export const JournalModal: React.FC<JournalModalProps> = ({
             <div className="p-2.5 rounded-lg bg-[#5c3e21] text-amber-200 shadow">
               {activeTab === 'coroner' ? (
                 <Skull className="w-7 h-7 text-red-300" />
+              ) : activeTab === 'bounties' ? (
+                <Scroll className="w-7 h-7 text-amber-300" />
               ) : (
                 <BookOpen className="w-7 h-7" />
               )}
@@ -195,20 +316,41 @@ export const JournalModal: React.FC<JournalModalProps> = ({
                 <h2 className="text-xl sm:text-2xl font-bold tracking-wide text-[#3d2411]">
                   {activeTab === 'coroner'
                     ? "Territorial Coroner's Inquest Log"
+                    : activeTab === 'bounties'
+                    ? "Daily Bounty Board Quests"
                     : "Jacob Waltz's Field Journal"}
                 </h2>
                 <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[#ebdcc2] text-[#6b4724] font-bold border border-[#c5ad88]">
-                  {activeTab === 'coroner' ? 'Pinal County Inquests' : 'Territorial Records'}
+                  {activeTab === 'coroner'
+                    ? 'Pinal County Inquests'
+                    : activeTab === 'bounties'
+                    ? 'Mercantile Contracts'
+                    : 'Territorial Records'}
                 </span>
               </div>
               <p className="text-xs text-stone-600 italic">
                 {activeTab === 'coroner'
                   ? 'Forensic Inquests, Cause & Coordinates of Demise, and Frontier Survival Mandates'
+                  : activeTab === 'bounties'
+                  ? 'Active Provisions Deliveries, Cartographic Surveys & Mining Quests from Tortilla Flat'
                   : 'Deathbed Transcriptions, Peralta Stone Ciphers & The Curse of the Ruth Family'}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {onOpenTortillaFlat && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenTortillaFlat('bounties');
+                }}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#ebdcc2] hover:bg-[#ded0b3] text-[#4a2e14] text-xs font-sans font-bold transition cursor-pointer border border-[#cbb793]"
+                title="Open Tortilla Flat Bounty Board"
+              >
+                <Store className="w-3.5 h-3.5 text-amber-800" />
+                <span>Mercantile Board</span>
+              </button>
+            )}
             {onOpenMap && (
               <button
                 onClick={() => {
@@ -245,7 +387,7 @@ export const JournalModal: React.FC<JournalModalProps> = ({
         </div>
 
         {/* Status Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-3 bg-[#ede2c8] p-2.5 rounded-lg border border-[#cbb793] text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-3 bg-[#ede2c8] p-2.5 rounded-lg border border-[#cbb793] text-xs">
           <div>
             <span className="text-stone-500 uppercase font-mono text-[10px] block">Clues Deciphered</span>
             <span className="text-base sm:text-lg font-bold text-stone-800 font-mono">
@@ -278,14 +420,35 @@ export const JournalModal: React.FC<JournalModalProps> = ({
               </span>
               <span className="text-xs sm:text-sm font-bold text-rose-900 font-mono flex items-center gap-1">
                 <Skull className="w-3.5 h-3.5 text-rose-700 inline" />
-                {coronersEntries.length} Case Files Filed
+                {coronersEntries.length} Case Files
+              </span>
+            </button>
+          </div>
+          <div>
+            <button
+              onClick={() => setActiveTab('bounties')}
+              className={`w-full text-left p-1 -m-1 rounded transition cursor-pointer ${
+                activeTab === 'bounties' ? 'bg-[#dfceb0]' : 'hover:bg-[#dfceb0]/60'
+              }`}
+              title="Track Active Bounty Board Quests"
+            >
+              <span className="text-stone-500 uppercase font-mono text-[10px] block flex items-center gap-1">
+                Active Bounties
+              </span>
+              <span
+                className={`text-xs sm:text-sm font-bold font-mono flex items-center gap-1 ${
+                  readyToClaimCount > 0 ? 'text-emerald-700' : 'text-amber-900'
+                }`}
+              >
+                <Scroll className="w-3.5 h-3.5 text-amber-700 inline" />
+                {activeBounties.length} Active {readyToClaimCount > 0 && `(${readyToClaimCount} Ready)`}
               </span>
             </button>
           </div>
         </div>
 
         {/* DYNAMIC CURSE OF THE LOST DUTCHMAN LORE BANNER (Shown on Journal & Curse tabs) */}
-        {activeTab !== 'coroner' && (
+        {activeTab !== 'coroner' && activeTab !== 'bounties' && (
           <div className="mb-3 rounded-lg border border-red-800/40 bg-gradient-to-r from-[#2c1210] via-[#3d1815] to-[#240e0d] text-amber-100 p-3 shadow-md">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-start gap-2.5">
@@ -428,10 +591,34 @@ export const JournalModal: React.FC<JournalModalProps> = ({
               {coronersEntries.length}
             </span>
           </button>
+
+          {/* New Tab: Daily Bounty Contracts */}
+          <button
+            onClick={() => setActiveTab('bounties')}
+            className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'bounties'
+                ? 'bg-[#5c3e21] text-amber-100 shadow ring-2 ring-amber-600/50'
+                : 'bg-[#ebdcc2] text-amber-950 hover:bg-[#dfceb0]'
+            }`}
+          >
+            <Scroll className="w-3.5 h-3.5 text-amber-700" />
+            <span>Daily Bounties</span>
+            <span
+              className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold ${
+                readyToClaimCount > 0
+                  ? 'bg-emerald-700 text-emerald-100 animate-pulse'
+                  : activeBounties.length > 0
+                  ? 'bg-amber-800 text-amber-100'
+                  : 'bg-black/20 text-stone-800'
+              }`}
+            >
+              {readyToClaimCount > 0 ? `${readyToClaimCount} READY` : activeBounties.length}
+            </span>
+          </button>
         </div>
 
         {/* TAB 1, 2, 3: Clue Entries List */}
-        {activeTab !== 'coroner' && (
+        {activeTab !== 'coroner' && activeTab !== 'bounties' && (
           <div className="flex-1 overflow-y-auto pr-2 space-y-3">
             {displayedClues.map((clue, idx) => {
               const isCurse = CURSE_CLUE_IDS.includes(clue.id as any);
@@ -865,6 +1052,291 @@ export const JournalModal: React.FC<JournalModalProps> = ({
                               Verdict: &ldquo;{entry.coronerVerdict}&rdquo; — Filed in Pinal County Territorial Record Book Vol. IV.
                             </div>
                           </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: DAILY BOUNTY BOARD CONTRACTS */}
+        {activeTab === 'bounties' && (
+          <div className="flex-1 flex flex-col min-h-0">
+            {/* Mercantile Bounty Header Banner */}
+            <div className="mb-3 p-3 bg-gradient-to-r from-[#3e2714] via-[#4d321b] to-[#36210f] text-amber-100 rounded-lg border border-amber-700/60 shadow">
+              <div className="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-2 rounded bg-black/40 border border-amber-600/80 text-amber-300 mt-0.5">
+                    <Store className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-sm tracking-wide text-amber-200 uppercase font-sans">
+                        Tortilla Flat Mercantile Notice Board Quests
+                      </h3>
+                      <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-amber-800 text-amber-100 font-bold border border-amber-600">
+                        {activeBounties.length} Active Contracts
+                      </span>
+                      {readyToClaimCount > 0 && (
+                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-emerald-700 text-emerald-100 font-bold animate-pulse border border-emerald-400">
+                          {readyToClaimCount} Ready To Collect
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                      Procedural contracts accepted at the Tortilla Flat Mercantile. Fulfill requirements through mountain exploration, hard-rock quarrying, or trail provisions, then return to the counter for cash, dynamite, and lumber rewards.
+                    </p>
+                  </div>
+                </div>
+
+                {onOpenTortillaFlat && (
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onOpenTortillaFlat('bounties');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-stone-950 font-sans font-bold text-xs shadow transition cursor-pointer shrink-0"
+                    title="Travel to Tortilla Flat Mercantile Counter"
+                  >
+                    <Store className="w-3.5 h-3.5" />
+                    <span>Mercantile Board</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Contracts List / Empty State */}
+            <div className="flex-1 overflow-y-auto pr-1 space-y-3">
+              {activeBounties.length === 0 ? (
+                <div className="p-8 text-center bg-[#f0e3cc]/60 border-2 border-dashed border-[#bfa580] rounded-xl my-4 space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-[#dfcca7] flex items-center justify-center mx-auto text-[#6a421b]">
+                    <Scroll className="w-6 h-6" />
+                  </div>
+                  <h4 className="font-serif font-bold text-lg text-[#3d2411]">
+                    No Active Mercantile Bounty Contracts
+                  </h4>
+                  <p className="text-xs text-stone-600 max-w-md mx-auto leading-relaxed">
+                    You have not accepted any frontier quests today. Ride or walk to Tortilla Flat and examine the weathered wooden notice board on the Mercantile porch to accept daily contracts for mining supplies, dynamite, and cold hard cash.
+                  </p>
+                  {onOpenTortillaFlat && (
+                    <div className="pt-2">
+                      <button
+                        onClick={() => {
+                          onClose();
+                          onOpenTortillaFlat('bounties');
+                        }}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#5c3e21] hover:bg-[#483018] text-amber-100 font-sans text-xs font-bold shadow transition cursor-pointer"
+                      >
+                        <Store className="w-4 h-4 text-amber-300" />
+                        <span>Open Tortilla Flat Bounty Board</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                activeBounties.map((b) => {
+                  const cat = getBountyCategory(b.type);
+                  const unit = getBountyUnit(b.type);
+                  const claimCheck = playerState ? bountyService.canClaim(b.id, playerState) : { eligible: false };
+                  const isCompleted = b.status === 'completed' || claimCheck.eligible;
+                  const progressPct = Math.min(100, Math.round((b.currentAmount / b.requiredAmount) * 100));
+
+                  return (
+                    <div
+                      key={b.id}
+                      className={`p-4 rounded-xl border-2 transition relative shadow-sm ${
+                        isCompleted
+                          ? 'bg-[#f4faf4] border-emerald-600/80 ring-1 ring-emerald-500/30'
+                          : 'bg-[#fffdf8] border-[#c4a67b]'
+                      }`}
+                    >
+                      {/* Top Badges & Actions */}
+                      <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold border ${cat.classes}`}
+                          >
+                            {cat.icon}
+                            <span>{cat.label}</span>
+                          </span>
+
+                          {isCompleted ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-100 text-emerald-900 border border-emerald-400 animate-pulse">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                              <span>READY FOR TURN-IN</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono text-stone-700 bg-stone-100 border border-stone-300">
+                              <Clock className="w-3.5 h-3.5 text-stone-500" />
+                              <span>IN PROGRESS</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Abandon Quest Workflow */}
+                        <div>
+                          {abandonConfirmId === b.id ? (
+                            <div className="flex items-center gap-1.5 bg-red-100 border border-red-300 px-2 py-1 rounded-lg">
+                              <span className="text-[11px] text-red-900 font-sans font-bold">Abandon?</span>
+                              <button
+                                onClick={() => handleAbandonBounty(b.id)}
+                                className="px-2 py-0.5 rounded bg-red-700 hover:bg-red-800 text-white text-[10px] font-mono font-bold cursor-pointer transition shadow-xs"
+                                title="Confirm abandoning this bounty"
+                              >
+                                Yes
+                              </button>
+                              <button
+                                onClick={() => setAbandonConfirmId(null)}
+                                className="px-2 py-0.5 rounded bg-stone-200 hover:bg-stone-300 text-stone-800 text-[10px] font-mono cursor-pointer transition"
+                                title="Cancel"
+                              >
+                                Keep
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setAbandonConfirmId(b.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-stone-600 hover:text-red-700 hover:bg-red-50 border border-transparent hover:border-red-200 text-xs font-sans transition cursor-pointer"
+                              title="Abandon this bounty quest and return it to the Mercantile board"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Abandon Quest</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Title & Description */}
+                      <div className="space-y-1 mb-3">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <h4 className="font-bold text-base text-[#3d2411] font-serif">
+                            {b.title}
+                          </h4>
+                          <span className="text-[11px] font-mono text-stone-500 shrink-0">
+                            Issuer: {b.issuer}
+                          </span>
+                        </div>
+                        <p className="text-xs text-stone-700 italic leading-relaxed">
+                          &ldquo;{b.description}&rdquo;
+                        </p>
+                      </div>
+
+                      {/* Requirements & Progress Bar */}
+                      <div className="bg-[#ede3ce]/70 border border-[#cbb793] rounded-lg p-3 my-2.5 text-xs space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-mono font-bold text-stone-700">
+                          <span className="uppercase tracking-wider">Contract Objective:</span>
+                          <span className={isCompleted ? 'text-emerald-800' : 'text-stone-800'}>
+                            {b.currentAmount} / {b.requiredAmount} {unit} ({progressPct}%)
+                          </span>
+                        </div>
+
+                        {/* Progress Bar */}
+                        <div className="w-full h-2.5 rounded-full bg-stone-300/80 overflow-hidden border border-stone-400/40">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              isCompleted
+                                ? 'bg-emerald-600'
+                                : 'bg-gradient-to-r from-amber-600 to-amber-500'
+                            }`}
+                            style={{ width: `${progressPct}%` }}
+                          />
+                        </div>
+
+                        {/* Specific Guidance Text */}
+                        <div className="text-[11px] text-stone-600 pt-0.5">
+                          {b.type === 'bring_rations' && (
+                            <span>
+                              Deliver preserved rations, jerky, or fresh game (venison, rabbit, mutton) to the Mercantile.
+                              {playerState && (
+                                <strong className="ml-1 text-stone-800">
+                                  Current Provisions in Pack: {(playerState.provisionsRations || 0) + (playerState.rabbitMeat || 0) + (playerState.venisonMeat || 0) + (playerState.bighornMutton || 0)}
+                                </strong>
+                              )}
+                            </span>
+                          )}
+                          {b.type === 'bring_planks' && (
+                            <span>
+                              Harvest timber logs from spring cottonwoods with your Felling Axe [X] and mill them into planks.
+                              {playerState && (
+                                <strong className="ml-1 text-stone-800">
+                                  Planks in Pack: {playerState.woodPlanks || 0}
+                                </strong>
+                              )}
+                            </span>
+                          )}
+                          {b.type === 'bring_gold' && (
+                            <span>
+                              Pan streams or mine vein stopes to collect raw gold ore.
+                              {playerState && (
+                                <strong className="ml-1 text-stone-800">
+                                  Raw Gold Carried: {playerState.goldFound || 0} oz
+                                </strong>
+                              )}
+                            </span>
+                          )}
+                          {b.type === 'map_landmark' && (
+                            <span>
+                              {b.targetLandmarkName
+                                ? `Trek across the Superstitions to locate and register: ${b.targetLandmarkName}.`
+                                : 'Survey and register unmapped mountain landmarks.'}
+                            </span>
+                          )}
+                          {b.type === 'excavate_blocks' && (
+                            <span>
+                              Swing your pickaxe into surface rock strata or underground mine shafts to quarry blocks.
+                            </span>
+                          )}
+                          {b.type === 'hunt_game' && (
+                            <span>
+                              Hunt desert wildlife (desert jackrabbits, Coues deer, or bighorn sheep) to harvest meat.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Reward Payout Row & Claim Action */}
+                      <div className="flex items-center justify-between gap-3 pt-1 border-t border-stone-200 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] uppercase font-mono text-stone-500 font-bold">
+                            Guaranteed Payout:
+                          </span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-950 font-mono text-xs font-bold border border-amber-300">
+                            <Coins className="w-3 h-3 text-amber-700" />
+                            <span>+${b.reward.cashDollars.toFixed(2)}</span>
+                          </span>
+                          {b.reward.dynamite && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-100 text-red-950 font-mono text-xs font-bold border border-red-300">
+                              <span>+{b.reward.dynamite} Dynamite Stick</span>
+                            </span>
+                          )}
+                          {b.reward.woodPlanks && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-950 font-mono text-xs font-bold border border-emerald-300">
+                              <Layers className="w-3 h-3 text-emerald-700" />
+                              <span>+{b.reward.woodPlanks} Planks</span>
+                            </span>
+                          )}
+                          {b.reward.ammo && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-stone-200 text-stone-900 font-mono text-xs font-bold border border-stone-300">
+                              <span>+{b.reward.ammo} Cartridges</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {isCompleted && onOpenTortillaFlat && (
+                          <button
+                            onClick={() => {
+                              onClose();
+                              onOpenTortillaFlat('bounties');
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-sans text-xs font-bold shadow transition cursor-pointer"
+                          >
+                            <Store className="w-3.5 h-3.5" />
+                            <span>Collect at Counter</span>
+                          </button>
                         )}
                       </div>
                     </div>

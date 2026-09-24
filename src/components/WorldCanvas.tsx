@@ -72,11 +72,12 @@ import { apacheVigilance, VigilanceStatus } from '../services/apacheVigilanceSer
 import { ApacheSmokeSignalSystem } from '../world/apacheSmokeSignals';
 import { SurfaceAnalysisResult, analyzeSurfaceAtPosition } from '../world/prospectingAnalysis';
 import { ProspectorGogglesOverlay } from './ProspectorGogglesOverlay';
-import { WorldScaleMode } from '../world/superstitionTopography';
+import { WorldScaleMode, getUsgsElevation } from '../world/superstitionTopography';
 import { Skull } from 'lucide-react';
 import { isScatteredSkullClue } from '../services/curseNarrativeEngine';
 import { enterFullscreen } from '../utils/fullscreen';
 import { desertShadeService } from '../services/desertShadeService';
+import { desertTemperatureService } from '../services/desertTemperatureService';
 import { townWantedService } from '../services/townWantedService';
 import { TownWantedOverlay } from './TownWantedOverlay';
 
@@ -659,6 +660,12 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
   const isExhaustedRef = useRef<boolean>(false);
   const isInShadeRef = useRef<boolean>(false);
   const currentShadeReasonRef = useRef<string>('Scorching Desert Sun');
+  const currentTemperatureRef = useRef<number>(85);
+  const currentFeelsLikeRef = useRef<number>(85);
+  const currentTempMultiplierRef = useRef<number>(1.0);
+  const isNearCampfireRef = useRef<boolean>(false);
+  const lastFreezeWarningTimeRef = useRef<number>(0);
+  const lastHeatWarningTimeRef = useRef<number>(0);
   const lastPantSoundTimeRef = useRef<number>(0);
   const lastShadeTransitionNoticeRef = useRef<number>(0);
   const hasTriggeredLowHydrationWarningRef = useRef<boolean>(false);
@@ -5410,7 +5417,7 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           }
 
           const baseDrain = isSprinting ? sprintDrain : (isHunkered ? walkDrain * 0.4 : walkDrain);
-          const drainRate = baseDrain * delta * rainRelief * ridingRelief * sandstormThirstMultiplier;
+          const drainRate = baseDrain * delta * rainRelief * ridingRelief * sandstormThirstMultiplier * currentTempMultiplierRef.current;
           currentHydrationRef.current = Math.max(0, currentHydrationRef.current - drainRate);
 
           // Low hydration warning (< 20%)
@@ -5433,8 +5440,8 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
               triggerDeath({
                 reason: 'dehydration',
                 title: 'Perished of Sunstroke',
-                subtitle: 'Exhausted Under the Scorching Arizona Sun',
-                cause: 'Blistering desert heat and an empty canteen brought fatal sunstroke in the Superstition wilderness. Always keep your canteen filled at mountain springs or the base camp water barrel!',
+                subtitle: `Exhausted Under ${currentTemperatureRef.current}°F Arizona Heat`,
+                cause: `Blistering ${currentTemperatureRef.current}°F desert heat (felt index ${currentFeelsLikeRef.current}°F) and an empty canteen brought fatal sunstroke in the Superstition wilderness. Always keep your canteen filled at mountain springs or the base camp water barrel!`,
                 goldFound: playerStateRef.current.goldFound || 0,
                 blocksDug: playerStateRef.current.blocksDug || 0,
                 landmarksDiscovered: playerStateRef.current.discoveredLandmarks?.length || 1,
@@ -5629,11 +5636,76 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
       isInShadeRef.current = shadeResult.isInShade;
       currentShadeReasonRef.current = shadeResult.shadeReason;
 
+      // 1c. Sonoran Desert Temperature & Thermal Micro-climate Engine
+      let nearbyCampfireActive = false;
+      let distanceToCampfire = 999;
+
+      // Check Tortilla Flat permanent town campfire (px: 3.5, pz: -236)
+      const distToTownFire = Math.hypot(playerPos.current.x - 3.5, playerPos.current.z - (-236));
+      if (distToTownFire < distanceToCampfire) {
+        distanceToCampfire = distToTownFire;
+      }
+      if (distToTownFire < 14) {
+        nearbyCampfireActive = true;
+      }
+
+      // Check Base Camp campfire (px: 0, pz: 0)
+      const distToBaseCampFire = Math.hypot(playerPos.current.x, playerPos.current.z);
+      if (distToBaseCampFire < distanceToCampfire) {
+        distanceToCampfire = distToBaseCampFire;
+      }
+      if (distToBaseCampFire < 12) {
+        nearbyCampfireActive = true;
+      }
+
+      // Check player-built structures (campfires, prospector outpost camps, frontier torches)
+      const built = playerStateRef.current.builtStructures;
+      if (built && built.length > 0) {
+        for (let bi = 0; bi < built.length; bi++) {
+          const bs = built[bi];
+          if (bs.type === 'prospector_camp' || bs.type === 'frontier_torch' || (bs.type as string) === 'campfire') {
+            const isLit = bs.isLit !== false && (bs.fuelHoursRemaining ?? 12) > 0;
+            if (isLit) {
+              const cdx = playerPos.current.x - bs.position.x;
+              const cdz = playerPos.current.z - bs.position.z;
+              const cDist = Math.hypot(cdx, cdz);
+              if (cDist < distanceToCampfire) {
+                distanceToCampfire = cDist;
+              }
+              if (cDist < 12) {
+                nearbyCampfireActive = true;
+              }
+            }
+          }
+        }
+      }
+
+      isNearCampfireRef.current = nearbyCampfireActive;
+
+      const playerElevationFt = getUsgsElevation(playerPos.current.y, playerPos.current.x, playerPos.current.z).feet;
+      const tempReading = desertTemperatureService.queryTemperature({
+        timeOfDay: timeOfDayRef.current,
+        weather: weatherRef.current,
+        elevationFt: playerElevationFt,
+        isInShade: shadeResult.isInShade,
+        shadeReason: shadeResult.shadeReason,
+        isUnderground,
+        currentMineLevel: undergroundLayersRef.current?.currentLevel || 0,
+        isHunkeredDown: isHunkeredDownRef.current,
+        nearbyCampfireActive,
+        distanceToCampfire,
+      });
+
+      currentTemperatureRef.current = tempReading.ambientF;
+      currentFeelsLikeRef.current = tempReading.feelsLikeF;
+      currentTempMultiplierRef.current = tempReading.hydrationMultiplier;
+
       if (!isGameOverRef.current) {
         if (isSprinting && isMoving) {
-          // Sprinting consumes vigour
+          // Sprinting consumes vigour - heavily accelerated in scorching heat
           const ridingSprintDiscount = isRiding ? 0.5 : 1.0;
-          const sprintVigourDrain = 18.0 * ridingSprintDiscount * delta;
+          const heatSprintPenalty = currentFeelsLikeRef.current >= 105 ? 1.65 : currentFeelsLikeRef.current >= 95 ? 1.3 : 1.0;
+          const sprintVigourDrain = 18.0 * ridingSprintDiscount * heatSprintPenalty * delta;
           currentVigourRef.current = Math.max(0, currentVigourRef.current - sprintVigourDrain);
 
           if (currentVigourRef.current <= 0) {
@@ -5642,26 +5714,30 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
               soundEngine.playExhaustedPanting();
               if (onShowBanner && Date.now() - lastPantSoundTimeRef.current > 4000) {
                 lastPantSoundTimeRef.current = Date.now();
-                onShowBanner("⚠️ Drained of vigour! Rest in the desert shade under cliffs, trees, or mine timbers.");
+                if (currentFeelsLikeRef.current >= 100) {
+                  onShowBanner("⚠️ Overcome by scorching heat! Vigour depleted — seek shade under cliffs, cottonwoods, or mine timbers.");
+                } else {
+                  onShowBanner("⚠️ Drained of vigour! Rest in the desert shade under cliffs, trees, or mine timbers.");
+                }
               }
             }
           }
         } else {
-          // Not sprinting: vigour recovers!
+          // Not sprinting: vigour recovery depends critically on shade & campfire warmth!
           if (shadeResult.isInShade) {
-            // Resting in desert shade: Rapid, refreshing recovery!
-            // Stationary in shade: +22.0/s (full recovery from 0 to 100 in ~4.5 seconds)
-            // Walking in shade: +12.0/s
-            const recoveryRate = (isMoving ? 12.0 : 22.0) * Math.max(0.65, shadeResult.shadeFactor);
+            // Resting in desert shade: Rapid, refreshing recovery sheltered from the baking sun!
+            // Stationary in shade: +24.0/s (full recovery in ~4 seconds)
+            // Walking in shade: +14.0/s
+            const recoveryRate = (isMoving ? 14.0 : 24.0) * Math.max(0.65, shadeResult.shadeFactor);
             const prevVigour = currentVigourRef.current;
             currentVigourRef.current = Math.min(100, currentVigourRef.current + recoveryRate * delta);
 
-            // Play relief audio cue when entering shade while low on stamina
+            // Play relief audio cue when entering shade while low on stamina or baking
             if (prevVigour < 35 && Date.now() - lastShadeTransitionNoticeRef.current > 10000) {
               lastShadeTransitionNoticeRef.current = Date.now();
               soundEngine.playShadeRelief();
               if (onShowBanner) {
-                onShowBanner(`🌿 In Desert Shade (${shadeResult.shadeReason})! Vigour recovering rapidly.`);
+                onShowBanner(`🌿 Desert Shade Relief (${shadeResult.shadeReason})! Vigour recovering rapidly.`);
               }
             }
 
@@ -5673,26 +5749,95 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
                 onShowBanner("⚡ Vigour restored! You can sprint again.");
               }
             }
-          } else {
-            // Out under the blazing direct desert sun
+          } else if (nearbyCampfireActive && distanceToCampfire < 12) {
+            // Resting by active campfire hearth (crucial during freezing desert night!):
+            // Warm embers dispel nocturnal cold, restoring vigour and warming the prospector
+            const fireProximity = Math.max(0.4, 1 - distanceToCampfire / 12);
+            const fireRecoveryRate = (isMoving ? 14.0 : 26.0) * fireProximity;
+            currentVigourRef.current = Math.min(100, currentVigourRef.current + fireRecoveryRate * delta);
+
+            // Campfire also gently restores health (+2.0 HP/s) up to 100%
+            if (currentHealthRef.current < 100) {
+              currentHealthRef.current = Math.min(100, currentHealthRef.current + delta * 2.0);
+            }
+
+            if (isExhaustedRef.current && currentVigourRef.current >= 25) {
+              isExhaustedRef.current = false;
+              soundEngine.playVigourRestored();
+              if (onShowBanner) {
+                onShowBanner("🔥 Warmed by the campfire! Vigour fully restored.");
+              }
+            }
+          } else if (tempReading.category === 'freezing') {
+            // FREEZING DESERT NIGHT WITHOUT FIRE (< 45°F):
+            // Muscles stiffen and shiver uncontrollably from biting desert frost.
+            // Vigour recovery is frozen or minimal (+0.5/s stationary, 0.0 moving)
+            const freezeRecovery = isMoving ? 0.0 : 0.5;
+            currentVigourRef.current = Math.min(100, currentVigourRef.current + freezeRecovery * delta);
+
+            // Cold exposure hypothermia if out of vigour in freezing night
+            if (currentVigourRef.current <= 5) {
+              currentHealthRef.current = Math.max(0, currentHealthRef.current - delta * 1.8);
+              if (Date.now() - lastFreezeWarningTimeRef.current > 7000) {
+                lastFreezeWarningTimeRef.current = Date.now();
+                soundEngine.playSandstormWarning();
+                if (onShowBanner) {
+                  onShowBanner("❄️ Freezing desert night! Shivering with cold hypothermia — light a campfire [C] or return to town!");
+                }
+              }
+
+              // Fatal hypothermia death if health reaches 0
+              if (currentHealthRef.current <= 0 && (playerStateRef.current.health || 0) > 0) {
+                soundEngine.playPlayerDeath();
+                triggerDeath({
+                  reason: 'hypothermia',
+                  title: 'Frozen by Desert Night',
+                  subtitle: `Perished in ${currentTemperatureRef.current}°F Nocturnal Frost`,
+                  cause: `The brutal freezing desert night (${currentTemperatureRef.current}°F) overtook you without the radiant warmth of a campfire. Always light a campfire [C], carry timber logs, or take shelter in town before night falls in the Superstitions!`,
+                  goldFound: playerStateRef.current.goldFound || 0,
+                  blocksDug: playerStateRef.current.blocksDug || 0,
+                  landmarksDiscovered: playerStateRef.current.discoveredLandmarks?.length || 1,
+                  timeSurvivedSeconds: Math.floor((Date.now() - expeditionStartTime.current) / 1000),
+                  coordinates: { x: playerPos.current.x, y: playerPos.current.y, z: playerPos.current.z },
+                });
+              }
+            }
+          } else if (tempReading.category === 'scorching' || tempReading.category === 'hyperthermia') {
+            // MIDDAY BAKING SUN WITHOUT SHADE (> 100°F direct sun):
+            // Labored gasping in blistering heat!
+            // If moving: ZERO vigour recovery (cannot regain stamina while walking under direct sun)
+            // If stationary: crippled recovery (+1.2/s), or tucked under bedroll (+10.0/s)
             if (isHunkeredDownRef.current) {
-              // Hunkered down in survival stance: breathing slow, head tucked into canvas roll (+12.0/s)
-              currentVigourRef.current = Math.min(100, currentVigourRef.current + 12.0 * delta);
+              currentVigourRef.current = Math.min(100, currentVigourRef.current + 10.0 * delta);
               if (isExhaustedRef.current && currentVigourRef.current >= 30) {
                 isExhaustedRef.current = false;
                 soundEngine.playVigourRestored();
               }
             } else if (!isMoving) {
-              // Stationary in sun: labored, sluggish recovery (+3.5/s)
-              currentVigourRef.current = Math.min(100, currentVigourRef.current + 3.5 * delta);
-              if (isExhaustedRef.current && currentVigourRef.current >= 40) {
+              currentVigourRef.current = Math.min(100, currentVigourRef.current + 1.2 * delta);
+              if (isExhaustedRef.current && currentVigourRef.current >= 45) {
                 isExhaustedRef.current = false;
                 soundEngine.playVigourRestored();
               }
             } else {
-              // Walking under scorching sun: minimal recovery (+0.8/s), or 0 during midday baking heat (11am-3pm)
-              const middayBake = (timeOfDayRef.current >= 10.5 && timeOfDayRef.current <= 15.5) ? 0.0 : 0.9;
-              currentVigourRef.current = Math.min(100, currentVigourRef.current + middayBake * delta);
+              // Walking under scorching sun: ZERO recovery
+            }
+
+            if (Date.now() - lastHeatWarningTimeRef.current > 10000 && currentVigourRef.current < 25) {
+              lastHeatWarningTimeRef.current = Date.now();
+              soundEngine.playExhaustedPanting();
+              if (onShowBanner) {
+                onShowBanner("☀️ Blistering midday heat! Vigour cannot recover in direct sun. Seek shade under cottonwoods or canyon cliffs!");
+              }
+            }
+          } else {
+            // Temperate / mild / warm conditions
+            const baseRate = isMoving ? 5.0 : 12.0;
+            const rate = baseRate * tempReading.vigourMultiplier;
+            currentVigourRef.current = Math.min(100, currentVigourRef.current + rate * delta);
+            if (isExhaustedRef.current && currentVigourRef.current >= 30) {
+              isExhaustedRef.current = false;
+              soundEngine.playVigourRestored();
             }
           }
         }
@@ -7070,6 +7215,9 @@ const WorldCanvasComponent: React.FC<WorldCanvasProps> = ({
           isExhausted: isExhaustedRef.current,
           isInShade: isInShadeRef.current,
           shadeReason: currentShadeReasonRef.current,
+          temperatureF: currentTemperatureRef.current,
+          temperatureFeelsLikeF: currentFeelsLikeRef.current,
+          isNearCampfire: isNearCampfireRef.current,
           isSprinting: currentSprint,
         }));
       }

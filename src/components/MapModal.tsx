@@ -1538,19 +1538,94 @@ export const MapModal: React.FC<MapModalProps> = ({
             </g>
           </svg>
 
-          {/* Authentic Compass Rose Indicator */}
-          <div className="absolute top-3 right-3 flex flex-col items-center opacity-85 pointer-events-none select-none">
-            <Compass
-              className={`w-11 h-11 sm:w-13 sm:h-13 ${
-                mapArchetype === 'peralta_stone' ? 'text-[#5c3214]' : 'text-[#6e4624]'
+          {/* Authentic Peralta / Spanish Colonial Compass Rose Indicator (Points True North) */}
+          <div className="absolute top-3 right-3 flex flex-col items-center opacity-90 pointer-events-none select-none">
+            <svg
+              viewBox="0 0 64 64"
+              className={`w-14 h-14 sm:w-16 sm:h-16 drop-shadow-md ${
+                mapArchetype === 'peralta_stone' ? 'text-[#451a03]' : 'text-[#5c3214]'
               }`}
-            />
+            >
+              {/* Outer Azimuth Degree Rings */}
+              <circle cx="32" cy="32" r="29" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.65" />
+              <circle cx="32" cy="32" r="26.5" fill="none" stroke="currentColor" strokeWidth="0.8" opacity="0.45" />
+
+              {/* 16-point graduation ticks */}
+              {Array.from({ length: 16 }).map((_, i) => {
+                const angle = i * 22.5;
+                const rad = (angle * Math.PI) / 180;
+                const r1 = i % 4 === 0 ? 24.5 : 26.5;
+                const r2 = 29;
+                return (
+                  <line
+                    key={i}
+                    x1={32 + Math.sin(rad) * r1}
+                    y1={32 - Math.cos(rad) * r1}
+                    x2={32 + Math.sin(rad) * r2}
+                    y2={32 - Math.cos(rad) * r2}
+                    stroke="currentColor"
+                    strokeWidth={i % 4 === 0 ? '1.4' : '0.75'}
+                    opacity="0.8"
+                  />
+                );
+              })}
+
+              {/* Secondary Star Points (NE, SE, SW, NW) */}
+              <polygon points="32,32 32,15 35,28" fill="#a16207" opacity="0.6" transform="rotate(45 32 32)" />
+              <polygon points="32,32 32,15 29,28" fill="#ca8a04" opacity="0.6" transform="rotate(45 32 32)" />
+              <polygon points="32,32 32,15 35,28" fill="#a16207" opacity="0.6" transform="rotate(135 32 32)" />
+              <polygon points="32,32 32,15 29,28" fill="#ca8a04" opacity="0.6" transform="rotate(135 32 32)" />
+              <polygon points="32,32 32,15 35,28" fill="#a16207" opacity="0.6" transform="rotate(225 32 32)" />
+              <polygon points="32,32 32,15 29,28" fill="#ca8a04" opacity="0.6" transform="rotate(225 32 32)" />
+              <polygon points="32,32 32,15 35,28" fill="#a16207" opacity="0.6" transform="rotate(315 32 32)" />
+              <polygon points="32,32 32,15 29,28" fill="#ca8a04" opacity="0.6" transform="rotate(315 32 32)" />
+
+              {/* Primary Cardinal Points (E, S, W) */}
+              {/* East Point */}
+              <polygon points="32,32 54,32 36,35" fill="#78350f" />
+              <polygon points="32,32 54,32 36,29" fill="#d97706" />
+              {/* South Point */}
+              <polygon points="32,32 32,54 29,36" fill="#78350f" />
+              <polygon points="32,32 32,54 35,36" fill="#d97706" />
+              {/* West Point */}
+              <polygon points="32,32 10,32 28,29" fill="#78350f" />
+              <polygon points="32,32 10,32 28,35" fill="#d97706" />
+
+              {/* Grand True-North Pointer (Straight UP to Four Peaks at 0.0° True North) */}
+              <polygon points="32,32 32,5 36,27" fill="#991b1b" />
+              <polygon points="32,32 32,5 28,27" fill="#ef4444" />
+              {/* Spanish Fleur-de-lis / Cross Apex */}
+              <path
+                d="M32 2 L33.5 5.5 L32 4.8 L30.5 5.5 Z"
+                fill="#f59e0b"
+                stroke="#78350f"
+                strokeWidth="0.5"
+              />
+
+              {/* Center Pivot Boss */}
+              <circle cx="32" cy="32" r="3.5" fill="#f59e0b" stroke="#78350f" strokeWidth="1" />
+              <circle cx="32" cy="32" r="1.5" fill="#451a03" />
+
+              {/* Cardinal Labels */}
+              <text x="32" y="14" fill="#b91c1c" fontSize="6.5" fontWeight="bold" fontFamily="serif" textAnchor="middle">
+                N
+              </text>
+              <text x="50" y="34" fill="currentColor" fontSize="5.5" fontWeight="bold" fontFamily="serif" textAnchor="middle">
+                E
+              </text>
+              <text x="32" y="51" fill="currentColor" fontSize="5.5" fontWeight="bold" fontFamily="serif" textAnchor="middle">
+                S
+              </text>
+              <text x="14" y="34" fill="currentColor" fontSize="5.5" fontWeight="bold" fontFamily="serif" textAnchor="middle">
+                {mapArchetype === 'peralta_stone' ? 'O' : 'W'}
+              </text>
+            </svg>
             <span
-              className={`text-[10px] font-serif font-bold tracking-widest mt-0.5 ${
+              className={`text-[9px] font-serif font-bold tracking-widest mt-0.5 ${
                 mapArchetype === 'peralta_stone' ? 'text-[#5c3214]' : 'text-[#6e4624]'
               }`}
             >
-              {mapArchetype === 'peralta_stone' ? '✦ NORTE ✦' : 'NORTH'}
+              {mapArchetype === 'peralta_stone' ? '✦ NORTE VERDADERO ✦' : 'TRUE NORTH'}
             </span>
           </div>
 
@@ -1764,20 +1839,37 @@ export const MapModal: React.FC<MapModalProps> = ({
                 );
               })}
 
-            {/* 3. Player Position Arrow & "YOU" Indicator */}
+            {/* 3. Player Position Arrow & "YOU" Indicator (True Heading Aligned) */}
             {playerPct.isInside && (
               <div
                 style={{ left: `${playerPct.pctX}%`, top: `${playerPct.pctY}%` }}
                 className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-40"
               >
+                {/* Precision Heading Arrow natively pointing straight UP (0° True North) */}
                 <div
-                  className="w-9 h-9 flex items-center justify-center transition-transform duration-75"
+                  className="w-10 h-10 flex items-center justify-center transition-transform duration-75 ease-out"
                   style={{ transform: `rotate(${playerDeg}deg)` }}
                 >
-                  <Navigation className="w-7 h-7 text-red-700 fill-red-600 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]" />
+                  <svg viewBox="0 0 32 32" className="w-9 h-9 drop-shadow-[0_2px_6px_rgba(0,0,0,0.85)]" fill="none">
+                    {/* Directional field of view illumination cone */}
+                    <path d="M16 16 L5 1 L27 1 Z" fill="rgba(239, 68, 68, 0.28)" />
+                    {/* Compass Surveyor Arrowhead pointing straight UP (0° True North) */}
+                    <path
+                      d="M16 2 L25 26 L16 20 L7 26 Z"
+                      fill="#dc2626"
+                      stroke="#7f1d1d"
+                      strokeWidth="1.6"
+                      strokeLinejoin="round"
+                    />
+                    {/* North ridge line accent */}
+                    <path d="M16 2 L16 20" stroke="#fecaca" strokeWidth="1.2" strokeLinecap="round" />
+                    {/* Brass center pivot */}
+                    <circle cx="16" cy="16" r="2.5" fill="#f59e0b" stroke="#78350f" strokeWidth="1" />
+                  </svg>
                 </div>
-                <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-red-950/95 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded shadow-md border border-red-500/60 whitespace-nowrap">
-                  YOU
+                <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-red-950/95 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded shadow-md border border-red-500/60 whitespace-nowrap flex items-center gap-1">
+                  <span>YOU</span>
+                  <span className="text-amber-300 font-normal">({Math.round(playerDeg)}°)</span>
                 </div>
               </div>
             )}

@@ -1,7 +1,32 @@
 import * as THREE from 'three';
-import { DebrisType } from '../types';
+import { DebrisType, SeasonType } from '../types';
 import { analyzeSurfaceAtPosition } from './prospectingAnalysis';
 import { isTortillaFlatTownLimits } from './townBoundaries';
+import { seasonService } from '../services/seasonService';
+
+export const terrainSeasonUniform = { value: new THREE.Vector3(1.0, 1.0, 1.0) };
+
+function updateTerrainSeasonTint(season: SeasonType) {
+  switch (season) {
+    case 'spring':
+      terrainSeasonUniform.value.set(1.02, 1.05, 0.98); // Fresh spring gold-green wash
+      break;
+    case 'summer':
+      terrainSeasonUniform.value.set(1.06, 1.02, 0.94); // High-sun baked terracotta warmth
+      break;
+    case 'autumn':
+      terrainSeasonUniform.value.set(1.05, 0.98, 0.90); // Golden hematite & amber canyon rock
+      break;
+    case 'winter':
+      terrainSeasonUniform.value.set(0.96, 1.00, 1.06); // Crisp cool mountain frost highlight
+      break;
+  }
+}
+
+seasonService.subscribe((season) => {
+  updateTerrainSeasonTint(season);
+});
+updateTerrainSeasonTint(seasonService.getSeason());
 
 // Simplex-like 2D noise implementation for self-contained, high-performance procedural terrain
 function fract(x: number) {
@@ -2552,6 +2577,7 @@ export function createRealisticTerrainMaterial(
     shader.uniforms.uMountainHolePosRadius = terrainHoleUniforms.uMountainHolePosRadius;
     shader.uniforms.uMountainHoleDirDepth = terrainHoleUniforms.uMountainHoleDirDepth;
     shader.uniforms.uMountainHoleCount = terrainHoleUniforms.uMountainHoleCount;
+    shader.uniforms.uSeasonTint = terrainSeasonUniform;
 
     // Vertex shader: pass 3D world position and accurate world normal with matching highp precision
     shader.vertexShader = shader.vertexShader.replace(
@@ -2574,6 +2600,7 @@ export function createRealisticTerrainMaterial(
       `#include <common>
       uniform sampler2D uTerrainNoise;
       uniform sampler2D uGroundDetail;
+      uniform vec3 uSeasonTint;
       uniform vec4 uMountainHolePosRadius[4];
       uniform vec4 uMountainHoleDirDepth[4];
       uniform int uMountainHoleCount;
@@ -2702,6 +2729,9 @@ export function createRealisticTerrainMaterial(
         float bFactor = (0.22 - mineralFleck) * 3.0;
         diffuseColor.rgb = mix(diffuseColor.rgb, darkBasalt, clamp(bFactor, 0.0, 0.55));
       }
+
+      // Real-time Sonoran seasonal ground tint modulation
+      diffuseColor.rgb *= uSeasonTint;
       `
     );
 

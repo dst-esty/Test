@@ -658,6 +658,66 @@ class SoundEngine {
     whistle.stop(t + 2.9);
   }
 
+  /**
+   * Sound effect for seasonal wind gusts (Santa Ana winds, frost gales, zephyrs).
+   */
+  public playWindGust() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(110, t);
+    osc.frequency.linearRampToValueAtTime(160, t + 0.8);
+    osc.frequency.exponentialRampToValueAtTime(80, t + 2.2);
+
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.18, t + 0.5);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 2.4);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 2.5);
+  }
+
+  /**
+   * Delicate acoustic raindrop droplets for spring showers & superbloom rain.
+   */
+  public playGentleSpringRain() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    for (let i = 0; i < 6; i++) {
+      const dropTime = t + i * 0.12 + Math.random() * 0.05;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800 + Math.random() * 400, dropTime);
+      osc.frequency.exponentialRampToValueAtTime(300, dropTime + 0.06);
+
+      gain.gain.setValueAtTime(0.06, dropTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, dropTime + 0.07);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(dropTime);
+      osc.stop(dropTime + 0.08);
+    }
+  }
+
+  /**
+   * Distant rolling thunder rumble for monsoons.
+   */
+  public playThunderRumble() {
+    this.playThunder();
+  }
+
   public playFootstep() {
     if (this.isMuted) return;
     this.init();

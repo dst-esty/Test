@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { getTerrainHeight, isHighPointOrPeak } from './terrain';
 import { isNearPeraltaCamp, createFlutedCylinderGeometry } from './foliage';
 import { getCelestialDirections } from './atmosphere';
-import { WeatherType } from '../types';
+import { WeatherType, SeasonType } from '../types';
+import { seasonService } from '../services/seasonService';
 
 /**
  * Deterministic spatial hash function.
@@ -609,6 +610,7 @@ export class GroundVegetationScatterManager {
   private lastUpdatePos = new THREE.Vector3(999999, 999999, 999999);
   private currentRadius = 320; // 320m scatter radius blankets wide panoramic vistas
   private isVisible = true;
+  private unsubscribeSeason?: () => void;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -654,6 +656,12 @@ export class GroundVegetationScatterManager {
     this.pricklyGeo = createRealisticPricklyPear3DGeometry();
 
     this.scene.add(this.group);
+
+    // Subscribe to seasonal foliage changes
+    this.unsubscribeSeason = seasonService.subscribe((season) => {
+      this.applySeason(season);
+    });
+    this.applySeason(seasonService.getSeason());
   }
 
   /**
@@ -1087,9 +1095,49 @@ export class GroundVegetationScatterManager {
   }
 
   /**
+   * Applies real-time Sonoran seasonal color palette shifts across all scattered vegetation.
+   */
+  public applySeason(season: SeasonType): void {
+    if (!this.saguaroMaterial) return;
+    switch (season) {
+      case 'spring':
+        // Spring bloom: Lush emerald tint and vivid superbloom blossom hues
+        this.saguaroMaterial.color.setRGB(1.04, 1.15, 0.98);
+        this.ocotilloMaterial.color.setRGB(1.10, 1.25, 0.95);
+        this.pricklyMaterial.color.setRGB(1.05, 1.18, 0.96);
+        break;
+      case 'summer':
+        // Summer heat: Sun-parched warm yellowing on cacti
+        this.saguaroMaterial.color.setRGB(1.16, 1.10, 0.86);
+        this.ocotilloMaterial.color.setRGB(1.06, 0.96, 0.84);
+        this.pricklyMaterial.color.setRGB(1.12, 1.04, 0.84);
+        break;
+      case 'autumn':
+        // Autumn: Weathered amber-gold and russet tones
+        this.saguaroMaterial.color.setRGB(0.96, 0.96, 0.86);
+        this.ocotilloMaterial.color.setRGB(1.14, 0.96, 0.80);
+        this.pricklyMaterial.color.setRGB(1.06, 0.96, 0.84);
+        break;
+      case 'winter':
+        // Winter: Cool frosted silver-sage tint
+        this.saguaroMaterial.color.setRGB(0.88, 0.98, 1.10);
+        this.ocotilloMaterial.color.setRGB(0.90, 0.94, 1.05);
+        this.pricklyMaterial.color.setRGB(0.88, 0.96, 1.08);
+        break;
+    }
+    this.saguaroMaterial.needsUpdate = true;
+    this.ocotilloMaterial.needsUpdate = true;
+    this.pricklyMaterial.needsUpdate = true;
+  }
+
+  /**
    * Clean disposal on component unmount.
    */
   public dispose(): void {
+    if (this.unsubscribeSeason) {
+      this.unsubscribeSeason();
+      this.unsubscribeSeason = undefined;
+    }
     for (const mesh of this.allInstancedMeshes) {
       this.group.remove(mesh);
       mesh.dispose();

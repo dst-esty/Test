@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { WeatherType } from '../types';
+import { WeatherType, SeasonType } from '../types';
 import { soundEngine } from '../audio/soundEffects';
+import { seasonService } from '../services/seasonService';
 
 interface CloudCluster {
   mesh: THREE.Group;
@@ -1510,6 +1511,33 @@ export class AtmosphereManager {
       finalCloudTop.lerp(new THREE.Color(0xb8c8da), rainW);
       finalCloudBase.lerp(new THREE.Color(0x6b7c91), rainW);
       finalCloudOpacity = THREE.MathUtils.lerp(finalCloudOpacity, 0.88, rainW);
+    }
+
+    // Seasonal atmospheric modulation (Sonoran Desert seasonal microclimate)
+    const activeSeason = seasonService.getSeason();
+    if (activeSeason === 'spring') {
+      // Spring: Crisp emerald sky tint, warm vibrant morning haze
+      finalZenith.lerp(new THREE.Color(0x2868a8), 0.08);
+      finalHorizon.lerp(new THREE.Color(0xdce6bc), 0.08);
+      finalFogColor.lerp(new THREE.Color(0xcce2bc), 0.06);
+    } else if (activeSeason === 'summer') {
+      // Summer: Bleached blazing high-noon sky, sun-baked golden-white horizon & thermal haze
+      finalZenith.lerp(new THREE.Color(0x3a6ca8), 0.12);
+      finalHorizon.lerp(new THREE.Color(0xf6dca8), 0.14);
+      finalFogColor.lerp(new THREE.Color(0xecd8a8), 0.10);
+      finalSunIntensity *= 1.08; // +8% solar irradiance in summer
+    } else if (activeSeason === 'autumn') {
+      // Autumn: Deep indigo high zenith, radiant warm golden-amber horizon glow
+      finalZenith.lerp(new THREE.Color(0x1a4682), 0.10);
+      finalHorizon.lerp(new THREE.Color(0xf0aa58), 0.12);
+      finalFogColor.lerp(new THREE.Color(0xdeb078), 0.08);
+    } else if (activeSeason === 'winter') {
+      // Winter: Pale ice-cyan zenith, crisp cold mountain fog, silver-blue shadows
+      finalZenith.lerp(new THREE.Color(0x4078b4), 0.12);
+      finalHorizon.lerp(new THREE.Color(0xd8e8f8), 0.15);
+      finalFogColor.lerp(new THREE.Color(0xc4d8ee), 0.12);
+      finalFogDensity *= 1.25; // Brisk mountain mist and inversion layers
+      finalHemiGround.lerp(new THREE.Color(0x405568), 0.10); // Frost-cooled ground bounce
     }
 
     // 3. Compute Night Factor, Lunar Illumination, and Moonlight Atmospheric Intensity

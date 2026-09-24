@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { getTerrainHeight, updateTerrainHoleCutouts, applyMountainHoleShaderToMaterial, isHighPointOrPeak } from './terrain';
-import { DebrisType } from '../types';
+import { DebrisType, SeasonType } from '../types';
 import { MountainHoleManager } from './mountainHoles';
 import { MountainDustParticleSystem } from './mountainDustParticles';
+import { seasonService } from '../services/seasonService';
 
 /**
  * Safely merges multiple geometries by normalizing attributes (non-indexed + common attributes).
@@ -1004,6 +1005,21 @@ export class DesertFoliageManager {
     uMountainHoleCount: { value: number };
   }> = [];
 
+  // PBR Foliage Materials for real-time Sonoran seasonal transitions
+  public saguaroMat?: THREE.MeshStandardMaterial;
+  public barrelMat?: THREE.MeshStandardMaterial;
+  public scrubMat?: THREE.MeshStandardMaterial;
+  public grassMat?: THREE.MeshStandardMaterial;
+  public padMat?: THREE.MeshStandardMaterial;
+  public chollaMat?: THREE.MeshStandardMaterial;
+  public ocotilloMat?: THREE.MeshStandardMaterial;
+  public agaveMat?: THREE.MeshStandardMaterial;
+  public barkMatCottonwood?: THREE.MeshStandardMaterial;
+  public barkMatMesquite?: THREE.MeshStandardMaterial;
+  public crownMatCottonwood?: THREE.MeshStandardMaterial;
+  public crownMatMesquite?: THREE.MeshStandardMaterial;
+  private unsubscribeSeason?: () => void;
+
   private scene: THREE.Scene;
   private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
 
@@ -1163,6 +1179,7 @@ export class DesertFoliageManager {
       metalness: 0.05,
       bumpScale: 0.05,
     });
+    this.saguaroMat = saguaroMat;
 
     const trunkGeo = createFlutedCylinderGeometry(0.35, 0.45, 6, 24, 16, 0.08, true);
     const armVerticalGeo = createFlutedCylinderGeometry(0.24, 0.28, 2.5, 18, 12, 0.07, true);
@@ -1290,6 +1307,7 @@ export class DesertFoliageManager {
       color: 0x3d6632,
       roughness: 0.82,
     });
+    this.barrelMat = barrelMat;
 
     interface BarrelSpawnItem {
       rx: number;
@@ -1521,6 +1539,7 @@ export class DesertFoliageManager {
       color: 0x5a6d3b,
       roughness: 0.82,
     });
+    this.scrubMat = scrubMat;
 
     interface ScrubSpawnItem {
       rx: number;
@@ -1592,6 +1611,7 @@ export class DesertFoliageManager {
       roughness: 0.9,
       side: THREE.DoubleSide,
     });
+    this.grassMat = grassMat;
 
     interface GrassSpawnItem {
       gx: number;
@@ -1665,6 +1685,7 @@ export class DesertFoliageManager {
       color: 0x3d6635,
       roughness: 0.8,
     });
+    this.padMat = padMat;
 
     interface PricklySpawnItem {
       px: number;
@@ -1738,6 +1759,7 @@ export class DesertFoliageManager {
       color: 0xa6b872,
       roughness: 0.85,
     });
+    this.chollaMat = chollaMat;
 
     interface ChollaSpawnItem {
       cx: number;
@@ -1811,6 +1833,7 @@ export class DesertFoliageManager {
       color: 0x544030,
       roughness: 0.88,
     });
+    this.ocotilloMat = ocotilloMat;
 
     interface OcotilloSpawnItem {
       ox: number;
@@ -1880,6 +1903,7 @@ export class DesertFoliageManager {
       color: 0x486b5d,
       roughness: 0.78,
     });
+    this.agaveMat = agaveMat;
 
     interface AgaveSpawnItem {
       ax: number;
@@ -2184,6 +2208,12 @@ export class DesertFoliageManager {
     // 9. Riparian Desert Trees Around Springs
     // ==========================================
     this.initSpringTrees();
+
+    // Subscribe to seasonal transitions and apply the initial palette
+    this.unsubscribeSeason = seasonService.subscribe((season) => {
+      this.applySeason(season);
+    });
+    this.applySeason(seasonService.getSeason());
   }
 
   /**
@@ -2204,19 +2234,23 @@ export class DesertFoliageManager {
       roughness: 0.95,
       bumpScale: 0.08,
     });
+    this.barkMatCottonwood = barkMatCottonwood;
     const barkMatMesquite = new THREE.MeshStandardMaterial({
       color: 0x2b1d14,
       roughness: 0.96,
       bumpScale: 0.08,
     });
+    this.barkMatMesquite = barkMatMesquite;
     const crownMatCottonwood = new THREE.MeshStandardMaterial({
       color: 0x4d6c2a,
       roughness: 0.8,
     });
+    this.crownMatCottonwood = crownMatCottonwood;
     const crownMatMesquite = new THREE.MeshStandardMaterial({
       color: 0x364e22,
       roughness: 0.85,
     });
+    this.crownMatMesquite = crownMatMesquite;
     const stumpMat = new THREE.MeshStandardMaterial({
       color: 0x8a6d4d,
       roughness: 0.9,
@@ -3138,6 +3172,79 @@ export class DesertFoliageManager {
     return { goldBlasted, rocksBlasted, woodBlasted, hydrationBlasted, destroyedPoints, bannerMessage: bannerMsg };
   }
 
+  public applySeason(season: SeasonType) {
+    if (!this.saguaroMat) return;
+
+    switch (season) {
+      case 'spring':
+        // Spring Superbloom: Vibrant lush desert growth, blooming flowers & fresh lime shoots
+        this.saguaroMat.color.setHex(0x327528);
+        if (this.barrelMat) this.barrelMat.color.setHex(0x447f30);
+        if (this.scrubMat) this.scrubMat.color.setHex(0x7a8a3a); // Fresh yellow-green blooming creosote/brittlebush
+        if (this.grassMat) this.grassMat.color.setHex(0x8ba64e); // Tender green bunchgrass shoots
+        if (this.padMat) this.padMat.color.setHex(0x3e8036); // Vibrant prickly pear pads
+        if (this.chollaMat) this.chollaMat.color.setHex(0xb8b868); // Glowing golden springtime spines
+        if (this.ocotilloMat) this.ocotilloMat.color.setHex(0x3a5a28); // Green ocotillo wands with scarlet flower tips
+        if (this.agaveMat) this.agaveMat.color.setHex(0x3f7a68); // Rich emerald-teal agave
+        if (this.crownMatCottonwood) this.crownMatCottonwood.color.setHex(0x609a32); // Fresh bright lime-green leaves
+        if (this.crownMatMesquite) this.crownMatMesquite.color.setHex(0x467228); // Tender spring mesquite canopy
+        break;
+
+      case 'summer':
+        // Summer Monsoons: Sun-scorched arid foliage, parched golden straw grasses, dusty olive creosote
+        this.saguaroMat.color.setHex(0x4a622a); // Sun-parched dusty yellow-green
+        if (this.barrelMat) this.barrelMat.color.setHex(0x525e2c);
+        if (this.scrubMat) this.scrubMat.color.setHex(0x68643c); // Sun-baked dusty olive creosote
+        if (this.grassMat) this.grassMat.color.setHex(0xd4be7b); // Bleached golden-straw parched bunchgrass
+        if (this.padMat) this.padMat.color.setHex(0x526330); // Dusty olive pads with purple tunas
+        if (this.chollaMat) this.chollaMat.color.setHex(0xd9cca0); // Pale sun-bleached whitish-straw spines
+        if (this.ocotilloMat) this.ocotilloMat.color.setHex(0x544030); // Bare spiny dark canes
+        if (this.agaveMat) this.agaveMat.color.setHex(0x486b5d); // Sun-parched dusty blue-green
+        if (this.crownMatCottonwood) this.crownMatCottonwood.color.setHex(0x3d6622); // Dense deep sun-absorbing green
+        if (this.crownMatMesquite) this.crownMatMesquite.color.setHex(0x324d1f); // Deep olive mesquite canopy
+        break;
+
+      case 'autumn':
+        // Autumn Harvest: Golden-amber dried grasses, rich russet creosote, and RADIANT GOLDEN COTTONWOODS
+        this.saguaroMat.color.setHex(0x345426); // Muted deep olive
+        if (this.barrelMat) this.barrelMat.color.setHex(0x3e5627);
+        if (this.scrubMat) this.scrubMat.color.setHex(0x786036); // Warm russet-bronze creosote & dry seed pods
+        if (this.grassMat) this.grassMat.color.setHex(0xb88842); // Rich golden-amber autumn grass
+        if (this.padMat) this.padMat.color.setHex(0x4a562a); // Weathered amber-green pad
+        if (this.chollaMat) this.chollaMat.color.setHex(0xaa9455); // Warm amber-gold spines
+        if (this.ocotilloMat) this.ocotilloMat.color.setHex(0x634b35); // Russet-tinted canes
+        if (this.agaveMat) this.agaveMat.color.setHex(0x3c5c50); // Deep teal-olive
+        if (this.crownMatCottonwood) this.crownMatCottonwood.color.setHex(0xd69e2e); // Radiant Arizona Golden Cottonwood!
+        if (this.crownMatMesquite) this.crownMatMesquite.color.setHex(0x8c6b28); // Warm golden-ochre mesquite canopy
+        break;
+
+      case 'winter':
+        // Winter Mesa: Frost-dusted silver-sage saguaros, dormant pale straw grass, dormant winter tree canopies
+        this.saguaroMat.color.setHex(0x3b5346); // Silver-frosted cool pine green
+        if (this.barrelMat) this.barrelMat.color.setHex(0x415243);
+        if (this.scrubMat) this.scrubMat.color.setHex(0x545c48); // Dormant silver-sage creosote
+        if (this.grassMat) this.grassMat.color.setHex(0x9c9e92); // Pale dormant silver-straw frost grass
+        if (this.padMat) this.padMat.color.setHex(0x3e4a42); // Frost-bitten cool slate-green pads
+        if (this.chollaMat) this.chollaMat.color.setHex(0xbac4c1); // Crystalline silver-frosted needles
+        if (this.ocotilloMat) this.ocotilloMat.color.setHex(0x423832); // Dormant dark thorny canes
+        if (this.agaveMat) this.agaveMat.color.setHex(0x3d5a57); // Pale frosty blue-green
+        if (this.crownMatCottonwood) this.crownMatCottonwood.color.setHex(0x766c5c); // Dormant silver-gray bare winter canopy
+        if (this.crownMatMesquite) this.crownMatMesquite.color.setHex(0x55483b); // Dormant winter mesquite canopy
+        break;
+    }
+
+    this.saguaroMat.needsUpdate = true;
+    if (this.barrelMat) this.barrelMat.needsUpdate = true;
+    if (this.scrubMat) this.scrubMat.needsUpdate = true;
+    if (this.grassMat) this.grassMat.needsUpdate = true;
+    if (this.padMat) this.padMat.needsUpdate = true;
+    if (this.chollaMat) this.chollaMat.needsUpdate = true;
+    if (this.ocotilloMat) this.ocotilloMat.needsUpdate = true;
+    if (this.agaveMat) this.agaveMat.needsUpdate = true;
+    if (this.crownMatCottonwood) this.crownMatCottonwood.needsUpdate = true;
+    if (this.crownMatMesquite) this.crownMatMesquite.needsUpdate = true;
+  }
+
   public setVisible(visible: boolean) {
     if (this.saguaroGroup) this.saguaroGroup.visible = visible;
     if (this.barrelMesh) this.barrelMesh.visible = visible;
@@ -3155,6 +3262,10 @@ export class DesertFoliageManager {
   }
 
   public dispose() {
+    if (this.unsubscribeSeason) {
+      this.unsubscribeSeason();
+      this.unsubscribeSeason = undefined;
+    }
     if (this.saguaroGroup) {
       this.scene.remove(this.saguaroGroup);
     }

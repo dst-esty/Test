@@ -16,6 +16,7 @@ import {
   Droplets,
   Flame,
   FileText,
+  Snowflake,
 } from 'lucide-react';
 
 interface GameOverModalProps {
@@ -98,6 +99,15 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ details, onRestart
           glow: 'from-indigo-950/80 via-stone-950/90 to-black/95',
           icon: <Mountain className="w-8 h-8 text-indigo-300 animate-pulse" />,
           epitaphHeader: 'PLUNGED FROM PRECIPICE INTO THE DARK',
+        };
+      case 'hypothermia':
+        return {
+          badge: 'NOCTURNAL DESERT HYPOTHERMIA',
+          color: 'text-sky-300',
+          borderColor: 'border-sky-600/70',
+          glow: 'from-sky-950/80 via-slate-950/90 to-black/95',
+          icon: <Snowflake className="w-8 h-8 text-sky-300 animate-spin" />,
+          epitaphHeader: 'FROZEN IN THE NOCTURNAL DESERT FROST',
         };
       case 'dynamite':
       default:
